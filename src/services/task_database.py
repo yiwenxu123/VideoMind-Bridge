@@ -20,10 +20,12 @@ class TaskDatabase:
         初始化数据库
 
         Args:
-            db_path: 数据库文件路径，默认为 ~/.config/VideoMind/tasks.db
+            db_path: 数据库文件路径，默认为项目目录下的 data/tasks.db
         """
         if db_path is None:
-            db_path = Path.home() / ".config" / "VideoMind" / "tasks.db"
+            # 使用项目目录下的 data 文件夹
+            project_root = Path(__file__).parent.parent.parent
+            db_path = project_root / "data" / "tasks.db"
 
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)

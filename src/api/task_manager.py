@@ -34,9 +34,13 @@ class TaskManager:
         初始化任务管理器
 
         Args:
-            output_dir: 输出目录，默认为 ~/.VideoMind/output
+            output_dir: 输出目录，默认为项目目录下的 output
         """
-        self.output_dir = output_dir or Path.home() / ".VideoMind" / "output"
+        if output_dir is None:
+            # 使用项目目录下的 output 文件夹
+            project_root = Path(__file__).parent.parent.parent
+            output_dir = project_root / "output"
+        self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # 数据库
@@ -47,10 +51,15 @@ class TaskManager:
         self._task_callbacks: Dict[UUID, List[Callable]] = {}
 
         # 服务组件
-        self._download_service = DownloadService()
+        self._download_service = DownloadService(self.output_dir)
         self._transcribe_service = TranscribeService()
-        self._ai_service = AIService()
-        self._export_orchestrator = ExportOrchestrator()
+        # AI服务使用mock模式，避免需要配置API Key
+        self._ai_service = AIService(mock=True)
+        # 导出编排器，默认导出到本地
+        self._export_orchestrator = ExportOrchestrator(
+            targets=[ExportTarget.LOCAL],
+            config={"local_output_path": self.output_dir}
+        )
 
         # 运行状态
         self._running = False
