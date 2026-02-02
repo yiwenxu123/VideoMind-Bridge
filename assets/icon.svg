@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- 背景圆形 -->
+  <circle cx="32" cy="32" r="30" fill="#2196F3"/>
+  
+  <!-- 播放按钮三角形 -->
+  <polygon points="26,20 26,44 44,32" fill="white"/>
+  
+  <!-- 底部横线（代表视频进度） -->
+  <rect x="12" y="48" width="40" height="4" rx="2" fill="white" opacity="0.8"/>
+  <rect x="12" y="48" width="20" height="4" rx="2" fill="#FF9800"/>
+</svg>

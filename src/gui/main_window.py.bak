@@ -1,0 +1,1057 @@
+"""VideoMind Bridge 主窗口"""
+
+import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtWidgets import (
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QLineEdit, QTextEdit,
+    QGroupBox, QRadioButton, QCheckBox, QComboBox,
+    QProgressBar, QListWidget, QListWidgetItem,
+    QSplitter, QFrame, QScrollArea, QStatusBar,
+    QMessageBox, QFileDialog, QApplication, QSizePolicy,
+    QSystemTrayIcon, QMenu, QDialog
+)
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QMutex, QMutexLocker
+from PySide6.QtGui import QIcon, QFont, QClipboard, QAction
+
+# 导入自定义组件
+from .widgets.url_input import URLInputWidget
+from .widgets.mode_selector import ModeSelector, ProcessingMode
+from .widgets.prompt_template_selector import PromptTemplateSelector
+from .widgets.target_selector import TargetSelector, ExportTarget
+from .widgets.task_queue import TaskQueueWidget, TaskStatus
+from .widgets.task_history_sidebar import TaskHistorySidebar
+
+# 导入工作线程
+from .workers.processing_worker import ProcessingWorker, TaskConfig
+
+# 导入服务
+sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+from src.services.download_service import DownloadService
+from src.services.transcribe_service import TranscribeService
+from src.services.ai_service import AIService
+from src.services.export_orchestrator import ExportOrchestrator
+from src.services.config_manager import get_config_manager
+from src.services.task_database import get_task_database
+from src.models.task import TaskHistory, ExportTarget as ModelExportTarget
+from src.utils import get_logger
+
+logger = get_logger(__name__)
+
+
+class MainWindow(QMainWindow):
+    """VideoMind Bridge 主窗口"""
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("VideoMind Bridge - 视频知识处理工作站")
+        self.setMinimumSize(900, 700)
+        self.resize(1000, 800)
+
+        # 初始化配置管理器
+        self.config_manager = get_config_manager()
+        self.config = self.config_manager.config
+
+        # 初始化服务
+        self.download_service: Optional[DownloadService] = None
+        self.transcribe_service: Optional[TranscribeService] = None
+        self.ai_service: Optional[AIService] = None
+
+        # 活跃的任务线程
+        self._workers_mutex = QMutex()
+        self.active_workers: dict[str, ProcessingWorker] = {}
+
+        # 输出目录（从配置读取）
+        self.output_dir = Path(self.config.download.output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 系统托盘图标
+        self.tray_icon: Optional[QSystemTrayIcon] = None
+        self._setup_tray_icon()
+        
+        # 检查托盘是否可用
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("系统不支持托盘图标")
+        else:
+            logger.info("系统支持托盘图标")
+
+        # 创建滚动区域作为主容器
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+
+        # 创建主分割器（垂直分割：上部主内容 + 下部任务区域）
+        self.main_splitter = QSplitter(Qt.Orientation.Vertical)
+        self.setCentralWidget(self.main_splitter)
+
+        # 上部：主内容区域（使用滚动区域）
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+
+        # 创建内容容器
+        self.central_widget = QWidget()
+        self.scroll_area.setWidget(self.central_widget)
+
+        # 创建主布局
+        self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setSpacing(15)
+        self.main_layout.setContentsMargins(20, 20, 20, 20)
+
+        # 构建 UI（包含任务队列和历史记录）
+        self._setup_ui()
+
+        # 添加到分割器
+        self.main_splitter.addWidget(self.scroll_area)
+        self.main_splitter.setSizes([500, 300])  # 设置初始高度比例
+
+        # 连接信号
+        self._connect_signals()
+
+        # 加载配置到 UI
+        self._load_config_to_ui()
+
+        # 状态栏
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("就绪")
+
+        # 设置菜单栏
+        self._setup_menu_bar()
+
+    def _setup_ui(self):
+        """设置 UI 布局"""
+        # ===== 1. 标题 =====
+        title_label = QLabel("🎬 VideoMind Bridge")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 24px;
+                font-weight: bold;
+                color: #2196F3;
+                padding: 10px 0;
+            }
+        """)
+        self.main_layout.addWidget(title_label)
+
+        subtitle_label = QLabel("视频知识处理工作站 - 采集→解析→理解→归档→分发")
+        subtitle_label.setStyleSheet("color: #666; padding-bottom: 10px;")
+        self.main_layout.addWidget(subtitle_label)
+
+        # ===== 2. 视频源输入 =====
+        self.url_input = URLInputWidget()
+        self.main_layout.addWidget(self.url_input)
+
+        # ===== 3. 处理模式选择 =====
+        self.mode_selector = ModeSelector()
+        # ModeSelector 内部已设置 Fixed 大小策略，确保高度不被压缩
+        self.main_layout.addWidget(self.mode_selector)
+
+        # ===== 4. Prompt 模板选择 =====
+        self.prompt_template_selector = PromptTemplateSelector()
+        self.main_layout.addWidget(self.prompt_template_selector)
+
+        # ===== 5. 导出目标快速选择 =====
+        self._setup_quick_export_selector()
+
+        # ===== 6. 操作按钮 =====
+        button_layout = QHBoxLayout()
+
+        self.start_button = QPushButton("▶ 开始处理")
+        self.start_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 12px 30px;
+                border-radius: 6px;
+                border: none;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+            }
+        """)
+        self.start_button.setMinimumHeight(45)
+        button_layout.addWidget(self.start_button)
+
+        button_layout.addStretch()
+
+        self.open_obsidian_button = QPushButton("📂 打开 Obsidian")
+        self.open_obsidian_button.setStyleSheet("""
+            QPushButton {
+                padding: 10px 20px;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+        """)
+        button_layout.addWidget(self.open_obsidian_button)
+
+        self.minimize_button = QPushButton("⏷ 最小化到托盘")
+        self.minimize_button.setStyleSheet("""
+            QPushButton {
+                padding: 10px 20px;
+                border-radius: 4px;
+                border: 1px solid #ddd;
+            }
+        """)
+        button_layout.addWidget(self.minimize_button)
+
+        self.main_layout.addLayout(button_layout)
+
+        # ===== 7. 任务队列和历史记录（标签页） =====
+        from PySide6.QtWidgets import QTabWidget
+
+        self.task_tab_widget = QTabWidget()
+        self.task_tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 1px solid #ddd;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QTabBar::tab {
+                padding: 8px 16px;
+                margin-right: 2px;
+                border: 1px solid #ddd;
+                border-bottom: none;
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                background-color: #f5f5f5;
+            }
+            QTabBar::tab:selected {
+                background-color: white;
+                border-bottom: 1px solid white;
+            }
+            QTabBar::tab:hover:!selected {
+                background-color: #e0e0e0;
+            }
+        """)
+
+        # 任务队列标签页
+        self.task_queue = TaskQueueWidget()
+        self.task_tab_widget.addTab(self.task_queue, "📋 任务队列")
+
+        # 历史记录标签页
+        self.history_sidebar = TaskHistorySidebar()
+        self.task_tab_widget.addTab(self.history_sidebar, "📚 历史记录")
+
+        self.main_layout.addWidget(self.task_tab_widget, stretch=1)
+
+        # 初始状态更新
+        self._on_mode_changed(self.mode_selector.get_current_mode())
+
+    def _connect_signals(self):
+        """连接信号槽"""
+        # 模式切换
+        self.mode_selector.mode_changed.connect(self._on_mode_changed)
+
+        # 开始处理
+        self.start_button.clicked.connect(self._on_start_processing)
+
+        # 打开 Obsidian
+        self.open_obsidian_button.clicked.connect(self._on_open_obsidian)
+
+        # 最小化到托盘按钮
+        self.minimize_button.clicked.connect(self._on_minimize_to_tray)
+
+        # 任务队列信号
+        self.task_queue.task_cancelled.connect(self._on_task_cancelled)
+        self.task_queue.task_paused.connect(self._on_task_paused)
+        self.task_queue.task_resumed.connect(self._on_task_resumed)
+
+        # 历史记录侧边栏信号
+        self.history_sidebar.task_reprocess.connect(self._on_history_reprocess)
+
+    def _setup_quick_export_selector(self):
+        """设置快速导出选择器（简化版）"""
+        from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QCheckBox
+        
+        export_group = QGroupBox("📤 导出目标")
+        export_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                font-size: 14px;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px;
+            }
+        """)
+        
+        export_layout = QHBoxLayout(export_group)
+        export_layout.setSpacing(20)
+        export_layout.setContentsMargins(15, 10, 15, 10)
+        
+        # 本地文件夹选项
+        self.local_export_check = QCheckBox("本地文件夹")
+        self.local_export_check.setChecked(True)
+        export_layout.addWidget(self.local_export_check)
+        
+        # Obsidian 选项
+        self.obsidian_export_check = QCheckBox("Obsidian")
+        self.obsidian_export_check.setChecked(True)
+        export_layout.addWidget(self.obsidian_export_check)
+        
+        export_layout.addStretch()
+        
+        self.main_layout.addWidget(export_group)
+        
+        # 保存引用以便后续使用
+        self.export_selector_group = export_group
+
+    def _on_mode_changed(self, mode: ProcessingMode):
+        """处理模式切换"""
+        if mode == ProcessingMode.DOWNLOAD_ONLY:
+            # Mode B: 仅下载，只导出到本地
+            self.obsidian_export_check.setChecked(False)
+            self.obsidian_export_check.setEnabled(False)
+        elif mode == ProcessingMode.TRANSCRIBE_ONLY:
+            # Mode C: 转录存档，只导出到本地
+            self.obsidian_export_check.setChecked(False)
+            self.obsidian_export_check.setEnabled(False)
+        else:
+            # Mode A: 完整处理，启用所有导出目标
+            self.obsidian_export_check.setEnabled(True)
+        
+        # 更新配置提示
+        if hasattr(self, '_update_config_hint'):
+            self._update_config_hint()
+
+    def _validate_config_before_processing(self, mode: ProcessingMode, targets: list) -> tuple[bool, str]:
+        """在开始处理前验证配置
+
+        Returns:
+            tuple[bool, str]: (是否通过验证, 错误信息)
+        """
+        config = self.config_manager.config
+        errors = []
+
+        # 1. 验证 API Key（完整处理模式需要）
+        if mode == ProcessingMode.FULL:
+            api_key = self.config_manager.get_api_key()
+            if not api_key:
+                errors.append("• API Key 未配置\n  完整处理模式需要配置 AI API Key")
+
+        # 2. 验证 Obsidian 导出（如果用户选择了 Obsidian）
+        if ExportTarget.OBSIDIAN in targets:
+            obsidian_path = config.export.obsidian.vault_path.strip() if config.export.obsidian.vault_path else ""
+            if not config.export.obsidian.enabled or not obsidian_path:
+                errors.append("• Obsidian Vault 路径未配置\n  您选择了导出到 Obsidian，但未配置 Vault 路径")
+
+        # 3. 验证本地文件夹（系统需要，但通常有默认值）
+        local_path = config.export.local.output_path.strip() if config.export.local.output_path else ""
+        if not local_path:
+            errors.append("• 本地文件夹路径未配置\n  系统将使用默认路径")
+
+        if errors:
+            return False, "\n\n".join(errors)
+        return True, ""
+
+    def _on_start_processing(self):
+        """开始处理"""
+        logger.debug("开始处理按钮被点击")
+        url = self.url_input.get_url()
+        if not url:
+            QMessageBox.warning(self, "警告", "请输入视频链接")
+            return
+
+        mode = self.mode_selector.get_current_mode()
+
+        # 获取导出目标
+        targets = []
+        if self.local_export_check.isChecked():
+            targets.append(ExportTarget.LOCAL)
+        if self.obsidian_export_check.isChecked():
+            targets.append(ExportTarget.OBSIDIAN)
+
+        if not targets:
+            QMessageBox.warning(self, "警告", "请至少选择一个输出目标")
+            return
+
+        # ===== 配置验证 =====
+        is_valid, error_msg = self._validate_config_before_processing(mode, targets)
+        if not is_valid:
+            QMessageBox.warning(
+                self,
+                "配置不完整",
+                f"{error_msg}\n\n"
+                f"请前往「文件 → 设置」进行配置。"
+            )
+            return
+
+        # 检查是否重复处理
+        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        detector = get_duplicate_detector()
+        existing_record = detector.check_duplicate(url)
+
+        if existing_record:
+            # 显示重复处理提示对话框
+            msg_box = QMessageBox(self)
+            msg_box.setWindowTitle("检测到重复处理")
+            msg_box.setIcon(QMessageBox.Icon.Question)
+
+            info_text = f"""该视频已于 {existing_record.processed_at.strftime('%Y-%m-%d %H:%M')} 处理过。
+
+标题: {existing_record.title}
+模式: {existing_record.mode}
+状态: {existing_record.status.value}
+"""
+            if existing_record.output_dir:
+                info_text += f"\n本地输出: {existing_record.output_dir}"
+            if existing_record.obsidian_note_path:
+                info_text += f"\nObsidian笔记: {existing_record.obsidian_note_path}"
+
+            msg_box.setText(info_text)
+            msg_box.setInformativeText("您想要如何处理？")
+
+            # 添加按钮
+            skip_button = msg_box.addButton("跳过", QMessageBox.ButtonRole.RejectRole)
+            reprocess_button = msg_box.addButton("重新处理", QMessageBox.ButtonRole.AcceptRole)
+            view_button = msg_box.addButton("查看结果", QMessageBox.ButtonRole.ActionRole)
+
+            msg_box.exec()
+
+            clicked_button = msg_box.clickedButton()
+
+            if clicked_button == skip_button:
+                # 跳过处理
+                self.status_bar.showMessage("已跳过重复处理")
+                return
+            elif clicked_button == view_button:
+                # 查看结果（打开输出目录或 Obsidian）
+                self._open_existing_result(existing_record)
+                return
+            # 否则继续重新处理
+
+        # 保存配置
+        self._save_config_from_ui()
+
+        # 添加到任务队列
+        task_id = self.task_queue.add_task(url, mode, targets)
+
+        # 启动后台处理线程
+        self._start_processing_task(task_id, url, mode, targets)
+
+        self.status_bar.showMessage(f"开始处理任务: {task_id}")
+
+    def _start_processing_task(self, task_id: str, url: str, mode: ProcessingMode, targets: list):
+        """启动处理任务"""
+        logger.debug(f"启动处理任务: {task_id}")
+        # 从配置管理器获取 AI 配置
+        ai_config = self.config_manager.ai
+
+        # 获取 Obsidian 配置
+        obsidian_vault_path = None
+        obsidian_subfolder = "Inbox/Videos"
+        if self.config.export.obsidian.enabled:
+            vault_path_str = self.config.export.obsidian.vault_path.strip() if self.config.export.obsidian.vault_path else ""
+            if vault_path_str:
+                obsidian_vault_path = Path(vault_path_str)
+            obsidian_subfolder = self.config.export.obsidian.subfolder or "Inbox/Videos"
+
+        # 获取选中的 Prompt 模板 ID
+        prompt_template_id = self.prompt_template_selector.get_selected_template_id()
+
+        # 创建任务配置
+        config = TaskConfig(
+            task_id=task_id,
+            url=url,
+            mode=mode,
+            targets=targets,
+            output_dir=self.output_dir,
+            whisper_model="small",  # TODO: 从配置读取
+            ai_engine=ai_config.engine,
+            ai_model=ai_config.model,
+            api_key=self.config_manager.get_api_key(),  # 从密钥环获取 API Key
+            download_video=True,  # TODO: 从配置读取
+            video_quality="best",
+            prompt_template_id=prompt_template_id,  # 从 AI 配置获取
+            obsidian_vault_path=obsidian_vault_path,
+            obsidian_subfolder=obsidian_subfolder
+        )
+
+        # 创建工作线程
+        worker = ProcessingWorker(config, parent=self)
+
+        # 连接信号 - 使用默认参数捕获当前值，避免闭包问题
+        worker.progress_updated.connect(self._on_task_progress)
+        worker.status_changed.connect(self._on_task_status_changed)
+        worker.task_completed.connect(
+            lambda tid, success, result, url=url, mode=mode: self._on_task_completed(tid, url, mode, success, result)
+        )
+        worker.task_failed.connect(
+            lambda tid, err, url=url: self._on_task_failed(tid, url, err)
+        )
+        worker.title_updated.connect(self._on_task_title_updated)
+        worker.finished.connect(lambda tid=task_id: self._on_worker_finished(tid))
+
+        # 添加处理记录（状态为 pending）
+        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        detector = get_duplicate_detector()
+        detector.add_record(
+            url=url,
+            title="处理中...",
+            mode=mode.value,
+            status=ProcessingStatus.PENDING,
+            task_id=task_id
+        )
+
+        # 保存并启动（线程安全）
+        self._add_worker(task_id, worker)
+        worker.start()
+
+    def _on_task_progress(self, task_id: str, progress: int, message: str):
+        """任务进度更新"""
+        self.task_queue.update_task_progress(task_id, progress, message)
+
+    def _on_task_status_changed(self, task_id: str, status: str, message: str):
+        """任务状态变更"""
+        status_map = {
+            "downloading": TaskStatus.DOWNLOADING,
+            "transcribing": TaskStatus.TRANSCRIBING,
+            "ai_processing": TaskStatus.AI_PROCESSING,
+            "exporting": TaskStatus.EXPORTING,
+            "completed": TaskStatus.COMPLETED,
+            "failed": TaskStatus.FAILED,
+            "cancelled": TaskStatus.CANCELLED,
+        }
+        task_status = status_map.get(status, TaskStatus.PENDING)
+        self.task_queue.update_task_status(task_id, task_status, message)
+
+    def _on_task_completed(self, task_id: str, url: str, mode: ProcessingMode, success: bool, result: dict):
+        """任务完成"""
+        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        detector = get_duplicate_detector()
+
+        if success:
+            title = result.get("title", "未知标题")
+            self.status_bar.showMessage(f"任务完成: {title}")
+
+            # 显示完成信息
+            highlights = result.get("highlights_count", 0)
+            export_success = result.get("export_success", 0)
+            export_total = result.get("export_total", 0)
+
+            # 更新处理记录为完成状态
+            export_results = result.get("export_results", [])
+            output_dir = None
+            obsidian_note_path = None
+
+            for export_result in export_results:
+                if export_result and hasattr(export_result, 'output_path'):
+                    output_path = str(export_result.output_path)
+                    if 'obsidian' in output_path.lower() or 'Inbox' in output_path:
+                        obsidian_note_path = output_path
+                    else:
+                        output_dir = output_path
+
+            detector.update_status(
+                url=url,
+                status=ProcessingStatus.COMPLETED,
+                output_dir=output_dir,
+                obsidian_note_path=obsidian_note_path
+            )
+
+            # 保存到历史记录
+            self._save_task_to_history(task_id, result)
+
+            QMessageBox.information(
+                self,
+                "处理完成",
+                f"视频: {title}\n"
+                f"提取要点: {highlights} 个\n"
+                f"导出成功: {export_success}/{export_total} 个目标"
+            )
+        else:
+            self.status_bar.showMessage(f"任务失败: {task_id}")
+            # 更新处理记录为失败状态
+            error_message = result.get("error", "未知错误")
+            detector.update_status(
+                url=url,
+                status=ProcessingStatus.FAILED,
+                error_message=error_message
+            )
+
+            # 保存失败任务到历史记录
+            self._save_task_to_history(task_id, result, failed=True)
+
+        # 重新启用开始按钮
+        self.start_button.setEnabled(True)
+
+    def _on_task_failed(self, task_id: str, url: str, error_message: str):
+        """任务失败"""
+        self.task_queue.update_task_status(task_id, TaskStatus.FAILED, error_message)
+        self.status_bar.showMessage(f"任务失败: {error_message}")
+
+        # 更新处理记录为失败状态
+        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        detector = get_duplicate_detector()
+        detector.update_status(
+            url=url,
+            status=ProcessingStatus.FAILED,
+            error_message=error_message
+        )
+
+        QMessageBox.critical(self, "处理失败", f"任务处理失败:\n{error_message}")
+        self.start_button.setEnabled(True)
+
+    def _on_task_title_updated(self, task_id: str, title: str):
+        """任务标题更新"""
+        self.task_queue.update_task_title(task_id, title)
+
+    def _add_worker(self, task_id: str, worker: ProcessingWorker) -> None:
+        """线程安全地添加工作线程"""
+        with QMutexLocker(self._workers_mutex):
+            self.active_workers[task_id] = worker
+
+    def _remove_worker(self, task_id: str) -> Optional[ProcessingWorker]:
+        """线程安全地移除并返回工作线程"""
+        with QMutexLocker(self._workers_mutex):
+            return self.active_workers.pop(task_id, None)
+
+    def _get_worker(self, task_id: str) -> Optional[ProcessingWorker]:
+        """线程安全地获取工作线程"""
+        with QMutexLocker(self._workers_mutex):
+            return self.active_workers.get(task_id)
+
+    def _on_worker_finished(self, task_id: str):
+        """工作线程结束"""
+        worker = self._remove_worker(task_id)
+        if worker:
+            # 确保线程已停止
+            if worker.isRunning():
+                worker.quit()
+                if not worker.wait(5000):  # 等待最多 5 秒
+                    worker.terminate()
+                    worker.wait()
+            worker.deleteLater()
+
+    def _on_task_cancelled(self, task_id: str):
+        """任务取消"""
+        worker = self._get_worker(task_id)
+        if worker:
+            worker.cancel()
+            self.status_bar.showMessage(f"任务已取消: {task_id}")
+
+    def _on_task_paused(self, task_id: str):
+        """任务暂停"""
+        worker = self._get_worker(task_id)
+        if worker:
+            worker.pause()
+            self.status_bar.showMessage(f"任务已暂停: {task_id}")
+
+    def _on_task_resumed(self, task_id: str):
+        """任务恢复"""
+        worker = self._get_worker(task_id)
+        if worker:
+            worker.resume()
+            self.status_bar.showMessage(f"任务已恢复: {task_id}")
+
+    def _on_history_reprocess(self, task_id: str):
+        """从历史记录重新处理任务"""
+        try:
+            # 从历史记录中获取任务信息
+            db = get_task_database()
+            task = db.get_task(task_id)
+
+            if not task:
+                QMessageBox.warning(self, "错误", f"找不到任务历史记录: {task_id}")
+                return
+
+            # 设置 URL
+            self.url_input.set_url(task.url)
+
+            # 设置处理模式
+            self.mode_selector.set_mode(task.mode)
+
+            # 设置导出目标
+            self.local_export_check.setChecked(ModelExportTarget.LOCAL in task.targets)
+            self.obsidian_export_check.setChecked(ModelExportTarget.OBSIDIAN in task.targets)
+
+            # 自动开始处理
+            self._on_start_processing()
+
+            self.status_bar.showMessage(f"已开始重新处理: {task.title}")
+
+        except Exception as e:
+            logger.error(f"重新处理任务失败: {e}")
+            QMessageBox.warning(self, "错误", f"重新处理任务失败: {e}")
+
+    def _save_task_to_history(self, task_id: str, result: dict, failed: bool = False):
+        """保存任务到历史记录"""
+        logger.info(f"开始保存任务到历史记录: {task_id}, failed={failed}")
+        try:
+            # 获取任务信息
+            task_widget = self.task_queue.tasks.get(task_id)
+            if not task_widget:
+                logger.warning(f"找不到任务控件: {task_id}")
+                return
+
+            task_info = task_widget.get_task_info()
+            logger.info(f"任务信息: url={task_info.url}, title={task_info.title}")
+
+            # 构建导出目标列表
+            targets = []
+            if self.local_export_check.isChecked():
+                targets.append(ModelExportTarget.LOCAL)
+            if self.obsidian_export_check.isChecked():
+                targets.append(ModelExportTarget.OBSIDIAN)
+
+            # 确定状态
+            status = TaskStatus.FAILED if failed else TaskStatus.COMPLETED
+            error_msg = result.get("error", "") if failed else None
+
+            # 创建历史记录
+            history = TaskHistory(
+                id=task_id,
+                url=task_info.url,
+                title=result.get("title", task_info.title or "未知"),
+                author=result.get("author", ""),
+                platform=result.get("platform", ""),
+                mode=task_info.mode,
+                targets=targets,
+                status=status,
+                error_msg=error_msg,
+                completed_at=datetime.now(),
+                summary=result.get("summary", ""),
+                highlights_count=result.get("highlights_count", 0),
+                output_files=[Path(p) for p in result.get("output_files", []) if p],
+                export_success_count=result.get("export_success", 0),
+                export_total_count=result.get("export_total", 0),
+            )
+
+            # 保存到数据库
+            db = get_task_database()
+            db.save_task(history)
+
+            # 刷新历史记录侧边栏
+            self.history_sidebar.refresh()
+
+            logger.info(f"任务已保存到历史记录: {task_id}")
+
+        except Exception as e:
+            logger.error(f"保存任务到历史记录失败: {e}", exc_info=True)
+
+    def _load_config_to_ui(self):
+        """加载配置到 UI"""
+        try:
+            # 加载导出配置
+            export_config = self.config.export
+            self.local_export_check.setChecked(export_config.local.enabled)
+            self.obsidian_export_check.setChecked(export_config.obsidian.enabled)
+
+            # 加载本地导出路径
+            if export_config.local.output_path:
+                self.output_dir = Path(export_config.local.output_path)
+
+            logger.info(f"配置已加载: {self.config_manager.get_config_file_path()}")
+        except Exception as e:
+            logger.error(f"加载配置到 UI 失败: {e}")
+
+    def _open_existing_result(self, record):
+        """打开已有的处理结果"""
+        from ..utils.platform_utils import PlatformHelper
+
+        opened = False
+
+        # 优先打开 Obsidian 笔记
+        if record.obsidian_note_path:
+            opened = PlatformHelper.open_application("Obsidian")
+
+        # 如果没有打开 Obsidian，打开本地输出目录
+        if not opened and record.output_dir:
+            output_path = Path(record.output_dir)
+            opened = PlatformHelper.open_path(output_path)
+
+        if opened:
+            self.status_bar.showMessage("已打开处理结果")
+        else:
+            QMessageBox.warning(self, "提示", "无法自动打开处理结果，请手动查看")
+
+    def _save_config_from_ui(self):
+        """从 UI 保存配置"""
+        try:
+            # 保存导出配置
+            self.config_manager.update_export(
+                local={
+                    "enabled": self.local_export_check.isChecked(),
+                    "output_path": str(self.output_dir)
+                },
+                obsidian={
+                    "enabled": self.obsidian_export_check.isChecked()
+                }
+            )
+
+            # 保存下载配置
+            self.config_manager.update_download(
+                output_dir=str(self.output_dir)
+            )
+
+            logger.info("配置已保存")
+        except Exception as e:
+            logger.error(f"保存配置失败: {e}")
+
+    def _on_open_obsidian(self):
+        """打开 Obsidian"""
+        import subprocess
+        import platform
+
+        system = platform.system()
+        try:
+            if system == "Darwin":  # macOS
+                subprocess.run(["open", "-a", "Obsidian"])
+            elif system == "Windows":
+                subprocess.run(["start", "obsidian:"], shell=True)
+            else:  # Linux
+                subprocess.run(["obsidian"])
+        except Exception as e:
+            QMessageBox.warning(self, "错误", f"无法打开 Obsidian: {e}")
+
+    def _on_minimize_to_tray(self):
+        """最小化到托盘按钮点击"""
+        if self.tray_icon:
+            self.hide()
+            
+            # 显示气泡提示
+            self.tray_icon.showMessage(
+                "VideoMind Bridge",
+                "应用已最小化到系统托盘，点击图标可恢复窗口",
+                QSystemTrayIcon.MessageIcon.Information,
+                3000
+            )
+            logger.info("应用已最小化到托盘")
+            
+            # 显示提示对话框告知用户托盘位置
+            from ..utils.platform_utils import PlatformHelper
+            tray_location = PlatformHelper.get_tray_location_hint()
+            extra_hint = "\n\n💡 提示：在 macOS 上，图标可能显示为黑色剪影，请仔细查看菜单栏右侧。" if PlatformHelper.is_macos() else ""
+
+            QMessageBox.information(
+                self,
+                "已最小化到托盘",
+                f"应用已最小化到系统托盘。\n\n"
+                f"请在{tray_location}查找 VideoMind Bridge 图标。\n\n"
+                f"点击托盘图标可以恢复窗口。"
+                f"{extra_hint}"
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "提示",
+                "系统托盘不可用，窗口将正常最小化"
+            )
+            self.showMinimized()
+
+    def _setup_tray_icon(self):
+        """设置系统托盘图标"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            logger.warning("系统不支持托盘图标，无法创建托盘图标")
+            return
+        
+        logger.info("正在创建托盘图标...")
+
+        # 创建托盘图标
+        self.tray_icon = QSystemTrayIcon(self)
+        self.tray_icon.setToolTip("VideoMind Bridge")
+
+        # 加载自定义图标
+        from ..utils.platform_utils import PlatformHelper
+        from pathlib import Path
+
+        # 尝试加载自定义图标
+        icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.svg"
+        if icon_path.exists():
+            icon = QIcon(str(icon_path))
+            logger.info(f"使用自定义图标: {icon_path}")
+        else:
+            # 回退到系统标准图标
+            icon = QApplication.style().standardIcon(
+                QApplication.style().StandardPixmap.SP_ComputerIcon
+            )
+            logger.warning(f"自定义图标不存在，使用系统默认图标")
+
+        # 在 macOS 上，设置图标为模板模式，这样系统会自动处理颜色
+        if PlatformHelper.is_macos():
+            icon.setIsMask(True)
+
+        self.tray_icon.setIcon(icon)
+
+        # macOS 特殊处理：设置托盘图标可见性
+        if PlatformHelper.is_macos():
+            self.tray_icon.setVisible(True)
+
+        # 创建托盘菜单
+        tray_menu = QMenu()
+
+        # 显示窗口动作
+        show_action = QAction("显示窗口", self)
+        show_action.triggered.connect(self._show_window)
+        tray_menu.addAction(show_action)
+
+        tray_menu.addSeparator()
+
+        # 退出动作
+        quit_action = QAction("退出", self)
+        quit_action.triggered.connect(self._quit_from_tray)
+        tray_menu.addAction(quit_action)
+
+        self.tray_icon.setContextMenu(tray_menu)
+
+        # 连接点击信号
+        self.tray_icon.activated.connect(self._on_tray_activated)
+
+        # 显示托盘图标
+        self.tray_icon.show()
+
+        # 验证托盘图标是否成功显示
+        if self.tray_icon.isVisible():
+            logger.info("托盘图标已显示")
+        else:
+            logger.warning("托盘图标创建但未显示（可能在 macOS 菜单栏被隐藏）")
+
+    def _on_tray_activated(self, reason):
+        """托盘图标被激活"""
+        if reason == QSystemTrayIcon.ActivationReason.DoubleClick:
+            self._show_window()
+
+    def _show_window(self):
+        """显示主窗口"""
+        self.show()
+        self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMinimized)
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self):
+        """从托盘退出应用"""
+        self._quit_application()
+
+    def _quit_application(self):
+        """退出应用程序"""
+        # 检查是否有正在进行的任务
+        if hasattr(self, 'task_queue') and self.task_queue.has_running_tasks():
+            reply = QMessageBox.question(
+                self, "确认退出",
+                "有任务正在处理中，确定要退出吗？\n\n"
+                "退出后正在进行的任务将被取消。",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                return
+
+        # 隐藏托盘图标
+        if self.tray_icon:
+            self.tray_icon.hide()
+
+        # 关闭应用
+        QApplication.instance().quit()
+
+    def closeEvent(self, event):
+        """关闭事件 - 根据设置决定是最小化到托盘还是退出"""
+        # 检查是否有正在进行的任务
+        if hasattr(self, 'task_queue') and self.task_queue.has_running_tasks():
+            reply = QMessageBox.question(
+                self, "确认",
+                "有任务正在处理中，确定要退出吗？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply == QMessageBox.StandardButton.No:
+                event.ignore()
+                return
+
+        # 根据设置决定是否最小化到托盘
+        config = self.config_manager.config
+        if config.ui.minimize_to_tray and self.tray_icon:
+            # 最小化到托盘
+            self.hide()
+            self.tray_icon.showMessage(
+                "VideoMind Bridge",
+                "应用已最小化到系统托盘",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+            event.ignore()  # 忽略关闭事件，不退出应用
+        else:
+            # 正常退出
+            if self.tray_icon:
+                self.tray_icon.hide()
+            event.accept()
+
+    def _setup_menu_bar(self):
+        """设置菜单栏"""
+        menubar = self.menuBar()
+
+        # 文件菜单
+        file_menu = menubar.addMenu("文件")
+
+        # 设置菜单项
+        settings_action = QAction("设置", self)
+        settings_action.setShortcut("Ctrl+,")
+        settings_action.triggered.connect(self._open_settings)
+        file_menu.addAction(settings_action)
+
+        file_menu.addSeparator()
+
+        # 退出菜单项
+        exit_action = QAction("退出", self)
+        exit_action.setShortcut("Ctrl+Q")
+        exit_action.triggered.connect(self._quit_application)
+        file_menu.addAction(exit_action)
+
+        # 帮助菜单
+        help_menu = menubar.addMenu("帮助")
+
+        about_action = QAction("关于", self)
+        about_action.triggered.connect(self._show_about)
+        help_menu.addAction(about_action)
+
+    def _open_settings(self):
+        """打开设置对话框"""
+        from .widgets.settings_dialog import SettingsDialog
+
+        # 创建对话框（保存为实例变量防止被垃圾回收）
+        self._settings_dialog = SettingsDialog(self)
+        
+        # 连接关闭信号
+        self._settings_dialog.finished.connect(self._on_settings_finished)
+        
+        # 使用 exec() 方法显示对话框（模态）
+        self._settings_dialog.exec()
+        
+        # 对话框关闭后清理引用
+        self._settings_dialog = None
+
+    def _on_settings_finished(self, result):
+        """设置对话框关闭后的处理"""
+        if result == QDialog.DialogCode.Accepted:
+            # 设置已保存，重新加载配置到 UI
+            self._load_config_to_ui()
+            # 更新配置提示
+            if hasattr(self, '_update_config_hint'):
+                self._update_config_hint()
+            self.status_bar.showMessage("设置已更新", 3000)
+
+    def _show_about(self):
+        """显示关于对话框"""
+        QMessageBox.about(
+            self,
+            "关于 VideoMind Bridge",
+            "<h2>VideoMind Bridge</h2>"
+            "<p>版本: 0.1.0</p>"
+            "<p>一个智能视频处理工具，支持下载、转录、AI 摘要和导出。</p>"
+            "<p>支持平台: Bilibili, YouTube, 抖音, 小红书等</p>"
+        )
