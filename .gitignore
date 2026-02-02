@@ -8,3 +8,44 @@ wheels/
 
 # Virtual environments
 .venv
+
+# IDE and editor files
+.DS_Store
+*.swp
+*.swo
+*~
+.vscode/
+.idea/
+
+# Backup files
+*.bak
+*.backup
+
+# Test directories (keep tests/ but ignore test data directories)
+test_cli/
+test_fix/
+test_full/
+test_full_flow/
+test_html_player/
+test_real_url/
+test_video_keep/
+
+# Output directory
+output/
+
+# Trae IDE documents
+.trae/
+
+# Temporary files
+123
+1~
+
+# Development notes (not needed in repo)
+md输出样式.md
+未来优化.md
+参考资料
+开发计划.md
+产品需求文档 (PRD) - v1.0.md
+
+# Test files
+mvp_test.py
