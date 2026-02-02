@@ -1,0 +1,116 @@
+/* VideoMind Bridge - 内容脚本样式 */
+
+#videomind-process-btn {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: linear-gradient(135deg, #00a1d6 0%, #0089b5 100%);
+  color: white;
+  padding: 12px 20px;
+  border-radius: 25px;
+  cursor: pointer;
+  z-index: 999999;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  box-shadow: 0 4px 15px rgba(0, 161, 214, 0.4);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.3s ease;
+  user-select: none;
+  border: none;
+  outline: none;
+}
+
+#videomind-process-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 161, 214, 0.5);
+}
+
+#videomind-process-btn:active {
+  transform: translateY(0);
+}
+
+#videomind-process-btn.vm-processing {
+  background: linear-gradient(135deg, #faad14 0%, #d48806 100%);
+  box-shadow: 0 4px 15px rgba(250, 173, 20, 0.4);
+  cursor: wait;
+}
+
+#videomind-process-btn.vm-success {
+  background: linear-gradient(135deg, #52c41a 0%, #389e0d 100%);
+  box-shadow: 0 4px 15px rgba(82, 196, 26, 0.4);
+}
+
+#videomind-process-btn.vm-error {
+  background: linear-gradient(135deg, #ff4d4f 0%, #cf1322 100%);
+  box-shadow: 0 4px 15px rgba(255, 77, 79, 0.4);
+}
+
+.vm-icon {
+  font-size: 16px;
+}
+
+.vm-text {
+  font-weight: 500;
+}
+
+/* 通知样式 */
+#videomind-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 15px 20px;
+  border-radius: 8px;
+  z-index: 999999;
+  font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transform: translateX(400px);
+  opacity: 0;
+  transition: all 0.3s ease;
+  max-width: 350px;
+}
+
+#videomind-notification.vm-show {
+  transform: translateX(0);
+  opacity: 1;
+}
+
+#videomind-notification.vm-success {
+  background: #f6ffed;
+  color: #52c41a;
+  border: 1px solid #b7eb8f;
+}
+
+#videomind-notification.vm-error {
+  background: #fff2f0;
+  color: #ff4d4f;
+  border: 1px solid #ffccc7;
+}
+
+.vm-notification-icon {
+  font-size: 18px;
+  flex-shrink: 0;
+}
+
+.vm-notification-text {
+  line-height: 1.5;
+}
+
+/* 动画 */
+@keyframes vm-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+#videomind-process-btn.vm-processing {
+  animation: vm-pulse 1.5s ease-in-out infinite;
+}
