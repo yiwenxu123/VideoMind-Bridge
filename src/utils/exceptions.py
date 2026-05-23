@@ -34,6 +34,13 @@ class DownloadError(VideoMindError):
         super().__init__(message, error_code, details)
 
 
+class UnsupportedPlatformError(VideoMindError):
+    """不支持的平台错误"""
+    
+    def __init__(self, message: str, error_code: str = "UNSUPPORTED_PLATFORM", details: dict = None):
+        super().__init__(message, error_code, details)
+
+
 class TranscribeError(VideoMindError):
     """转录相关错误"""
     

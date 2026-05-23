@@ -60,6 +60,14 @@ class TranscriptSegment:
 
 
 @dataclass
+class Highlight:
+    """时间轴要点"""
+    time: str  # 格式化时间 (MM:SS)
+    seconds: int  # 绝对秒数
+    content: str  # 要点内容
+
+
+@dataclass
 class ExportContext:
     """
     导出上下文
@@ -131,15 +139,126 @@ class VideoTask:
     # 错误信息
     error_msg: Optional[str] = None
     retry_count: int = 0
+    completed_at: Optional[datetime] = None
+    
+    # 输出文件
+    output_files: List[Path] = field(default_factory=list)
     
     def to_dict(self) -> Dict[str, Any]:
         """序列化为字典"""
-        raise NotImplementedError()
-    
+        return {
+            "id": str(self.id),
+            "url": self.url,
+            "created_at": self.created_at.isoformat(),
+            "updated_at": self.updated_at.isoformat(),
+            "mode": self.mode.value,
+            "targets": [t.value for t in self.targets],
+            "ai_provider": self.ai_provider,
+            "ai_prompt": self.ai_prompt,
+            "status": self.status.value,
+            "progress": self.progress,
+            "current_step": self.current_step,
+            "metadata": self._metadata_to_dict(self.metadata),
+            "audio_path": str(self.audio_path) if self.audio_path else None,
+            "transcript_segments": [
+                {"start": s.start, "end": s.end, "text": s.text, "confidence": s.confidence}
+                for s in self.transcript_segments
+            ],
+            "ai_summary": self.ai_summary,
+            "export_results": [self._export_result_to_dict(r) for r in self.export_results],
+            "error_msg": self.error_msg,
+            "retry_count": self.retry_count,
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "output_files": [str(p) for p in self.output_files],
+        }
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "VideoTask":
         """从字典反序列化"""
-        raise NotImplementedError()
+        return cls(
+            id=UUID(data["id"]) if isinstance(data.get("id"), str) else data.get("id", uuid4()),
+            url=data.get("url", ""),
+            created_at=datetime.fromisoformat(data["created_at"]) if isinstance(data.get("created_at"), str) else data.get("created_at", datetime.now()),
+            updated_at=datetime.fromisoformat(data["updated_at"]) if isinstance(data.get("updated_at"), str) else data.get("updated_at", datetime.now()),
+            mode=ProcessingMode(data["mode"]) if isinstance(data.get("mode"), str) else data.get("mode", ProcessingMode.FULL),
+            targets={ExportTarget(t) for t in data.get("targets", ["local"])},
+            ai_provider=data.get("ai_provider"),
+            ai_prompt=data.get("ai_prompt"),
+            status=TaskStatus(data["status"]) if isinstance(data.get("status"), str) else data.get("status", TaskStatus.PENDING),
+            progress=data.get("progress", 0.0),
+            current_step=data.get("current_step", ""),
+            metadata=cls._metadata_from_dict(data.get("metadata")),
+            audio_path=Path(data["audio_path"]) if data.get("audio_path") else None,
+            transcript_segments=[
+                TranscriptSegment(**s) for s in data.get("transcript_segments", [])
+            ],
+            ai_summary=data.get("ai_summary"),
+            export_results=[cls._export_result_from_dict(r) for r in data.get("export_results", [])],
+            error_msg=data.get("error_msg"),
+            retry_count=data.get("retry_count", 0),
+            completed_at=datetime.fromisoformat(data["completed_at"]) if data.get("completed_at") else None,
+            output_files=[Path(p) for p in data.get("output_files", [])],
+        )
+
+    @staticmethod
+    def _metadata_to_dict(metadata: Optional[VideoMetadata]) -> Optional[Dict[str, Any]]:
+        """将 VideoMetadata 转换为字典"""
+        if metadata is None:
+            return None
+        return {
+            "title": metadata.title,
+            "author": metadata.author,
+            "duration": metadata.duration,
+            "platform": metadata.platform,
+            "url": metadata.url,
+            "thumbnail_url": metadata.thumbnail_url,
+            "description": metadata.description,
+            "published_at": metadata.published_at.isoformat() if metadata.published_at else None,
+            "raw_info": metadata.raw_info,
+        }
+
+    @staticmethod
+    def _metadata_from_dict(data: Optional[Dict[str, Any]]) -> Optional[VideoMetadata]:
+        """从字典创建 VideoMetadata"""
+        if data is None:
+            return None
+        return VideoMetadata(
+            title=data.get("title", ""),
+            author=data.get("author", ""),
+            duration=data.get("duration", 0),
+            platform=data.get("platform", ""),
+            url=data.get("url", ""),
+            thumbnail_url=data.get("thumbnail_url"),
+            description=data.get("description"),
+            published_at=datetime.fromisoformat(data["published_at"]) if data.get("published_at") else None,
+            raw_info=data.get("raw_info", {}),
+        )
+
+    @staticmethod
+    def _export_result_to_dict(result: ExportResult) -> Dict[str, Any]:
+        """将 ExportResult 转换为字典"""
+        return {
+            "success": result.success,
+            "target": result.target.value,
+            "timestamp": result.timestamp.isoformat(),
+            "error_msg": result.error_msg,
+            "output_path": str(result.output_path) if result.output_path else None,
+            "remote_url": result.remote_url,
+            "metadata": result.metadata,
+        }
+
+    @staticmethod
+    def _export_result_from_dict(data: Dict[str, Any]) -> ExportResult:
+        """从字典创建 ExportResult"""
+        return ExportResult(
+            success=data.get("success", False),
+            target=ExportTarget(data["target"]) if isinstance(data.get("target"), str) else data.get("target"),
+            timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp", datetime.now()),
+            error_msg=data.get("error_msg"),
+            output_path=Path(data["output_path"]) if data.get("output_path") else None,
+            remote_url=data.get("remote_url"),
+            metadata=data.get("metadata", {}),
+        )
 
 
 @dataclass

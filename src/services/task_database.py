@@ -75,6 +75,18 @@ class TaskDatabase:
                 )
             """)
 
+            # 创建处理时间统计表
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS processing_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    mode TEXT NOT NULL,
+                    platform TEXT,
+                    duration_seconds INTEGER NOT NULL,
+                    processing_time_seconds REAL NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
+
             # 创建索引
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_status ON task_history(status)
@@ -84,6 +96,9 @@ class TaskDatabase:
             """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_platform ON task_history(platform)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_stats_mode ON processing_stats(mode)
             """)
 
             logger.info(f"数据库初始化完成: {self.db_path}")
@@ -327,6 +342,109 @@ class TaskDatabase:
         except Exception as e:
             logger.error(f"获取任务统计信息失败: {e}")
             return {"total": 0, "by_status": {}, "by_platform": {}}
+
+    def save_processing_stats(
+        self,
+        mode: str,
+        platform: str,
+        duration_seconds: int,
+        processing_time_seconds: float
+    ) -> bool:
+        """
+        保存处理时间统计数据
+
+        Args:
+            mode: 处理模式
+            platform: 视频平台
+            duration_seconds: 视频时长（秒）
+            processing_time_seconds: 实际处理时间（秒）
+
+        Returns:
+            是否保存成功
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                cursor.execute("""
+                    INSERT INTO processing_stats
+                    (mode, platform, duration_seconds, processing_time_seconds, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    mode,
+                    platform,
+                    duration_seconds,
+                    processing_time_seconds,
+                    datetime.now().isoformat()
+                ))
+
+                logger.debug(f"处理时间统计已保存: {mode}, {duration_seconds}s -> {processing_time_seconds}s")
+                return True
+
+        except Exception as e:
+            logger.error(f"保存处理时间统计失败: {e}")
+            return False
+
+    def get_average_processing_ratio(
+        self,
+        mode: str,
+        platform: Optional[str] = None,
+        limit: int = 50
+    ) -> Optional[float]:
+        """
+        获取平均处理时间比例
+
+        Args:
+            mode: 处理模式
+            platform: 视频平台（可选）
+            limit: 使用最近多少条记录
+
+        Returns:
+            平均处理时间比例（处理时间/视频时长），无数据时返回 None
+        """
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+
+                if platform:
+                    cursor.execute("""
+                        SELECT AVG(processing_time_seconds * 1.0 / duration_seconds) as ratio
+                        FROM processing_stats
+                        WHERE mode = ? AND platform = ?
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (mode, platform, limit))
+                else:
+                    cursor.execute("""
+                        SELECT AVG(processing_time_seconds * 1.0 / duration_seconds) as ratio
+                        FROM processing_stats
+                        WHERE mode = ?
+                        ORDER BY created_at DESC
+                        LIMIT ?
+                    """, (mode, limit))
+
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return float(row[0])
+                return None
+
+        except Exception as e:
+            logger.error(f"获取平均处理时间比例失败: {e}")
+            return None
+
+    def get_processing_stats_count(self, mode: str) -> int:
+        """获取指定模式的统计记录数量"""
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT COUNT(*) FROM processing_stats WHERE mode = ?",
+                    (mode,)
+                )
+                return cursor.fetchone()[0]
+        except Exception as e:
+            logger.error(f"获取统计记录数量失败: {e}")
+            return 0
 
     def _row_to_task_history(self, row: sqlite3.Row) -> Optional[TaskHistory]:
         """将数据库行转换为 TaskHistory 对象"""

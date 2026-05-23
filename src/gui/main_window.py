@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QFileDialog, QApplication, QSizePolicy,
     QDialog
 )
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QMutex, QMutexLocker
+from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QMutex, QMutexLocker, QTimer
 from PySide6.QtGui import QIcon, QFont, QClipboard, QAction
 
 # 导入自定义组件
@@ -66,15 +66,29 @@ class MainWindow(QMainWindow):
         self._workers_mutex = QMutex()
         self.active_workers: dict[str, ProcessingWorker] = {}
 
+        # 等待中的任务队列
+        self._pending_tasks: list = []
+
         # 输出目录（从配置读取）
-        self.output_dir = Path(self.config.download.output_dir)
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_dir = Path(self.config.download.output_dir)
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            logger.error(f"创建输出目录失败: {e}")
+            # 使用默认目录
+            self.output_dir = Path.home() / "Downloads" / "VideoMind"
+            self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # 初始化托盘管理器
         self.tray_manager = TrayManager(self)
         self.tray_manager.show_window_requested.connect(self._show_window)
         self.tray_manager.quit_requested.connect(self._quit_application)
         self.tray_manager.setup()
+
+        # 定时刷新历史记录（每 5 秒）
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.timeout.connect(self._auto_refresh_history)
+        self._refresh_timer.start(5000)  # 5 秒
 
         # 创建主分割器（垂直分割：上部主内容 + 下部任务区域）
         self.main_splitter = QSplitter(Qt.Orientation.Vertical)
@@ -353,11 +367,14 @@ class MainWindow(QMainWindow):
         return True, ""
 
     def _on_start_processing(self):
-        """开始处理"""
+        """开始处理 - 支持单条和批量模式"""
         logger.debug("开始处理按钮被点击")
-        url = self.url_input.get_url()
-        if not url:
-            QMessageBox.warning(self, "警告", "请输入视频链接")
+
+        # 获取所有 URL
+        urls = self.url_input.get_valid_urls()
+
+        if not urls:
+            QMessageBox.warning(self, "警告", "请输入有效的视频链接\n支持 Bilibili、YouTube、小红书等平台")
             return
 
         mode = self.mode_selector.get_current_mode()
@@ -384,6 +401,18 @@ class MainWindow(QMainWindow):
             )
             return
 
+        # 保存配置
+        self._save_config_from_ui()
+
+        # 批量处理
+        if len(urls) > 1:
+            self._start_batch_processing(urls, mode, targets)
+        else:
+            # 单条处理
+            self._process_single_url(urls[0], mode, targets)
+
+    def _process_single_url(self, url: str, mode: ProcessingMode, targets: list):
+        """处理单个 URL"""
         # 检查是否重复处理
         from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
         detector = get_duplicate_detector()
@@ -428,9 +457,6 @@ class MainWindow(QMainWindow):
                 return
             # 否则继续重新处理
 
-        # 保存配置
-        self._save_config_from_ui()
-
         # 添加到任务队列
         task_id = self.task_queue.add_task(url, mode, targets)
 
@@ -439,9 +465,105 @@ class MainWindow(QMainWindow):
 
         self.status_bar.showMessage(f"开始处理任务: {task_id}")
 
+    def _start_batch_processing(self, urls: list, mode: ProcessingMode, targets: list):
+        """开始批量处理"""
+        total = len(urls)
+
+        # 检查重复处理的数量
+        from ..services.duplicate_detector import get_duplicate_detector
+        detector = get_duplicate_detector()
+
+        duplicate_count = 0
+        new_urls = []
+
+        for url in urls:
+            existing = detector.check_duplicate(url)
+            if existing:
+                duplicate_count += 1
+            else:
+                new_urls.append(url)
+
+        # 显示批量处理确认对话框
+        msg_box = QMessageBox(self)
+        msg_box.setWindowTitle("批量处理确认")
+        msg_box.setIcon(QMessageBox.Icon.Information)
+
+        info_text = f"即将批量处理 {total} 个视频：\n\n"
+        info_text += f"• 新任务: {len(new_urls)} 个\n"
+        if duplicate_count > 0:
+            info_text += f"• 已处理过: {duplicate_count} 个（将跳过）\n"
+        info_text += f"\n处理模式: {mode.value}\n"
+        info_text += f"导出目标: {', '.join(t.value for t in targets)}"
+
+        msg_box.setText(info_text)
+        msg_box.setInformativeText("确定要开始批量处理吗？")
+
+        # 添加按钮
+        cancel_button = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+        start_button = msg_box.addButton("开始处理", QMessageBox.ButtonRole.AcceptRole)
+
+        # 如果有重复，添加"全部重新处理"选项
+        if duplicate_count > 0:
+            reprocess_all_button = msg_box.addButton("全部重新处理", QMessageBox.ButtonRole.ActionRole)
+
+        msg_box.exec()
+
+        clicked_button = msg_box.clickedButton()
+
+        if clicked_button == cancel_button:
+            return
+
+        # 确定要处理的 URL 列表
+        urls_to_process = urls if clicked_button == reprocess_all_button else new_urls
+
+        if not urls_to_process:
+            QMessageBox.information(self, "提示", "没有需要处理的新视频")
+            return
+
+        # 清空输入框
+        self.url_input.clear()
+
+        # 批量创建任务
+        created_count = 0
+        for url in urls_to_process:
+            task_id = self.task_queue.add_task(url, mode, targets)
+            self._start_processing_task(task_id, url, mode, targets)
+            created_count += 1
+
+        self.status_bar.showMessage(f"已创建 {created_count} 个批量处理任务")
+
+        # 显示成功提示
+        QMessageBox.information(
+            self,
+            "批量处理已启动",
+            f"成功创建 {created_count} 个处理任务\n"
+            f"任务将按顺序执行，请查看下方任务队列了解进度。"
+        )
+
     def _start_processing_task(self, task_id: str, url: str, mode: ProcessingMode, targets: list):
-        """启动处理任务"""
+        """启动处理任务（支持并发控制）"""
         logger.debug(f"启动处理任务: {task_id}")
+
+        # 检查并发限制
+        max_concurrent = self.config_manager.config.performance.max_concurrent_tasks
+        current_running = len(self.active_workers)
+
+        if current_running >= max_concurrent:
+            # 达到并发上限，将任务加入等待队列
+            logger.info(f"任务 {task_id} 加入等待队列（当前运行: {current_running}/{max_concurrent}）")
+            self._pending_tasks.append({
+                'task_id': task_id,
+                'url': url,
+                'mode': mode,
+                'targets': targets
+            })
+            self.task_queue.update_task_status(task_id, TaskStatus.PENDING, f"等待中 ({current_running}/{max_concurrent})")
+            return
+
+        self._do_start_task(task_id, url, mode, targets)
+
+    def _do_start_task(self, task_id: str, url: str, mode: ProcessingMode, targets: list):
+        """实际启动任务"""
         # 从配置管理器获取 AI 配置
         ai_config = self.config_manager.ai
 
@@ -464,12 +586,12 @@ class MainWindow(QMainWindow):
             mode=mode,
             targets=targets,
             output_dir=self.output_dir,
-            whisper_model="small",  # TODO: 从配置读取
+            whisper_model=self.config_manager.config.transcribe.whisper_model,
             ai_engine=ai_config.engine,
             ai_model=ai_config.model,
             api_key=self.config_manager.get_api_key(),  # 从密钥环获取 API Key
-            download_video=True,  # TODO: 从配置读取
-            video_quality="best",
+            download_video=self.config_manager.config.download.download_video,
+            video_quality=self.config_manager.config.download.video_quality,
             prompt_template_id=prompt_template_id,  # 从 AI 配置获取
             obsidian_vault_path=obsidian_vault_path,
             obsidian_subfolder=obsidian_subfolder
@@ -479,7 +601,9 @@ class MainWindow(QMainWindow):
         worker = ProcessingWorker(config, parent=self)
 
         # 连接信号 - 使用默认参数捕获当前值，避免闭包问题
-        worker.progress_updated.connect(self._on_task_progress)
+        worker.progress_updated.connect(
+            lambda tid, progress, msg, task_id=task_id: self._on_task_progress(tid, progress, msg, task_id)
+        )
         worker.status_changed.connect(self._on_task_status_changed)
         worker.task_completed.connect(
             lambda tid, success, result, url=url, mode=mode: self._on_task_completed(tid, url, mode, success, result)
@@ -488,6 +612,7 @@ class MainWindow(QMainWindow):
             lambda tid, err, url=url: self._on_task_failed(tid, url, err)
         )
         worker.title_updated.connect(self._on_task_title_updated)
+        worker.metadata_updated.connect(self._on_task_metadata_updated)
         worker.retrying.connect(self._on_task_retrying)
         worker.finished.connect(lambda tid=task_id: self._on_worker_finished(tid))
 
@@ -506,9 +631,45 @@ class MainWindow(QMainWindow):
         self._add_worker(task_id, worker)
         worker.start()
 
-    def _on_task_progress(self, task_id: str, progress: int, message: str):
+    def _process_next_pending_task(self):
+        """处理下一个等待中的任务"""
+        if not self._pending_tasks:
+            return
+
+        max_concurrent = self.config_manager.config.performance.max_concurrent_tasks
+        current_running = len(self.active_workers)
+
+        while self._pending_tasks and current_running < max_concurrent:
+            task_info = self._pending_tasks.pop(0)
+            logger.info(f"从等待队列启动任务: {task_info['task_id']}")
+            self._do_start_task(
+                task_info['task_id'],
+                task_info['url'],
+                task_info['mode'],
+                task_info['targets']
+            )
+            current_running += 1
+
+    def _on_task_progress(self, task_id: str, progress: int, message: str, original_task_id: str = ""):
         """任务进度更新"""
-        self.task_queue.update_task_progress(task_id, progress, message)
+        # 获取预估时间（需要知道视频时长，在下载完成后才能准确预估）
+        time_estimate = ""
+        if progress > 0 and progress < 100:
+            # 尝试从任务队列获取任务信息
+            task_info = self.task_queue.get_task_info(task_id)
+            if task_info and task_info.video_duration > 0:
+                from ..services.time_estimator import get_time_estimator
+                estimator = get_time_estimator()
+                estimate = estimator.estimate_remaining_time(
+                    task_id=task_id,
+                    mode=task_info.mode.value if hasattr(task_info.mode, 'value') else str(task_info.mode),
+                    video_duration=task_info.video_duration,
+                    current_progress=progress / 100.0,
+                    platform=task_info.platform
+                )
+                time_estimate = estimate.message
+
+        self.task_queue.update_task_progress(task_id, progress, message, time_estimate)
 
     def _on_task_status_changed(self, task_id: str, status: str, message: str):
         """任务状态变更"""
@@ -611,6 +772,24 @@ class MainWindow(QMainWindow):
         """任务标题更新"""
         self.task_queue.update_task_title(task_id, title)
 
+    def _on_task_metadata_updated(self, task_id: str, duration: int, platform: str):
+        """任务元数据更新（视频时长、平台）"""
+        # 更新任务队列中的任务信息
+        task_info = self.task_queue.get_task_info(task_id)
+        if task_info:
+            task_info.video_duration = duration
+            task_info.platform = platform
+
+            # 显示预估时间
+            from ..services.time_estimator import get_time_estimator
+            estimator = get_time_estimator()
+            estimate = estimator.estimate_processing_time(
+                mode=task_info.mode.value if hasattr(task_info.mode, 'value') else str(task_info.mode),
+                video_duration=duration,
+                platform=platform
+            )
+            self.task_queue.update_task_time_estimate(task_id, estimate.message)
+
     def _add_worker(self, task_id: str, worker: ProcessingWorker) -> None:
         """线程安全地添加工作线程"""
         with QMutexLocker(self._workers_mutex):
@@ -637,6 +816,9 @@ class MainWindow(QMainWindow):
                     worker.terminate()
                     worker.wait()
             worker.deleteLater()
+
+        # 检查是否有等待中的任务
+        self._process_next_pending_task()
 
     def _on_task_cancelled(self, task_id: str):
         """任务取消"""
@@ -687,7 +869,13 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             logger.error(f"重新处理任务失败: {e}")
-            QMessageBox.warning(self, "错误", f"重新处理任务失败: {e}")
+
+    def _auto_refresh_history(self):
+        """自动刷新历史记录"""
+        try:
+            self.history_sidebar.refresh()
+        except Exception as e:
+            logger.debug(f"自动刷新历史记录失败: {e}")
 
     def _save_task_to_history(self, task_id: str, result: dict, failed: bool = False):
         """保存任务到历史记录"""
@@ -873,11 +1061,35 @@ class MainWindow(QMainWindow):
             if reply == QMessageBox.StandardButton.No:
                 return
 
+        # 清理资源
+        self._cleanup_resources()
+
         # 隐藏托盘图标
         self.tray_manager.hide()
 
         # 关闭应用
         QApplication.instance().quit()
+
+    def _cleanup_resources(self):
+        """清理资源"""
+        try:
+            # 停止所有工作线程
+            for task_id, worker in list(self.active_workers.items()):
+                try:
+                    if worker.isRunning():
+                        worker.cancel()
+                        worker.wait(2000)
+                except Exception as e:
+                    logger.error(f"停止工作线程失败: {e}")
+
+            # 清理模型缓存（如果配置启用）
+            if self.config_manager.config.performance.auto_clear_cache_on_exit:
+                from ..services.transcribe_service import clear_model_cache
+                clear_model_cache()
+                logger.info("模型缓存已清理")
+
+        except Exception as e:
+            logger.error(f"清理资源失败: {e}")
 
     def closeEvent(self, event):
         """关闭事件 - 根据设置决定是最小化到托盘还是退出"""

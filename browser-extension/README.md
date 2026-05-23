@@ -9,6 +9,7 @@
 - 🔔 **实时通知** - 提交成功/失败即时显示通知
 - 📋 **任务管理** - 扩展弹窗查看最近任务列表
 - 🔄 **自动检测** - 自动检测页面视频并显示处理按钮
+- ⚙️ **可配置** - 支持自定义 API 服务地址
 
 ## 快速开始
 
@@ -18,10 +19,18 @@
 
 ```bash
 cd "/Users/yiwenxu123/Projects/VideoMind Bridge"
+
+# 方式一：使用 main.py（推荐）
+python main.py --api
+
+# 方式二：指定端口
+python main.py --api --port 9000
+
+# 方式三：直接启动模块
 python -m src.api
 ```
 
-服务启动后会监听 `http://127.0.0.1:8787`
+服务启动后会监听 `http://127.0.0.1:8787`（默认端口）
 
 ### 2. 安装浏览器扩展
 
@@ -53,9 +62,38 @@ python -m src.api
 #### 方法二：扩展弹窗
 
 1. 点击浏览器工具栏的扩展图标
-2. 查看当前页面信息
-3. 点击"处理当前视频"按钮
-4. 查看最近任务列表
+2. 查看当前页面信息和服务状态
+3. 选择处理模式（完整处理/仅下载/仅转录）
+4. 点击"开始处理"按钮
+5. 查看最近任务列表和进度
+
+## 配置 API 地址
+
+如果 API 服务运行在非默认端口，可以通过浏览器控制台配置：
+
+```javascript
+// 打开浏览器控制台（F12），执行以下命令
+chrome.storage.local.set({
+  videomind_config: {
+    apiBaseUrl: 'http://127.0.0.1:9000'
+  }
+});
+
+// 验证配置
+chrome.storage.local.get(['videomind_config'], (result) => {
+  console.log('当前配置:', result);
+});
+```
+
+或者通过 background.js 的消息接口：
+
+```javascript
+// 在控制台执行
+chrome.runtime.sendMessage(
+  { type: 'SET_API_URL', url: 'http://127.0.0.1:9000' },
+  (response) => console.log('配置结果:', response)
+);
+```
 
 ## 工作流程
 
@@ -81,12 +119,12 @@ python -m src.api
 
 ```
 browser-extension/
-├── manifest.json      # 扩展配置文件
+├── manifest.json      # 扩展配置文件（Manifest V3）
 ├── content.js         # 内容脚本（注入视频页面）
 ├── content.css        # 内容脚本样式
 ├── popup.html         # 扩展弹窗页面
-├── popup.js           # 弹窗逻辑（可选）
-├── background.js      # 后台服务（可选）
+├── popup.js           # 弹窗逻辑
+├── background.js      # 后台服务（Service Worker）
 ├── icons/             # 扩展图标
 │   ├── icon16.png
 │   ├── icon48.png
@@ -103,14 +141,23 @@ browser-extension/
 | 抖音 | `*.douyin.com/video/*` | ✅ 支持 |
 | 小红书 | `*.xiaohongshu.com/explore/*` | ✅ 支持 |
 
+## 处理模式说明
+
+| 模式 | 说明 | 输出 |
+|------|------|------|
+| 完整处理 | 下载 → 转录 → AI摘要 → 导出 | 摘要文件 + 带播放器页面 |
+| 仅下载 | 只下载视频和音频 | 视频文件 + 音频文件 |
+| 仅转录 | 下载音频 → 转录 | 字幕文件（SRT/TXT） |
+
 ## 常见问题
 
 ### Q: 扩展显示"无法连接到服务"
 
 **A:** 请确保：
-1. 已运行 `python -m src.api` 启动 API 服务
-2. 服务监听在 `127.0.0.1:8787`
+1. 已运行 `python main.py --api` 启动 API 服务
+2. 服务监听在正确的端口（默认 8787）
 3. 浏览器没有阻止本地连接
+4. 检查防火墙设置
 
 ### Q: 视频页面没有显示处理按钮
 
@@ -118,6 +165,7 @@ browser-extension/
 1. 刷新页面等待 1-2 秒
 2. 检查 URL 是否在支持列表中
 3. 查看浏览器控制台是否有错误
+4. 确认扩展已正确加载
 
 ### Q: 提交任务后没有反应
 
@@ -125,6 +173,20 @@ browser-extension/
 1. 检查 API 服务是否正常运行
 2. 查看浏览器控制台的网络请求
 3. 确认视频链接格式正确
+4. 检查 API 服务日志
+
+### Q: 如何修改 API 服务端口
+
+**A:**
+1. 启动服务时指定端口：`python main.py --api --port 9000`
+2. 在扩展中配置新地址（见上方"配置 API 地址"）
+
+### Q: AI 摘要功能显示"需要 AI Key"
+
+**A:**
+1. 在 VideoMind Bridge GUI 中配置 AI API Key
+2. 或设置环境变量 `DEEPSEEK_API_KEY`
+3. 配置后重启 API 服务
 
 ## 开发计划
 
@@ -133,6 +195,7 @@ browser-extension/
 - [ ] 支持更多视频平台
 - [ ] 添加批量处理功能
 - [ ] 添加任务进度实时显示
+- [ ] 添加扩展内设置页面
 
 ## 技术细节
 
@@ -154,13 +217,28 @@ fetch('http://127.0.0.1:8787/api/v1/tasks', {
     targets: ['local', 'obsidian']
   })
 })
+
+// 获取任务列表
+fetch('http://127.0.0.1:8787/api/v1/tasks')
+
+// WebSocket 进度订阅
+const ws = new WebSocket('ws://127.0.0.1:8787/ws');
+ws.send(JSON.stringify({ action: 'subscribe', task_id: 'xxx' }));
 ```
 
 ### 安全说明
 
-- 扩展只访问 `127.0.0.1:8787`（本地服务）
+- 扩展只访问本地服务地址（`127.0.0.1`/`localhost`）
 - 不收集任何用户数据
 - 不修改视频页面核心功能
+- API Key 存储在本地密钥环中，不上传
+
+### Manifest V3 说明
+
+本扩展使用 Manifest V3 规范：
+- 使用 Service Worker 替代 Background Page
+- 使用 `chrome.storage.local` 存储配置
+- 权限最小化原则
 
 ## 许可证
 

@@ -10,6 +10,9 @@ from PySide6.QtCore import Qt
 
 from ...services.prompt_template import get_prompt_template_manager, TemplateStyle
 from ...services.config_manager import get_config_manager
+from ...utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class AIConfigWidget(QGroupBox):
@@ -211,14 +214,14 @@ class AIConfigWidget(QGroupBox):
                     break
 
         except Exception as e:
-            print(f"加载模板失败: {e}")
+            logger.error(f"加载模板失败: {e}")
             # 加载失败时添加默认选项
             self.template_combo.addItem("默认风格", "default")
 
     def _on_template_changed(self, index: int):
         """模板选择变更"""
         template_id = self.template_combo.currentData()
-        print(f"选择模板: {template_id}")
+        logger.debug(f"选择模板: {template_id}")
 
     def _on_test_connection(self):
         """测试 API 连接"""
@@ -256,7 +259,7 @@ class AIConfigWidget(QGroupBox):
                 self.connection_status.setStyleSheet("color: #4CAF50; font-size: 12px;")
                 # 测试成功后，保存 API Key 到密钥环
                 if self.save_api_key(api_key):
-                    print("API Key 已保存到系统密钥环")
+                    logger.info("API Key 已保存到系统密钥环")
             else:
                 self.connection_status.setText(f"❌ {message}")
                 self.connection_status.setStyleSheet("color: #f44336; font-size: 12px;")

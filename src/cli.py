@@ -13,40 +13,41 @@ VideoMind Bridge - CLI 入口
 """
 
 import argparse
-import os
+import json
 import sys
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
-from rich.text import Text
 
 # 处理导入路径（支持 python -m src.cli 和直接运行）
 try:
     # 作为模块运行: python -m src.cli
-    from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext
+    from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext, Highlight
     from src.services.download_service import DownloadService
     from src.services.transcribe_service import TranscribeService
-    from src.services.ai_service import AIService, Highlight
+    from src.services.ai_service import AIService
     from src.services.export_orchestrator import ExportOrchestrator
+    from src.utils.media_utils import generate_srt
 except ImportError:
     # 直接运行: python src/cli.py
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext
+    from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext, Highlight
     from src.services.download_service import DownloadService
     from src.services.transcribe_service import TranscribeService
-    from src.services.ai_service import AIService, Highlight
+    from src.services.ai_service import AIService
     from src.services.export_orchestrator import ExportOrchestrator
+    from src.utils.media_utils import generate_srt
 
 
 console = Console()
 
 
-def parse_args():
+def parse_args(argv: Optional[List[str]] = None):
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
         description="VideoMind Bridge - 视频知识处理工具",
@@ -70,7 +71,7 @@ def parse_args():
         """
     )
 
-    parser.add_argument("url", help="视频链接")
+    parser.add_argument("url", nargs="?", help="视频链接")
     parser.add_argument(
         "--mode",
         choices=["full", "download", "transcribe"],
@@ -124,8 +125,252 @@ def parse_args():
         choices=["best", "worst", "1080p", "720p", "480p"],
         help="视频质量 (默认: best，可选: worst/1080p/720p/480p)"
     )
+    parser.add_argument(
+        "--stdin",
+        action="store_true",
+        default=False,
+        help="从 stdin 读取 URL（每行一个），支持管道"
+    )
+    parser.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        default=False,
+        help="以 JSON 格式输出结果（适合 Agent/脚本调用）"
+    )
+    parser.add_argument(
+        "--output-file",
+        type=str,
+        default=None,
+        help="将结果写入文件而非 stdout"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=int,
+        default=600,
+        help="整体超时时间（秒，默认 600）"
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        default=False,
+        help="静默模式，仅输出最终结果"
+    )
+    parser.add_argument(
+        "--cookie-browser",
+        default=None,
+        choices=["chrome", "safari", "firefox", "edge", "brave"],
+        help="从浏览器读取 cookies（国内平台如抖音/小红书需要）"
+    )
 
-    return parser.parse_args()
+    # === v2 新参数 ===
+    parser.add_argument(
+        "--prescreen", "-p",
+        action="store_true",
+        default=False,
+        help="启用内容预筛 (评估内容价值后决策)"
+    )
+    parser.add_argument(
+        "--smart", "-s",
+        action="store_true",
+        default=False,
+        help="智能模式: 预筛 + 成本感知提取 (等价于 --prescreen --cost-tier free)"
+    )
+    parser.add_argument(
+        "--prescreen-only",
+        action="store_true",
+        default=False,
+        help="仅预筛, 不提取内容"
+    )
+    parser.add_argument(
+        "--cost-tier",
+        default=None,
+        choices=["free", "cheap", "paid", "expensive", "premium"],
+        help="最大可接受提取成本等级 (默认: 不限)"
+    )
+    parser.add_argument(
+        "--list-extractors",
+        action="store_true",
+        default=False,
+        help="列出可用提取器及其状态"
+    )
+
+    return parser.parse_args(argv)
+
+
+def run_v2_extraction(args) -> int:
+    """运行 v2 提取引擎 (prescreen/extract/router)"""
+    from src.core import ContentRouter, HermesFormatter, Prescreener
+    from src.core.models import ContentGrade, CostTier
+
+    router = ContentRouter()
+    prescreener = Prescreener(router)
+    url = args.url
+    use_json = args.json_output
+
+    # --list-extractors 模式
+    if args.list_extractors:
+        extractors = router.list_extractors()
+        if use_json:
+            print(json.dumps(extractors, ensure_ascii=False, indent=2))
+        else:
+            for name, avail in extractors.items():
+                icon = "[green]✓[/green]" if avail else "[red]✗[/red]"
+                console.print(f"  {icon} {name}: {'可用' if avail else '不可用'}")
+        return 0
+
+    if not url:
+        console.print("[red]错误: 需要提供 URL[/red]")
+        return 1
+
+    # 解析成本等级
+    cost_map = {
+        "free": CostTier.FREE, "cheap": CostTier.CHEAP,
+        "paid": CostTier.PAID, "expensive": CostTier.EXPENSIVE,
+        "premium": CostTier.PREMIUM,
+    }
+    max_cost = cost_map.get(args.cost_tier) if args.cost_tier else None
+
+    # --prescreen-only: 仅预筛 (快速模式, 无网络)
+    if args.prescreen_only:
+        result = prescreener.prescreen_quick(url)
+        if use_json:
+            print(json.dumps({
+                "url": result.url,
+                "platform": result.platform,
+                "grade": result.grade.value,
+                "score": result.score,
+                "reasons": result.reasons,
+                "note": "快速预筛 — 执行 --prescreen 获取完整评分",
+            }, ensure_ascii=False, indent=2))
+        else:
+            grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
+            color = grade_color.get(result.grade.value, "white")
+            console.print(f"  [bold]预筛结果:[/bold] [{color}]{result.grade.value} 级[/{color}]")
+            console.print(f"  平台: {result.platform}")
+            for reason in result.reasons:
+                console.print(f"  [dim]• {reason}[/dim]")
+            console.print(f"\n  [dim]提示: 执行 \"--smart\" 获取完整评分+提取[/dim]")
+        return 0
+
+    # --prescreen 或 --smart: 先提取获取元信息, 再用元信息评分
+    prescreen_meta = None
+    if args.prescreen or args.smart:
+        if not use_json:
+            console.print("[cyan]获取元信息...[/cyan]")
+
+        # --smart 模式: 先用最小成本获取元信息做预筛决策
+        if args.smart:
+            quick_result = router.extract(url, max_cost=CostTier.FREE)
+            if quick_result.success and quick_result.title:
+                prescreen_result = prescreener.prescreen(
+                    url,
+                    title=quick_result.title,
+                    duration_seconds=quick_result.duration_seconds,
+                )
+            else:
+                prescreen_result = prescreener.prescreen_quick(url)
+
+            is_worth = prescreener.is_extraction_worthwhile(prescreen_result.grade, ContentGrade.C)
+            prescreen_meta = {
+                "url": prescreen_result.url,
+                "platform": prescreen_result.platform,
+                "title": prescreen_result.title,
+                "duration_seconds": prescreen_result.duration_seconds,
+                "grade": prescreen_result.grade.value,
+                "score": prescreen_result.score,
+                "reasons": prescreen_result.reasons,
+                "extraction_recommended": is_worth,
+                "extraction_skipped": False,
+            }
+
+            if not use_json:
+                grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
+                color = grade_color.get(prescreen_result.grade.value, "white")
+                console.print(f"  [bold]预筛:[/bold] [{color}]{prescreen_result.grade.value} 级 ({prescreen_result.score:.0f}/100)[/{color}]")
+                for reason in prescreen_result.reasons[:5]:
+                    console.print(f"  [dim]• {reason}[/dim]")
+
+            # 跳过不通过视频
+            if not is_worth:
+                prescreen_meta["extraction_skipped"] = True
+                prescreen_meta["skip_reason"] = f"预筛 {prescreen_result.grade.value} 级, 低于提取阈值 C 级"
+                if use_json:
+                    print(json.dumps(prescreen_meta, ensure_ascii=False, indent=2))
+                else:
+                    console.print(f"[yellow]⏭ 跳过提取: {prescreen_result.grade.value} 级低于 C 级阈值[/yellow]")
+                    console.print(f"  [dim]{prescreen_meta['skip_reason']}[/dim]")
+                return 0
+
+            # 根据等级推荐成本
+            recommended = prescreener.recommend_cost_tier(prescreen_result.grade)
+            if max_cost is None:
+                max_cost = cost_map.get(recommended, CostTier.FREE)
+                if not use_json:
+                    console.print(f"  推荐成本: [cyan]{recommended}[/cyan]")
+        else:
+            # --prescreen 模式: 提取一次, 用提取结果做预筛评分
+            max_cost_info = max_cost or CostTier.FREE
+            prescreen_extract = router.extract(url, max_cost=max_cost_info)
+            prescreen_result = prescreener.prescreen(
+                url,
+                title=prescreen_extract.title if prescreen_extract.success else "",
+                duration_seconds=prescreen_extract.duration_seconds if prescreen_extract.success else 0.0,
+            )
+
+            prescreen_meta = {
+                "url": prescreen_result.url,
+                "platform": prescreen_result.platform,
+                "title": prescreen_result.title,
+                "duration_seconds": prescreen_result.duration_seconds,
+                "grade": prescreen_result.grade.value,
+                "score": prescreen_result.score,
+                "reasons": prescreen_result.reasons,
+                "extraction_recommended": True,
+                "extract_result": prescreen_extract,  # 复用提取结果, 避免二次提取
+            }
+
+            if not use_json:
+                grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
+                color = grade_color.get(prescreen_result.grade.value, "white")
+                console.print(f"  [bold]预筛:[/bold] [{color}]{prescreen_result.grade.value} 级 ({prescreen_result.score:.0f}/100)[/{color}]")
+                for reason in prescreen_result.reasons[:5]:
+                    console.print(f"  [dim]• {reason}[/dim]")
+
+    # 提取内容 (复用 --prescreen 的结果, 避免重复提取)
+    if prescreen_meta and "extract_result" in prescreen_meta:
+        result = prescreen_meta.pop("extract_result")
+    else:
+        if not use_json:
+            console.print(f"\n[cyan]提取中 ({'成本上限: ' + max_cost.value if max_cost else '无限'} )...[/cyan]")
+        result = router.extract(url, max_cost=max_cost)
+
+    # 输出
+    if use_json:
+        output = HermesFormatter.format_extract_result_full(result)
+        if prescreen_meta:
+            output["prescreen"] = prescreen_meta
+        print(json.dumps(output, ensure_ascii=False, indent=2))
+    else:
+        if result.success:
+            grade_info = ""
+            if prescreen_meta:
+                grade_info = f" [{'SABC'.index(prescreen_meta.get('grade','C'))}]"
+            console.print(f"[green]✓ 提取成功[/green]{grade_info} ({result.source})")
+            console.print(f"  标题: {result.title}")
+            console.print(f"  平台: {result.platform}")
+            console.print(f"  成本: {result.cost_tier.value}")
+            if result.language:
+                console.print(f"  语言: {result.language}")
+            if result.duration_seconds:
+                console.print(f"  时长: {format_duration(result.duration_seconds)}")
+            preview = result.content[:200] + "..." if len(result.content) > 200 else result.content
+            console.print(f"\n[dim]{preview}[/dim]")
+        else:
+            console.print(f"[red]✗ 提取失败: {result.error}[/red]")
+            return 1
+
+    return 0
 
 
 def parse_targets(targets_str: str) -> List[ExportTarget]:
@@ -155,24 +400,145 @@ def format_duration(seconds: float) -> str:
         return f"{seconds/3600:.1f}小时"
 
 
+def _build_json_result(
+    success: bool,
+    url: str,
+    mode: str,
+    metadata: Optional[VideoMetadata] = None,
+    video_path: Optional[Path] = None,
+    audio_path: Optional[Path] = None,
+    transcript_result=None,
+    summary_result=None,
+    highlights: Optional[List[Highlight]] = None,
+    export_results: Optional[list] = None,
+    elapsed: float = 0.0,
+    error: Optional[str] = None,
+    error_step: Optional[str] = None,
+) -> Dict[str, Any]:
+    """构建 JSON 输出结果"""
+    result: Dict[str, Any] = {
+        "success": success,
+        "url": url,
+        "mode": mode,
+        "elapsed_seconds": round(elapsed, 2),
+    }
+
+    if error:
+        result["error"] = error
+        result["error_step"] = error_step
+
+    if metadata:
+        result["metadata"] = {
+            "title": metadata.title,
+            "author": metadata.author,
+            "duration": metadata.duration,
+            "platform": metadata.platform,
+            "url": metadata.url,
+            "thumbnail_url": metadata.thumbnail_url,
+            "description": metadata.description,
+        }
+
+    if video_path:
+        result["video_path"] = str(video_path)
+    if audio_path:
+        result["audio_path"] = str(audio_path)
+
+    if transcript_result:
+        result["transcript"] = {
+            "language": transcript_result.language,
+            "language_probability": round(transcript_result.language_probability, 4),
+            "segments_count": len(transcript_result.segments),
+            "full_text": transcript_result.full_text,
+            "formatted_text": transcript_result.formatted_text,
+            "segments": [
+                {
+                    "start": round(s.start, 2),
+                    "end": round(s.end, 2),
+                    "text": s.text,
+                    "confidence": round(s.confidence, 4) if s.confidence else None,
+                }
+                for s in transcript_result.segments
+            ],
+        }
+
+    if summary_result:
+        result["summary"] = {
+            "text": summary_result.summary,
+            "highlights": [
+                {"time": h.time, "seconds": h.seconds, "content": h.content}
+                for h in (highlights or [])
+            ],
+        }
+
+    if export_results:
+        result["exports"] = []
+        for r in export_results:
+            export_info: Dict[str, Any] = {
+                "target": r.target.value,
+                "success": r.success,
+            }
+            if r.output_path:
+                export_info["output_path"] = str(r.output_path)
+            if r.error_msg:
+                export_info["error"] = r.error_msg
+            if r.metadata.get("files"):
+                export_info["files"] = r.metadata["files"]
+            result["exports"].append(export_info)
+
+    return result
+
+
 def main():
     """主入口"""
     args = parse_args()
     start_time = time.time()
 
-    # 显示欢迎信息
-    video_status = "保留视频" if args.keep_video else "仅音频"
-    console.print(Panel.fit(
-        "[bold cyan]VideoMind Bridge[/bold cyan] - 视频知识处理工具\n"
-        f"模式: [green]{args.mode}[/green] | "
-        f"模型: [green]{args.model}[/green] | "
-        f"目标: [green]{args.targets}[/green] | "
-        f"视频: [green]{video_status}[/green]",
-        title="🎬",
-        border_style="cyan"
-    ))
+    # v2 模式: prescreen / smart / prescreen-only / cost-tier / list-extractors
+    if args.prescreen or args.smart or args.prescreen_only or args.cost_tier or args.list_extractors:
+        return run_v2_extraction(args)
 
-    # 解析参数
+    # stdin 模式：每行一个 URL，JSONL 批量输出
+    if args.stdin:
+        urls = [line.strip() for line in sys.stdin if line.strip()]
+        has_error = False
+        for url in urls:
+            import copy
+            a = copy.copy(args)
+            a.url = url
+            a.json_output = True
+            a.quiet = True
+            if _process_single(a, time.time()) != 0:
+                has_error = True
+        return 1 if has_error else 0
+
+    return _process_single(args, start_time)
+
+
+def _process_single(args, start_time: float) -> int:
+    """处理单个视频链接"""
+    use_json = args.json_output
+    use_quiet = args.quiet or use_json
+
+    out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None
+    def _write_json(data: dict):
+        text = json.dumps(data, ensure_ascii=False, indent=2)
+        if out_file:
+            out_file.write(text + "\n")
+        else:
+            print(text)
+
+    if not use_quiet:
+        video_status = "保留视频" if args.keep_video else "仅音频"
+        console.print(Panel.fit(
+            "[bold cyan]VideoMind Bridge[/bold cyan] - 视频知识处理工具\n"
+            f"模式: [green]{args.mode}[/green] | "
+            f"模型: [green]{args.model}[/green] | "
+            f"目标: [green]{args.targets}[/green] | "
+            f"视频: [green]{video_status}[/green]",
+            title="🎬",
+            border_style="cyan"
+        ))
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -183,7 +549,6 @@ def main():
         "transcribe": ProcessingMode.TRANSCRIBE_ONLY,
     }[args.mode]
 
-    # 初始化服务
     download_service = DownloadService(output_dir)
     transcribe_service = TranscribeService(model_size=args.model)
     ai_service = None
@@ -191,120 +556,139 @@ def main():
         try:
             ai_service = AIService()
         except ValueError as e:
-            console.print(f"[yellow]警告: {e}[/yellow]")
-            console.print("[yellow]将使用 mock 模式继续...[/yellow]")
+            if not use_quiet:
+                console.print(f"[yellow]警告: {e}[/yellow]")
+                console.print("[yellow]将使用 mock 模式继续...[/yellow]")
             ai_service = AIService(mock=True)
     elif args.mock:
         ai_service = AIService(mock=True)
 
-    # 存储结果供后续使用
     video_path: Optional[Path] = None
     audio_path: Optional[Path] = None
     metadata: Optional[VideoMetadata] = None
     transcript_result = None
     summary_result = None
     highlights: List[Highlight] = []
+    export_results_list: list = []
 
-    # 创建进度显示
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(),
-        TaskProgressColumn(),
-        console=console,
-    ) as progress:
+    if not use_quiet:
+        progress_ctx = Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console,
+        )
+    else:
+        progress_ctx = _DummyProgress()
 
-        # ========== 步骤 1: 下载 ==========
-        download_task = progress.add_task("[cyan]下载视频...", total=100)
-
-        def download_callback(status: str, percent: float):
-            progress.update(download_task, description=f"[cyan]{status}", completed=percent)
-
+    with progress_ctx:
         try:
             result = download_service.download(
                 args.url,
                 download_video=args.keep_video,
                 video_quality=args.video_quality,
-                progress_callback=download_callback
+                cookies_from_browser=args.cookie_browser,
             )
             video_path = result.video_path
             audio_path = result.audio_path
             metadata = result.metadata
 
-            progress.update(download_task, description="[green]✓ 下载完成", completed=100)
-            console.print(f"  [dim]标题: {metadata.title}[/dim]")
-            console.print(f"  [dim]UP主: {metadata.author}[/dim]")
-            console.print(f"  [dim]时长: {metadata.duration//60}分{metadata.duration%60}秒[/dim]")
-            if video_path:
-                console.print(f"  [dim]视频: {video_path.name}[/dim]")
-            console.print(f"  [dim]音频: {audio_path.name}[/dim]")
+            if not use_quiet:
+                console.print(f"  [dim]标题: {metadata.title}[/dim]")
+                console.print(f"  [dim]UP主: {metadata.author}[/dim]")
+                console.print(f"  [dim]时长: {metadata.duration//60}分{metadata.duration%60}秒[/dim]")
+                if video_path:
+                    console.print(f"  [dim]视频: {video_path.name}[/dim]")
+                console.print(f"  [dim]音频: {audio_path.name}[/dim]")
         except Exception as e:
-            console.print(f"[red]✗ 下载失败: {e}[/red]")
+            if use_json:
+                _write_json(_build_json_result(
+                    success=False, url=args.url, mode=args.mode,
+                    error=str(e), error_step="download",
+                    elapsed=time.time() - start_time,
+                ))
+            else:
+                console.print(f"[red]✗ 下载失败: {e}[/red]")
             return 1
 
-        # 如果是仅下载模式，到此结束
         if processing_mode == ProcessingMode.DOWNLOAD_ONLY:
-            console.print(f"\n[green]✓ 下载完成![/green]")
-            if video_path:
-                console.print(f"  [dim]视频: {video_path}[/dim]")
-            console.print(f"  [dim]音频: {audio_path}[/dim]")
+            elapsed = time.time() - start_time
+            if use_json:
+                _write_json(_build_json_result(
+                    success=True, url=args.url, mode=args.mode,
+                    metadata=metadata, video_path=video_path, audio_path=audio_path,
+                    elapsed=elapsed,
+                ))
+            else:
+                console.print(f"\n[green]✓ 下载完成![/green]")
+                if video_path:
+                    console.print(f"  [dim]视频: {video_path}[/dim]")
+                console.print(f"  [dim]音频: {audio_path}[/dim]")
             return 0
-
-        # ========== 步骤 2: 转录 ==========
-        transcribe_task = progress.add_task("[cyan]语音转录...", total=100)
-
-        def transcribe_callback(status: str, percent: float):
-            progress.update(transcribe_task, description=f"[cyan]{status}", completed=percent)
 
         try:
             transcript_result = transcribe_service.transcribe(
                 audio_path,
                 language="zh",
-                progress_callback=transcribe_callback
             )
 
-            progress.update(transcribe_task, description="[green]✓ 转录完成", completed=100)
-            console.print(f"  [dim]语言: {transcript_result.language} ({transcript_result.language_probability:.0%})[/dim]")
-            console.print(f"  [dim]片段: {len(transcript_result.segments)} 个[/dim]")
+            if not use_quiet:
+                console.print(f"  [dim]语言: {transcript_result.language} ({transcript_result.language_probability:.0%})[/dim]")
+                console.print(f"  [dim]片段: {len(transcript_result.segments)} 个[/dim]")
         except Exception as e:
-            console.print(f"[red]✗ 转录失败: {e}[/red]")
+            if use_json:
+                _write_json(_build_json_result(
+                    success=False, url=args.url, mode=args.mode,
+                    metadata=metadata, video_path=video_path, audio_path=audio_path,
+                    error=str(e), error_step="transcribe",
+                    elapsed=time.time() - start_time,
+                ))
+            else:
+                console.print(f"[red]✗ 转录失败: {e}[/red]")
             return 1
 
-        # 如果是仅转录模式，保存 SRT 并结束
         if processing_mode == ProcessingMode.TRANSCRIBE_ONLY:
             srt_path = audio_path.with_suffix(".srt")
             srt_content = generate_srt(transcript_result.segments)
             srt_path.write_text(srt_content, encoding="utf-8")
-            console.print(f"\n[green]✓ 转录完成![/green]")
-            console.print(f"  [dim]SRT: {srt_path}[/dim]")
+            elapsed = time.time() - start_time
+            if use_json:
+                json_result = _build_json_result(
+                    success=True, url=args.url, mode=args.mode,
+                    metadata=metadata, audio_path=audio_path,
+                    transcript_result=transcript_result,
+                    elapsed=elapsed,
+                )
+                json_result["transcript"]["srt_path"] = str(srt_path)
+                _write_json(json_result)
+            else:
+                console.print(f"\n[green]✓ 转录完成![/green]")
+                console.print(f"  [dim]SRT: {srt_path}[/dim]")
             return 0
 
-        # ========== 步骤 3: AI 摘要 ==========
         if ai_service:
-            ai_task = progress.add_task("[cyan]AI 生成摘要...", total=100)
-            progress.update(ai_task, completed=50)
-
             try:
                 summary_result = ai_service.summarize(
                     transcript=transcript_result.full_text,
                     title=metadata.title
                 )
                 highlights = summary_result.highlights
-                progress.update(ai_task, description="[green]✓ AI 摘要完成", completed=100)
-                console.print(f"  [dim]总结: {summary_result.summary[:50]}...[/dim]")
-                console.print(f"  [dim]时间轴: {len(highlights)} 个要点[/dim]")
+                if not use_quiet:
+                    console.print(f"  [dim]总结: {summary_result.summary[:50]}...[/dim]")
+                    console.print(f"  [dim]时间轴: {len(highlights)} 个要点[/dim]")
             except Exception as e:
-                console.print(f"[red]✗ AI 摘要失败: {e}[/red]")
+                if not use_quiet:
+                    console.print(f"[red]✗ AI 摘要失败: {e}[/red]")
                 summary_result = None
                 highlights = []
         else:
             summary_result = None
             highlights = []
 
-    # ========== 步骤 4: 导出 ==========
-    console.print("\n[cyan]导出到目标...[/cyan]")
+    if not use_quiet:
+        console.print("\n[cyan]导出到目标...[/cyan]")
 
-    # 构建导出上下文
     export_context = ExportContext(
         task_id=uuid4(),
         video_metadata=metadata,
@@ -318,72 +702,73 @@ def main():
         }
     )
 
-    # 配置
     export_config = {
         "local_output_path": output_dir,
         "organize_by": "date",
         "obsidian_vault_path": Path(args.obsidian_vault) if args.obsidian_vault else None,
     }
 
-    # 执行导出
     orchestrator = ExportOrchestrator(targets=targets, config=export_config)
-    export_results = orchestrator.export_all(export_context)
+    export_results_list = orchestrator.export_all(export_context)
 
-    # 显示导出结果
-    for result in export_results:
-        if result.success:
-            console.print(f"[green]✓ {result.target.value}:[/green] {result.output_path}")
-            if result.metadata.get("files"):
-                console.print(f"  [dim]文件: {', '.join(result.metadata['files'])}[/dim]")
-        else:
-            console.print(f"[red]✗ {result.target.value}:[/red] {result.error_msg}")
+    if not use_quiet:
+        for result in export_results_list:
+            if result.success:
+                console.print(f"[green]✓ {result.target.value}:[/green] {result.output_path}")
+                if result.metadata.get("files"):
+                    console.print(f"  [dim]文件: {', '.join(result.metadata['files'])}[/dim]")
+            else:
+                console.print(f"[red]✗ {result.target.value}:[/red] {result.error_msg}")
 
-    # 生成 HTML 播放器（如果保留视频）
     if video_path and highlights:
         try:
             from src.exporters.html_player_exporter import HTMLPlayerExporter
             html_exporter = HTMLPlayerExporter()
             html_result = html_exporter.export(export_context)
-            if html_result.success:
+            if html_result.success and not use_quiet:
                 console.print(f"[green]✓ HTML播放器:[/green] {html_result.output_path}")
+            if html_result.success:
+                export_results_list.append(html_result)
         except Exception as e:
-            console.print(f"[yellow]⚠ HTML播放器生成失败: {e}[/yellow]")
+            if not use_quiet:
+                console.print(f"[yellow]⚠ HTML播放器生成失败: {e}[/yellow]")
 
-    # ========== 完成 ==========
     elapsed = time.time() - start_time
-    console.print(f"\n[bold green]✓ 完成![/bold green] 总耗时: {format_duration(elapsed)}")
 
-    # 显示时间轴预览
-    if highlights:
-        console.print(f"\n[cyan]关键时间轴预览:[/cyan]")
-        for i, h in enumerate(highlights[:5], 1):
-            console.print(f"  [{h.time}] {h.content[:40]}...")
-        if len(highlights) > 5:
-            console.print(f"  ... 还有 {len(highlights) - 5} 个要点")
+    if use_json:
+        _write_json(_build_json_result(
+            success=True, url=args.url, mode=args.mode,
+            metadata=metadata, video_path=video_path, audio_path=audio_path,
+            transcript_result=transcript_result,
+            summary_result=summary_result, highlights=highlights,
+            export_results=export_results_list,
+            elapsed=elapsed,
+        ))
+    else:
+        console.print(f"\n[bold green]✓ 完成![/bold green] 总耗时: {format_duration(elapsed)}")
+        if highlights:
+            console.print(f"\n[cyan]关键时间轴预览:[/cyan]")
+            for i, h in enumerate(highlights[:5], 1):
+                console.print(f"  [{h.time}] {h.content[:40]}...")
+            if len(highlights) > 5:
+                console.print(f"  ... 还有 {len(highlights) - 5} 个要点")
 
+    if out_file:
+        out_file.close()
     return 0
 
 
-def generate_srt(segments: list) -> str:
-    """生成 SRT 字幕格式"""
-    lines = []
-    for i, seg in enumerate(segments, 1):
-        start = format_srt_time(seg.start)
-        end = format_srt_time(seg.end)
-        lines.append(f"{i}")
-        lines.append(f"{start} --> {end}")
-        lines.append(seg.text)
-        lines.append("")
-    return "\n".join(lines)
+class _DummyProgress:
+    """静默模式下的空进度条替代"""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
 
-def format_srt_time(seconds: float) -> str:
-    """格式化为 SRT 时间格式"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds % 1) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
 
 
 if __name__ == "__main__":

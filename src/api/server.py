@@ -9,7 +9,6 @@ from typing import Dict, List, Optional, Set
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
-from fastapi.middleware.cors import CORSMiddleware
 
 from ..models.task import ProcessingMode, ExportTarget, TaskStatus, VideoTask
 from ..utils import get_logger
@@ -134,14 +133,37 @@ class APIServer:
             lifespan=lifespan,
         )
 
-        # 添加CORS中间件
-        app.add_middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+        allowed_origins = [
+            "chrome-extension://",
+            "moz-extension://",
+            "http://127.0.0.1",
+            "http://localhost",
+            "http://[::1]",
+        ]
+
+        @app.middleware("http")
+        async def cors_middleware(request, call_next):
+            origin = request.headers.get("origin", "")
+            
+            is_allowed = (
+                not origin or
+                any(origin.startswith(allowed) for allowed in allowed_origins)
+            )
+            
+            response = await call_next(request)
+            
+            if is_allowed and origin:
+                response.headers["Access-Control-Allow-Origin"] = origin
+                response.headers["Access-Control-Allow-Credentials"] = "true"
+                response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
+                response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+            
+            return response
+
+        @app.options("/{path:path}")
+        async def options_handler(path: str):
+            from fastapi.responses import Response
+            return Response(status_code=200)
 
         # 注册路由
         self._register_routes(app)
@@ -185,11 +207,13 @@ class APIServer:
         @app.get("/api/v1/config", response_model=ConfigResponse)
         async def get_config():
             """获取系统配置"""
+            ai_enabled = not self.task_manager._ai_service.mock
             return ConfigResponse(
                 default_output_dir=str(self.task_manager.output_dir),
                 supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu"],
                 supported_ai_providers=["deepseek", "openai", "anthropic"],
                 supported_export_targets=["local", "obsidian", "notion"],
+                ai_enabled=ai_enabled,
             )
 
         # 任务管理API
@@ -203,6 +227,7 @@ class APIServer:
                     targets=set(request.targets),
                     ai_provider=request.ai_provider,
                     ai_prompt=request.ai_prompt,
+                    cookies_from_browser=request.cookies_from_browser,
                 )
 
                 # 注册进度回调
@@ -277,6 +302,26 @@ class APIServer:
         @app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket连接，用于实时接收任务进度更新"""
+            origin = websocket.headers.get("origin", "")
+            
+            allowed_origins = [
+                "chrome-extension://",
+                "moz-extension://",
+                "http://127.0.0.1",
+                "http://localhost",
+                "http://[::1]",
+            ]
+            
+            is_allowed = (
+                not origin or
+                any(origin.startswith(allowed) for allowed in allowed_origins)
+            )
+            
+            if not is_allowed:
+                logger.warning(f"WebSocket 连接被拒绝，Origin: {origin}")
+                await websocket.close(code=1008)
+                return
+            
             await self.connection_manager.connect(websocket)
             try:
                 while True:
@@ -332,10 +377,10 @@ class APIServer:
             platform=task.metadata.platform if task.metadata else None,
             created_at=task.created_at,
             updated_at=task.updated_at,
-            completed_at=None,  # TODO: 添加完成时间
+            completed_at=task.completed_at,
             error_msg=task.error_msg,
             summary=task.ai_summary,
-            output_files=[],  # TODO: 添加输出文件
+            output_files=[str(p) for p in task.output_files],
         )
 
     async def start(self) -> None:

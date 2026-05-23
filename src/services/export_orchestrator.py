@@ -7,7 +7,11 @@ from typing import List
 from ..exporters.base import BaseExporter
 from ..exporters.local_exporter import LocalExporter
 from ..exporters.obsidian_exporter import ObsidianExporter
+from ..exporters.webhook_exporter import WebhookExporter
 from ..models.task import ExportContext, ExportResult, ExportTarget
+from ..utils import get_logger
+
+logger = get_logger(__name__)
 
 
 class ExportOrchestrator:
@@ -43,6 +47,21 @@ class ExportOrchestrator:
                     subfolder=self.config.get("obsidian_subfolder", "Inbox/Videos")
                 )
                 exporters.append(exporter)
+
+            elif target == ExportTarget.WEBHOOK:
+                webhook_config = self.config.get("webhook", {})
+                if webhook_config.get("enabled") and webhook_config.get("url"):
+                    exporter = WebhookExporter(
+                        url=webhook_config["url"],
+                        headers=webhook_config.get("headers", {}),
+                        timeout=webhook_config.get("timeout", 30),
+                        max_retries=webhook_config.get("max_retries", 3),
+                        retry_delay=webhook_config.get("retry_delay", 1.0),
+                        events=webhook_config.get("events", ["on_completed"])
+                    )
+                    exporters.append(exporter)
+                else:
+                    logger.warning("Webhook 导出目标已选择但未启用或未配置 URL")
 
             elif target == ExportTarget.NOTION:
                 # NotionExporter 留空，暂不实现
@@ -91,14 +110,12 @@ class ExportOrchestrator:
     def _safe_export(self, exporter: BaseExporter, context: ExportContext) -> ExportResult:
         """安全执行导出（捕获异常）"""
         try:
-            print(f"DEBUG: Starting export with {exporter.name}")
+            logger.debug(f"Starting export with {exporter.name}")
             result = exporter.export(context)
-            print(f"DEBUG: Export result: success={result.success}, error={result.error_msg}")
+            logger.debug(f"Export result: success={result.success}, error={result.error_msg}")
             return result
         except Exception as e:
-            print(f"DEBUG: Export exception: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error(f"Export exception: {e}", exc_info=True)
             raise
 
     def _get_target_for_exporter(self, exporter: BaseExporter) -> ExportTarget:
@@ -107,6 +124,8 @@ class ExportOrchestrator:
             return ExportTarget.LOCAL
         elif isinstance(exporter, ObsidianExporter):
             return ExportTarget.OBSIDIAN
+        elif isinstance(exporter, WebhookExporter):
+            return ExportTarget.WEBHOOK
         return ExportTarget.LOCAL
 
 

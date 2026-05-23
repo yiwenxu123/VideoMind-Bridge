@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "VideoMind Bridge",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "一键处理视频到VideoMind Bridge - 支持B站、YouTube、抖音、小红书",
   "permissions": [
     "activeTab",
@@ -9,7 +9,9 @@
     "notifications"
   ],
   "host_permissions": [
-    "http://127.0.0.1:8787/*"
+    "http://127.0.0.1:*/*",
+    "http://localhost:*/*",
+    "http://[::1]:*/*"
   ],
   "action": {
     "default_popup": "popup.html",
@@ -25,7 +27,7 @@
       "matches": [
         "*://*.bilibili.com/video/*",
         "*://*.youtube.com/watch*",
-        "*://*.douyin.com/video/*",
+        "*://*.douyin.com/*",
         "*://*.xiaohongshu.com/explore/*",
         "*://*.xiaohongshu.com/discovery/item/*"
       ],

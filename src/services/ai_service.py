@@ -9,18 +9,12 @@ from typing import List, Optional
 import httpx
 from jinja2 import Template
 
+from ..models.task import Highlight
 from .prompt_template import get_prompt_template_manager, PromptTemplate
 from ..utils import get_logger
+from ..utils.exceptions import AIError
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class Highlight:
-    """时间轴要点"""
-    time: str      # 显示格式 "00:05:23"
-    seconds: int   # 秒数 323，用于生成链接
-    content: str   # 要点内容
 
 
 @dataclass
@@ -151,10 +145,15 @@ class AIService:
         if self._client is None:
             self._client = httpx.Client(
                 base_url=self.base_url,
-                timeout=self.DEFAULT_TIMEOUT,
+                timeout=httpx.Timeout(
+                    connect=30.0,
+                    read=self.DEFAULT_TIMEOUT,
+                    write=30.0,
+                    pool=10.0
+                ),
                 limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
             )
-            logger.debug("创建 HTTP 客户端（带连接池）")
+            logger.debug("创建 HTTP 客户端（带连接池和超时配置）")
         return self._client
 
     def close(self) -> None:
@@ -307,7 +306,11 @@ class AIService:
 
         # 所有重试都失败了
         logger.error(f"API 调用在 {self.MAX_RETRIES} 次尝试后仍然失败")
-        raise RuntimeError(f"API 调用失败（已重试 {self.MAX_RETRIES} 次）: {last_exception}") from last_exception
+        raise AIError(
+            f"API 调用失败（已重试 {self.MAX_RETRIES} 次）: {last_exception}",
+            error_code="GENERATION_FAILED",
+            details={"retries": self.MAX_RETRIES, "last_error": str(last_exception)}
+        ) from last_exception
 
     def test_connection(self) -> tuple[bool, str]:
         """

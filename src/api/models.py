@@ -27,6 +27,9 @@ class TaskCreateRequest(BaseModel):
     )
     ai_provider: Optional[str] = Field(None, description="AI提供商名称")
     ai_prompt: Optional[str] = Field(None, description="自定义Prompt模板")
+    cookies_from_browser: Optional[str] = Field(
+        None, description="浏览器名称（chrome/safari/firefox，国内平台需要）"
+    )
 
     class Config:
         json_schema_extra = {
@@ -132,3 +135,4 @@ class ConfigResponse(BaseModel):
     supported_platforms: List[str] = Field(..., description="支持的平台列表")
     supported_ai_providers: List[str] = Field(..., description="支持的AI提供商")
     supported_export_targets: List[str] = Field(..., description="支持的导出目标")
+    ai_enabled: bool = Field(default=False, description="AI功能是否已启用")

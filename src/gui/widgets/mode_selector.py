@@ -1,8 +1,6 @@
 """处理模式选择组件 - 三级处理模式卡片"""
 
-import sys
 from pathlib import Path
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QRadioButton, QButtonGroup,
@@ -10,9 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-# 导入统一的 ProcessingMode
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from src.models.task import ProcessingMode
+from ...models.task import ProcessingMode
 
 
 class ModeCard(QFrame):

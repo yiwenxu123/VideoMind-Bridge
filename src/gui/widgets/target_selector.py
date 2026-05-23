@@ -1,8 +1,6 @@
 """输出目标选择组件"""
 
-import sys
 from pathlib import Path
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QCheckBox, QLineEdit, QPushButton,
@@ -10,9 +8,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-# 导入统一的 ExportTarget
-sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
-from src.models.task import ExportTarget
+from ...models.task import ExportTarget
 
 
 class TargetCard(QGroupBox):
@@ -197,6 +193,37 @@ class TargetSelector(QWidget):
         self.local_card.config_layout.addLayout(local_config_layout)
         cards_layout.addWidget(self.local_card)
 
+        # Webhook
+        self.webhook_card = TargetCard(
+            icon="🔗",
+            title="Webhook",
+            description="推送到自定义 URL\n支持自动化集成",
+            target=ExportTarget.WEBHOOK
+        )
+        # 添加 Webhook 配置
+        webhook_url_layout = QHBoxLayout()
+        webhook_url_layout.addWidget(QLabel("URL:"))
+        self.webhook_url_input = QLineEdit()
+        self.webhook_url_input.setPlaceholderText("https://your-app.com/webhook")
+        webhook_url_layout.addWidget(self.webhook_url_input)
+        self.webhook_card.config_layout.addLayout(webhook_url_layout)
+
+        webhook_headers_layout = QHBoxLayout()
+        webhook_headers_layout.addWidget(QLabel("Headers:"))
+        self.webhook_headers_input = QLineEdit()
+        self.webhook_headers_input.setPlaceholderText('{"Authorization": "Bearer xxx"}')
+        webhook_headers_layout.addWidget(self.webhook_headers_input)
+        self.webhook_card.config_layout.addLayout(webhook_headers_layout)
+
+        # Webhook 测试按钮
+        webhook_test_layout = QHBoxLayout()
+        webhook_test_layout.addStretch()
+        self.webhook_test_button = QPushButton("🧪 测试连接")
+        self.webhook_test_button.clicked.connect(self._on_test_webhook)
+        webhook_test_layout.addWidget(self.webhook_test_button)
+        self.webhook_card.config_layout.addLayout(webhook_test_layout)
+        cards_layout.addWidget(self.webhook_card)
+
         # Notion
         self.notion_card = TargetCard(
             icon="📝",
@@ -232,6 +259,62 @@ class TargetSelector(QWidget):
             # 更新卡片描述显示新路径
             self._update_local_description()
 
+    def _on_test_webhook(self):
+        """测试 Webhook 连接"""
+        from PySide6.QtWidgets import QMessageBox
+        import httpx
+        import json
+
+        url = self.webhook_url_input.text().strip()
+        if not url:
+            QMessageBox.warning(self, "警告", "请先输入 Webhook URL")
+            return
+
+        # 解析 headers
+        headers = {}
+        headers_text = self.webhook_headers_input.text().strip()
+        if headers_text:
+            try:
+                headers = json.loads(headers_text)
+            except json.JSONDecodeError:
+                QMessageBox.warning(self, "警告", "Headers 格式错误，应为 JSON 格式")
+                return
+
+        # 发送测试请求
+        try:
+            test_payload = {
+                "event": "test",
+                "timestamp": "2026-01-01T00:00:00Z",
+                "data": {"message": "This is a test from VideoMind Bridge"}
+            }
+
+            response = httpx.post(
+                url,
+                json=test_payload,
+                headers={"Content-Type": "application/json", **headers},
+                timeout=10
+            )
+
+            if response.status_code < 400:
+                QMessageBox.information(
+                    self,
+                    "测试成功",
+                    f"Webhook 测试成功！\n\n状态码: {response.status_code}\n响应: {response.text[:200]}"
+                )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "测试失败",
+                    f"Webhook 返回错误状态码: {response.status_code}\n响应: {response.text[:200]}"
+                )
+
+        except httpx.TimeoutException:
+            QMessageBox.warning(self, "测试失败", "请求超时，请检查 URL 是否正确")
+        except httpx.ConnectError as e:
+            QMessageBox.warning(self, "测试失败", f"连接错误: {str(e)}")
+        except Exception as e:
+            QMessageBox.warning(self, "测试失败", f"请求异常: {str(e)}")
+
     def _update_local_description(self):
         """更新本地文件夹卡片描述"""
         path = self.local_path_input.text() or str(Path.home() / "Downloads" / "VideoMind")
@@ -258,6 +341,20 @@ class TargetSelector(QWidget):
             targets.append({
                 "type": ExportTarget.LOCAL,
                 "output_path": self.local_path_input.text()
+            })
+        if self.webhook_card.is_selected():
+            import json
+            headers = {}
+            headers_text = self.webhook_headers_input.text().strip()
+            if headers_text:
+                try:
+                    headers = json.loads(headers_text)
+                except json.JSONDecodeError:
+                    pass
+            targets.append({
+                "type": ExportTarget.WEBHOOK,
+                "url": self.webhook_url_input.text(),
+                "headers": headers
             })
         if self.notion_card.is_selected():
             targets.append({

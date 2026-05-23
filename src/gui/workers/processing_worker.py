@@ -23,6 +23,7 @@ from ...utils.retry import (
     is_retryable_error
 )
 from ...utils.exceptions import RetryableError
+from ...services.time_estimator import get_time_estimator
 
 logger = get_logger(__name__)
 
@@ -72,6 +73,7 @@ class ProcessingWorker(QThread):
     task_completed = Signal(str, bool, dict)  # task_id, success, result
     task_failed = Signal(str, str)            # task_id, error_message
     title_updated = Signal(str, str)          # task_id, title
+    metadata_updated = Signal(str, int, str)  # task_id, duration_seconds, platform
     task_paused = Signal(str)                 # task_id
     task_resumed = Signal(str)                # task_id
     retrying = Signal(str, int, int, str)     # task_id, attempt, max_attempts, error
@@ -131,16 +133,33 @@ class ProcessingWorker(QThread):
         mode = self.config.mode
         logger.debug(f"ProcessingWorker.run() started for task {task_id}")
 
+        # 记录任务开始时间
+        time_estimator = get_time_estimator()
+        time_estimator.record_task_start(task_id)
+
+        # 视频时长（将在下载后更新）
+        video_duration = 0
+        platform = ""
+
         try:
             # 根据模式执行不同流程
             if mode == ProcessingMode.DOWNLOAD_ONLY:
-                self._process_download_only(task_id)
+                video_duration, platform = self._process_download_only(task_id)
             elif mode == ProcessingMode.TRANSCRIBE_ONLY:
-                self._process_transcribe_only(task_id)
+                video_duration, platform = self._process_transcribe_only(task_id)
             elif mode == ProcessingMode.FULL:
-                self._process_full(task_id)
+                video_duration, platform = self._process_full(task_id)
             else:
                 raise ValueError(f"Unknown processing mode: {mode}")
+
+            # 记录任务完成统计
+            if video_duration > 0:
+                time_estimator.record_task_complete(
+                    task_id=task_id,
+                    mode=mode.value,
+                    platform=platform,
+                    video_duration=video_duration
+                )
 
         except InterruptedError:
             logger.info(f"Task {task_id} was cancelled")
@@ -209,7 +228,7 @@ class ProcessingWorker(QThread):
 
         return callback
 
-    def _process_download_only(self, task_id: str):
+    def _process_download_only(self, task_id: str) -> tuple[int, str]:
         """仅下载模式"""
         self.status_changed.emit(task_id, "downloading", "开始下载...")
 
@@ -224,8 +243,9 @@ class ProcessingWorker(QThread):
         # 下载完成后检查是否需要停止
         self._check_should_stop(task_id, "下载")
 
-        # 更新标题
+        # 更新标题和元数据
         self.title_updated.emit(task_id, result.metadata.title)
+        self.metadata_updated.emit(task_id, result.metadata.duration, result.metadata.platform)
         self.status_changed.emit(task_id, "completed", "下载完成")
         self.progress_updated.emit(task_id, 100, "完成")
 
@@ -244,7 +264,9 @@ class ProcessingWorker(QThread):
             "export_results": []
         })
 
-    def _process_transcribe_only(self, task_id: str):
+        return result.metadata.duration, result.metadata.platform
+
+    def _process_transcribe_only(self, task_id: str) -> tuple[int, str]:
         """转录存档模式"""
         # 步骤1: 下载 (30%)
         self.status_changed.emit(task_id, "downloading", "下载音频...")
@@ -258,6 +280,7 @@ class ProcessingWorker(QThread):
         self._check_should_stop(task_id, "下载")
 
         self.title_updated.emit(task_id, download_result.metadata.title)
+        self.metadata_updated.emit(task_id, download_result.metadata.duration, download_result.metadata.platform)
 
         # 步骤2: 转录 (50%)
         self.status_changed.emit(task_id, "transcribing", "语音转录中...")
@@ -324,7 +347,9 @@ class ProcessingWorker(QThread):
             "export_results": export_results
         })
 
-    def _process_full(self, task_id: str):
+        return download_result.metadata.duration, download_result.metadata.platform
+
+    def _process_full(self, task_id: str) -> tuple[int, str]:
         """完整处理模式"""
         # 步骤1: 下载 (20%)
         self.status_changed.emit(task_id, "downloading", "下载视频...")
@@ -338,6 +363,7 @@ class ProcessingWorker(QThread):
 
         self._check_should_stop(task_id, "下载")
         self.title_updated.emit(task_id, download_result.metadata.title)
+        self.metadata_updated.emit(task_id, download_result.metadata.duration, download_result.metadata.platform)
 
         # 步骤2: 转录 (40%)
         self.status_changed.emit(task_id, "transcribing", "语音转录中...")
@@ -443,6 +469,8 @@ class ProcessingWorker(QThread):
             "export_total": len(export_results),
             "export_results": export_results  # 添加导出结果列表
         })
+
+        return download_result.metadata.duration, download_result.metadata.platform
 
     def _parse_targets(self, targets_config: List[Any]) -> List[ExportTarget]:
         """解析目标配置"""

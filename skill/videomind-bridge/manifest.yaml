@@ -1,0 +1,86 @@
+name: videomind-bridge
+version: 1.0.0
+description: 视频知识提取工具 - 下载、转录、AI摘要、多格式导出
+author: VideoMind
+license: MIT
+homepage: https://github.com/your-org/VideoMind-Bridge
+
+categories:
+  - productivity
+  - media
+
+compatibility:
+  - python>=3.11
+  - network-access: true
+
+requirements:
+  bins:
+    - uv
+    - yt-dlp
+  anyBins:
+    - ffmpeg
+  env: []
+
+primaryEnv: DEEPSEEK_API_KEY
+
+platforms:
+  - darwin
+  - linux
+
+entry: scripts/process.sh
+
+inputs:
+  - name: url
+    type: string
+    required: true
+    description: 视频链接
+
+  - name: mode
+    type: string
+    required: false
+    default: full
+    description: 处理模式 (full/download/transcribe)
+    enum:
+      - full
+      - download
+      - transcribe
+
+  - name: model
+    type: string
+    required: false
+    default: small
+    description: Whisper 模型大小
+    enum:
+      - tiny
+      - base
+      - small
+      - medium
+
+  - name: targets
+    type: string
+    required: false
+    default: local
+    description: 导出目标，逗号分隔
+
+  - name: keep_video
+    type: boolean
+    required: false
+    default: true
+    description: 是否保留视频文件
+
+outputs:
+  - name: success
+    type: boolean
+    description: 是否处理成功
+
+  - name: metadata
+    type: object
+    description: 视频元数据
+
+  - name: transcript
+    type: object
+    description: 转录结果
+
+  - name: summary
+    type: object
+    description: AI 摘要结果

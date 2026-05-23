@@ -1,0 +1,120 @@
+name: Build Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to build (e.g., 1.0.0)'
+        required: false
+        default: ''
+
+jobs:
+  build-macos:
+    name: Build macOS
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ".[dev]"
+      
+      - name: Install ffmpeg
+        run: brew install ffmpeg
+      
+      - name: Build app
+        run: |
+          pyinstaller build.spec --noconfirm
+      
+      - name: Create DMG
+        run: |
+          brew install create-dmg
+          create-dmg \
+            --volname "VideoMind Bridge" \
+            --volicon "src/gui/resources/icon.icns" \
+            --window-pos 200 120 \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --icon "VideoMind Bridge.app" 150 190 \
+            --hide-extension "VideoMind Bridge.app" \
+            --app-drop-link 450 190 \
+            "dist/VideoMind-Bridge-macOS.dmg" \
+            "dist/VideoMind Bridge.app"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoMind-Bridge-macOS
+          path: dist/VideoMind-Bridge-macOS.dmg
+
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+          pip install -e ".[dev]"
+      
+      - name: Build exe
+        run: |
+          pyinstaller build.spec --noconfirm
+      
+      - name: Create installer
+        run: |
+          # 使用 7-Zip 创建压缩包
+          7z a -tzip "dist/VideoMind-Bridge-Windows.zip" "dist/VideoMind Bridge/*"
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VideoMind-Bridge-Windows
+          path: dist/VideoMind-Bridge-Windows.zip
+
+  release:
+    name: Create Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: VideoMind-Bridge-macOS
+          path: artifacts/
+      
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: VideoMind-Bridge-Windows
+          path: artifacts/
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            artifacts/VideoMind-Bridge-macOS.dmg
+            artifacts/VideoMind-Bridge-Windows.zip
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

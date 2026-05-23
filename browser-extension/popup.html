@@ -12,269 +12,430 @@
     }
 
     body {
-      width: 350px;
-      min-height: 400px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-      background: #f5f5f5;
+      width: 360px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #FAFAFA;
+      color: #1A1A2E;
+      line-height: 1.5;
     }
 
     .header {
-      background: linear-gradient(135deg, #00a1d6 0%, #0089b5 100%);
-      color: white;
-      padding: 20px;
+      background: #FFFFFF;
+      padding: 24px 20px;
+      border-bottom: 1px solid #F0F0F0;
+    }
+
+    .brand {
       display: flex;
       align-items: center;
       gap: 12px;
     }
 
-    .header-icon {
+    .brand-icon {
       width: 40px;
       height: 40px;
-      background: white;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       border-radius: 10px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 24px;
-    }
-
-    .header-text h1 {
+      color: white;
       font-size: 18px;
+    }
+
+    .brand-info h1 {
+      font-size: 16px;
       font-weight: 600;
-      margin-bottom: 2px;
+      color: #1A1A2E;
     }
 
-    .header-text p {
+    .brand-info p {
       font-size: 12px;
-      opacity: 0.9;
+      color: #8E8E93;
+      margin-top: 1px;
     }
 
-    .status-bar {
-      padding: 12px 20px;
+    .section {
+      padding: 16px 20px;
+    }
+
+    .section-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: #8E8E93;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      margin-bottom: 10px;
+    }
+
+    .connection-status {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      padding: 12px 14px;
+      background: #FFFFFF;
+      border-radius: 10px;
+      margin-bottom: 12px;
+      border: 1px solid #F0F0F0;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #8E8E93;
+      flex-shrink: 0;
+    }
+
+    .status-dot.connected {
+      background: #34C759;
+    }
+
+    .status-dot.disconnected {
+      background: #FF3B30;
+    }
+
+    .status-text {
       font-size: 13px;
-      border-bottom: 1px solid #e8e8e8;
+      color: #1A1A2E;
+      flex: 1;
     }
 
-    .status-bar.connected {
-      background: #f6ffed;
-      color: #52c41a;
-    }
-
-    .status-bar.disconnected {
-      background: #fff2f0;
-      color: #ff4d4f;
-    }
-
-    .content {
-      padding: 20px;
-    }
-
-    .current-page {
-      background: white;
+    .card {
+      background: #FFFFFF;
       border-radius: 12px;
       padding: 16px;
-      margin-bottom: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+      border: 1px solid #F0F0F0;
     }
 
-    .current-page h3 {
-      font-size: 13px;
-      color: #999;
-      margin-bottom: 8px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .page-url {
-      font-size: 13px;
-      color: #333;
+    .url-display {
+      font-size: 11px;
+      color: #636366;
       word-break: break-all;
+      padding: 10px;
+      background: #F5F5F7;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      font-family: 'SF Mono', Monaco, monospace;
       line-height: 1.5;
+    }
+
+    .mode-selector {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
       margin-bottom: 12px;
     }
 
-    .btn-primary {
-      width: 100%;
+    .mode-option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
       padding: 12px;
-      background: linear-gradient(135deg, #00a1d6 0%, #0089b5 100%);
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 14px;
-      font-weight: 500;
+      background: #F5F5F7;
+      border-radius: 10px;
       cursor: pointer;
-      transition: all 0.3s ease;
+      transition: all 0.15s ease;
+      border: 2px solid transparent;
+    }
+
+    .mode-option:hover {
+      background: #E8E8EA;
+    }
+
+    .mode-option.active {
+      background: #EEF2FF;
+      border-color: #667eea;
+    }
+
+    .mode-option.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .mode-icon {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      gap: 8px;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .mode-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .mode-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #1A1A2E;
+      margin-bottom: 2px;
+    }
+
+    .mode-desc {
+      font-size: 11px;
+      color: #8E8E93;
+      line-height: 1.3;
+    }
+
+    .mode-check {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid #D1D1D6;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: transparent;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+
+    .mode-option.active .mode-check {
+      background: #667eea;
+      border-color: #667eea;
+      color: white;
+    }
+
+    .mode-option.disabled .mode-check {
+      border-color: #D1D1D6;
+      color: #8E8E93;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
     }
 
     .btn-primary:hover:not(:disabled) {
       transform: translateY(-1px);
-      box-shadow: 0 4px 12px rgba(0, 161, 214, 0.3);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+    }
+
+    .btn-primary:active:not(:disabled) {
+      transform: translateY(0);
     }
 
     .btn-primary:disabled {
-      opacity: 0.6;
+      opacity: 0.5;
       cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
     }
 
     .btn-primary.processing {
-      background: linear-gradient(135deg, #faad14 0%, #d48806 100%);
-    }
-
-    .recent-tasks {
-      background: white;
-      border-radius: 12px;
-      padding: 16px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
-    }
-
-    .recent-tasks h3 {
-      font-size: 13px;
-      color: #999;
-      margin-bottom: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+      background: #8E8E93;
     }
 
     .task-list {
-      max-height: 200px;
+      max-height: 160px;
       overflow-y: auto;
     }
 
     .task-item {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
       padding: 12px;
-      border: 1px solid #f0f0f0;
-      border-radius: 8px;
-      margin-bottom: 8px;
+      border-radius: 10px;
+      margin-bottom: 6px;
       cursor: pointer;
-      transition: all 0.2s ease;
-    }
-
-    .task-item:hover {
-      border-color: #00a1d6;
-      background: #f0f9ff;
+      transition: all 0.15s ease;
+      background: #F5F5F7;
     }
 
     .task-item:last-child {
       margin-bottom: 0;
     }
 
-    .task-title {
-      font-size: 13px;
-      font-weight: 500;
-      color: #333;
-      margin-bottom: 4px;
+    .task-item:hover {
+      background: #E8E8EA;
+    }
+
+    .task-info {
+      flex: 1;
+      min-width: 0;
+      margin-right: 10px;
+    }
+
+    .task-url {
+      font-size: 11px;
+      color: #1A1A2E;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      margin-bottom: 2px;
     }
 
-    .task-meta {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 11px;
-      color: #999;
+    .task-time {
+      font-size: 10px;
+      color: #8E8E93;
     }
 
     .task-status {
-      padding: 2px 6px;
-      border-radius: 4px;
+      padding: 3px 8px;
+      border-radius: 12px;
       font-size: 10px;
       font-weight: 500;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
 
     .task-status.pending {
-      background: #f0f0f0;
-      color: #666;
+      background: #F2F2F7;
+      color: #636366;
     }
 
     .task-status.processing {
-      background: #e6f7ff;
-      color: #1890ff;
+      background: #FFF2E8;
+      color: #FF9500;
     }
 
-    .task-status.completed {
-      background: #f6ffed;
-      color: #52c41a;
+    .task-status.complete {
+      background: #E8FAE8;
+      color: #34C759;
     }
 
-    .task-status.failed {
-      background: #fff2f0;
-      color: #ff4d4f;
+    .task-status.error {
+      background: #FFE8E8;
+      color: #FF3B30;
     }
 
     .empty-state {
       text-align: center;
-      padding: 30px 20px;
-      color: #999;
+      padding: 24px 16px;
     }
 
     .empty-state-icon {
-      font-size: 48px;
-      margin-bottom: 12px;
+      font-size: 24px;
+      margin-bottom: 8px;
+      opacity: 0.4;
     }
 
-    .empty-state-text {
-      font-size: 13px;
+    .empty-state p {
+      font-size: 12px;
+      color: #8E8E93;
+      margin-bottom: 2px;
     }
 
-    .footer {
-      padding: 12px 20px;
-      text-align: center;
-      font-size: 11px;
-      color: #999;
-      border-top: 1px solid #e8e8e8;
+    .empty-state small {
+      font-size: 10px;
+      color: #B0B0B5;
     }
 
-    .spinner {
-      width: 16px;
-      height: 16px;
-      border: 2px solid rgba(255,255,255,0.3);
-      border-top-color: white;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+    .divider {
+      height: 1px;
+      background: #F0F0F0;
+      margin: 0;
     }
 
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    .badge {
+      display: inline-block;
+      padding: 2px 6px;
+      background: #FFF2E8;
+      color: #FF9500;
+      font-size: 9px;
+      border-radius: 8px;
+      margin-left: 4px;
     }
   </style>
 </head>
 <body>
   <div class="header">
-    <div class="header-icon">📝</div>
-    <div class="header-text">
-      <h1>VideoMind Bridge</h1>
-      <p>视频智能处理助手</p>
+    <div class="brand">
+      <div class="brand-icon">📝</div>
+      <div class="brand-info">
+        <h1>VideoMind Bridge</h1>
+        <p>视频智能处理</p>
+      </div>
     </div>
   </div>
 
-  <div id="status-bar" class="status-bar disconnected">
-    <span id="status-icon">⚠️</span>
-    <span id="status-text">正在连接服务...</span>
+  <div class="section">
+    <div class="section-title">连接状态</div>
+    <div class="connection-status">
+      <div class="status-dot disconnected" id="status-dot"></div>
+      <span class="status-text" id="status-text">检查服务中...</span>
+    </div>
   </div>
 
-  <div class="content">
-    <div class="current-page">
-      <h3>当前页面</h3>
-      <div id="page-url" class="page-url">-</div>
-      <button id="process-btn" class="btn-primary" disabled>
-        <span>📝</span>
-        <span>处理当前视频</span>
+  <div class="divider"></div>
+
+  <div class="section">
+    <div class="section-title">当前页面</div>
+    <div class="card">
+      <div class="url-display" id="page-url">等待获取页面...</div>
+      
+      <div class="mode-selector">
+        <div class="mode-option active" data-mode="full">
+          <div class="mode-icon" style="background: #F3E8FF;">🧠</div>
+          <div class="mode-info">
+            <div class="mode-name">完整处理</div>
+            <div class="mode-desc">下载→转录→AI摘要→生成笔记</div>
+          </div>
+          <div class="mode-check">✓</div>
+        </div>
+        
+        <div class="mode-option" data-mode="download">
+          <div class="mode-icon" style="background: #E8F5E9;">💾</div>
+          <div class="mode-info">
+            <div class="mode-name">仅下载</div>
+            <div class="mode-desc">仅下载原始视频+音频</div>
+          </div>
+          <div class="mode-check"></div>
+        </div>
+        
+        <div class="mode-option" data-mode="transcribe">
+          <div class="mode-icon" style="background: #E3F2FD;">📝</div>
+          <div class="mode-info">
+            <div class="mode-name">
+              转录存档
+              <span class="badge">省成本</span>
+            </div>
+            <div class="mode-desc">生成字幕，不调用 AI</div>
+          </div>
+          <div class="mode-check"></div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="process-btn" disabled>
+        <span>开始处理</span>
       </button>
     </div>
+  </div>
 
-    <div class="recent-tasks">
-      <h3>
-        最近任务
-        <span id="task-count"
+  <div class="section">
+    <div class="section-title">任务历史</div>
+    <div class="card">
+      <div class="task-list" id="task-list">
+        <div class="empty-state">
+          <div class="empty-state-icon">📋</div>
+          <p>暂无任务</p>
+          <small>处理视频后将显示在此</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

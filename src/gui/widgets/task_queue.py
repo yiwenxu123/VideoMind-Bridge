@@ -45,6 +45,9 @@ class TaskInfo:
     status: TaskStatus
     progress: int
     message: str
+    time_estimate: str = ""  # 预估时间消息
+    video_duration: int = 0  # 视频时长（秒）
+    platform: str = ""  # 视频平台
 
 
 class TaskItemWidget(QFrame):
@@ -171,6 +174,11 @@ class TaskItemWidget(QFrame):
 
         layout.addLayout(progress_layout)
 
+        # 第三行：预估时间
+        self.time_estimate_label = QLabel(task_info.time_estimate)
+        self.time_estimate_label.setStyleSheet("color: #888; font-size: 11px; margin-top: 2px;")
+        layout.addWidget(self.time_estimate_label)
+
         # 连接信号
         self.action_button.clicked.connect(self._on_action_clicked)
 
@@ -209,10 +217,16 @@ class TaskItemWidget(QFrame):
         """删除按钮点击"""
         self.delete_clicked.emit(self.task_id)
 
-    def update_progress(self, progress: int, message: str):
+    def update_progress(self, progress: int, message: str, time_estimate: str = ""):
         """更新进度"""
         self.progress_bar.setValue(progress)
         self.message_label.setText(message)
+        if time_estimate:
+            self.time_estimate_label.setText(time_estimate)
+
+    def update_time_estimate(self, time_estimate: str):
+        """更新预估时间"""
+        self.time_estimate_label.setText(time_estimate)
 
     def update_status(self, status: TaskStatus, message: str = ""):
         """更新状态"""
@@ -363,10 +377,15 @@ class TaskQueueWidget(QWidget):
         except Exception as e:
             logger.debug(f"Error setting task widget: {e}")
 
-    def update_task_progress(self, task_id: str, progress: int, message: str):
+    def update_task_progress(self, task_id: str, progress: int, message: str, time_estimate: str = ""):
         """更新任务进度"""
         if task_id in self.tasks:
-            self.tasks[task_id].update_progress(progress, message)
+            self.tasks[task_id].update_progress(progress, message, time_estimate)
+
+    def update_task_time_estimate(self, task_id: str, time_estimate: str):
+        """更新任务预估时间"""
+        if task_id in self.tasks:
+            self.tasks[task_id].update_time_estimate(time_estimate)
 
     def update_task_status(self, task_id: str, status: TaskStatus, message: str = ""):
         """更新任务状态"""

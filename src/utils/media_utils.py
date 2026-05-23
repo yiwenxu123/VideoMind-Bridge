@@ -1,17 +1,8 @@
 """媒体工具模块"""
 
-from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
-from ..models.task import TranscriptSegment
+from ..models.task import TranscriptSegment, Highlight
 from .time_utils import format_time_for_srt
-
-
-@dataclass
-class Highlight:
-    """时间轴要点 - 避免循环导入，在工具模块重新定义"""
-    time: str      # 显示格式 "00:05:23"
-    seconds: int   # 秒数 323，用于生成链接
-    content: str   # 要点内容
 
 
 def generate_srt(segments: List[TranscriptSegment]) -> str:

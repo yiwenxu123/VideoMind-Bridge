@@ -1,12 +1,13 @@
 """API任务管理器
 
 管理API任务的生命周期，协调各个服务组件。
+遵循依赖倒置原则：依赖抽象接口而非具体实现。
 """
 
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from ..models.task import (
@@ -15,19 +16,36 @@ from ..models.task import (
     ProcessingMode,
     ExportTarget,
     VideoMetadata,
+    TaskHistory,
 )
 from ..services.task_database import TaskDatabase, get_task_database
 from ..services.download_service import DownloadService
 from ..services.transcribe_service import TranscribeService
 from ..services.ai_service import AIService
 from ..services.export_orchestrator import ExportOrchestrator
+from ..services.config_manager import get_config_manager
+from ..services.interfaces import (
+    IDownloadService,
+    ITranscribeService,
+    IAIProvider,
+    IExportOrchestrator,
+)
 from ..utils import get_logger
+
+if TYPE_CHECKING:
+    pass
 
 logger = get_logger(__name__)
 
 
 class TaskManager:
-    """API任务管理器"""
+    """API任务管理器
+    
+    协调各服务组件完成视频处理流程：
+    下载 → 转录 → AI摘要 → 导出
+    
+    服务组件通过接口类型声明，支持未来替换为 Skills 实现。
+    """
 
     def __init__(self, output_dir: Optional[Path] = None):
         """
@@ -37,31 +55,36 @@ class TaskManager:
             output_dir: 输出目录，默认为项目目录下的 output
         """
         if output_dir is None:
-            # 使用项目目录下的 output 文件夹
             project_root = Path(__file__).parent.parent.parent
             output_dir = project_root / "output"
         self.output_dir = output_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # 数据库
         self.db = get_task_database()
 
-        # 活跃任务
         self._tasks: Dict[UUID, VideoTask] = {}
         self._task_callbacks: Dict[UUID, List[Callable]] = {}
 
-        # 服务组件
-        self._download_service = DownloadService(self.output_dir)
-        self._transcribe_service = TranscribeService()
-        # AI服务使用mock模式，避免需要配置API Key
-        self._ai_service = AIService(mock=True)
-        # 导出编排器，默认导出到本地
-        self._export_orchestrator = ExportOrchestrator(
+        self._download_service: IDownloadService = DownloadService(self.output_dir)
+        self._transcribe_service: ITranscribeService = TranscribeService()
+        
+        self._config_manager = get_config_manager()
+        api_key = self._config_manager.get_api_key()
+        if api_key:
+            self._ai_service: IAIProvider = AIService(
+                api_key=api_key, 
+                model=self._config_manager.ai.model
+            )
+            logger.info(f"AI服务已启用，模型: {self._config_manager.ai.model}")
+        else:
+            self._ai_service = AIService(mock=True)
+            logger.warning("AI服务使用mock模式，未配置API Key")
+        
+        self._export_orchestrator: IExportOrchestrator = ExportOrchestrator(
             targets=[ExportTarget.LOCAL],
             config={"local_output_path": self.output_dir}
         )
 
-        # 运行状态
         self._running = False
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
@@ -100,6 +123,7 @@ class TaskManager:
         targets: Optional[Set[ExportTarget]] = None,
         ai_provider: Optional[str] = None,
         ai_prompt: Optional[str] = None,
+        cookies_from_browser: Optional[str] = None,
     ) -> VideoTask:
         """
         创建新任务
@@ -110,6 +134,7 @@ class TaskManager:
             targets: 导出目标
             ai_provider: AI提供商
             ai_prompt: AI提示词
+            cookies_from_browser: 浏览器名称（chrome/safari/firefox）
 
         Returns:
             创建的任务对象
@@ -127,21 +152,16 @@ class TaskManager:
             created_at=datetime.now(),
             updated_at=datetime.now(),
         )
+        task.cookies_from_browser = cookies_from_browser
 
-        # 解析视频元数据
-        try:
-            metadata = await self._download_service.extract_metadata(url)
-            task.metadata = metadata
-            task.current_step = "已解析视频信息"
-        except Exception as e:
-            logger.warning(f"解析视频元数据失败: {e}")
-            task.metadata = VideoMetadata(
-                title="未知标题",
-                author="未知作者",
-                duration=0,
-                platform="unknown",
-                url=url,
-            )
+        # 暂不解析元数据，下载时一并获取
+        task.metadata = VideoMetadata(
+            title="获取中...",
+            author="未知",
+            duration=0,
+            platform="unknown",
+            url=url,
+        )
 
         # 保存任务
         self._tasks[task.id] = task
@@ -281,6 +301,8 @@ class TaskManager:
             except Exception as e:
                 logger.error(f"任务更新回调失败: {e}")
 
+        self._save_task_to_db(task)
+
     async def _process_queue(self) -> None:
         """处理任务队列"""
         while self._running:
@@ -380,13 +402,25 @@ class TaskManager:
     async def _download_audio(self, task: VideoTask) -> Optional[Path]:
         """下载音频"""
         try:
-            output_path = self.output_dir / f"{task.id}.m4a"
-            await self._download_service.download_audio(
-                task.url,
-                output_path,
-                progress_callback=lambda p: self._update_download_progress(task, p),
-            )
-            return output_path
+            loop = asyncio.get_event_loop()
+            
+            def do_download():
+                result = self._download_service.download(
+                    task.url,
+                    download_video=False,
+                    progress_callback=lambda status, percent: self._update_download_progress(task, percent),
+                    cookies_from_browser=getattr(task, 'cookies_from_browser', None),
+                )
+                return result
+
+            result = await loop.run_in_executor(None, do_download)
+            
+            if result and result.audio_path:
+                if result.metadata:
+                    task.metadata = result.metadata
+                return result.audio_path
+            
+            return None
         except Exception as e:
             logger.error(f"下载音频失败: {e}")
             return None
@@ -403,19 +437,22 @@ class TaskManager:
     ) -> List:
         """转录音频"""
         try:
-            segments = await self._transcribe_service.transcribe(
-                audio_path,
-                progress_callback=lambda p: self._update_transcribe_progress(task, p),
-            )
-            return segments
+            loop = asyncio.get_event_loop()
+            
+            def do_transcribe():
+                return self._transcribe_service.transcribe(
+                    audio_path,
+                    language="zh",
+                )
+            
+            result = await loop.run_in_executor(None, do_transcribe)
+            
+            if result and hasattr(result, 'segments'):
+                return result.segments
+            return []
         except Exception as e:
             logger.error(f"转录音频失败: {e}")
             raise
-
-    def _update_transcribe_progress(self, task: VideoTask, progress: float) -> None:
-        """更新转录进度"""
-        task.progress = 40.0 + progress * 0.2  # 40% - 60%
-        self._notify_task_update(task)
 
     async def _generate_summary(self, task: VideoTask) -> str:
         """生成AI摘要"""
@@ -424,30 +461,94 @@ class TaskManager:
                 f"[{s.start:.1f}s] {s.text}" for s in task.transcript_segments
             ])
 
-            summary = await self._ai_service.generate_summary(
-                transcript_text,
-                provider=task.ai_provider,
-                prompt_template=task.ai_prompt,
-                progress_callback=lambda p: self._update_ai_progress(task, p),
-            )
-            return summary
+            loop = asyncio.get_event_loop()
+            
+            def do_summarize():
+                result = self._ai_service.summarize(
+                    transcript=transcript_text,
+                    title=task.metadata.title if task.metadata else "",
+                )
+                return result
+            
+            result = await loop.run_in_executor(None, do_summarize)
+            
+            if result and hasattr(result, 'summary'):
+                return result.summary
+            return ""
         except Exception as e:
             logger.error(f"生成摘要失败: {e}")
             raise
 
-    def _update_ai_progress(self, task: VideoTask, progress: float) -> None:
-        """更新AI处理进度"""
-        task.progress = 70.0 + progress * 0.15  # 70% - 85%
-        self._notify_task_update(task)
-
     async def _export_results(self, task: VideoTask) -> None:
         """导出结果"""
         try:
-            # TODO: 实现导出逻辑
-            pass
+            task.output_files = []
+            
+            if not task.audio_path or not task.audio_path.exists():
+                logger.warning(f"音频文件不存在，跳过导出: {task.audio_path}")
+                return
+            
+            from ..models.task import ExportContext, VideoMetadata
+            
+            metadata = task.metadata or VideoMetadata(
+                title="未知标题",
+                author="",
+                duration=0,
+                platform="unknown",
+                url=task.url,
+            )
+            
+            context = ExportContext(
+                task_id=task.id,
+                video_metadata=metadata,
+                video_path=None,
+                audio_path=task.audio_path,
+                transcript_path=None,
+                transcript_segments=task.transcript_segments,
+                transcript_text="\n".join([s.text for s in task.transcript_segments]) if task.transcript_segments else "",
+                ai_summary=task.ai_summary,
+            )
+            
+            results = self._export_orchestrator.export_all(context)
+            
+            for result in results:
+                if result.success and result.output_path:
+                    task.output_files.append(result.output_path)
+                    logger.info(f"导出成功: {result.output_path}")
+                elif not result.success:
+                    logger.warning(f"导出失败: {result.error_msg}")
+            
+            logger.info(f"导出完成，共 {len(task.output_files)} 个文件")
         except Exception as e:
             logger.error(f"导出失败: {e}")
             raise
+
+    def _save_task_to_db(self, task: VideoTask) -> None:
+        """保存任务到数据库"""
+        try:
+            task_history = TaskHistory(
+                id=str(task.id),
+                url=task.url,
+                title=task.metadata.title if task.metadata else "未知标题",
+                author=task.metadata.author if task.metadata else "",
+                platform=task.metadata.platform if task.metadata else "unknown",
+                mode=task.mode,
+                targets=list(task.targets),
+                status=task.status,
+                error_msg=task.error_msg,
+                created_at=task.created_at,
+                completed_at=datetime.now() if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED) else None,
+                summary=task.ai_summary,
+                highlights_count=0,
+                transcript_path=task.audio_path,
+                output_files=task.output_files if hasattr(task, 'output_files') and task.output_files else [],
+                export_success_count=0,
+                export_total_count=len(task.targets),
+            )
+            self.db.save_task(task_history)
+            logger.debug(f"任务已保存到数据库: {task.id}")
+        except Exception as e:
+            logger.error(f"保存任务到数据库失败: {e}")
 
     def get_statistics(self) -> Dict:
         """获取统计信息"""

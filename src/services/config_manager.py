@@ -19,24 +19,20 @@ class ConfigManager:
     安全特性：
     - API Key 使用系统密钥环加密存储，不在配置文件中保存明文
     - 配置文件只保存 API Key 的占位符，实际值从密钥环读取
-    - 线程安全：使用锁保护实例创建
+    - 线程安全：使用锁保护实例创建和初始化
     """
 
     _instance: Optional["ConfigManager"] = None
-    _config: Optional[AppConfig] = None
     _lock = threading.Lock()
-    _initialized = False
 
     def __new__(cls):
-        if cls._instance is None:
-            with cls._lock:
-                # 双重检查锁定
-                if cls._instance is None:
-                    cls._instance = super().__new__(cls)
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
-        # 使用锁保护初始化过程
         with self._lock:
             if self._initialized:
                 return
@@ -45,7 +41,6 @@ class ConfigManager:
             self._config_file = self._config_dir / "config.yaml"
             self._config = self._load_config()
 
-            # 迁移配置文件中的明文 API Key 到密钥环
             self._migrate_api_keys()
 
             self._initialized = True

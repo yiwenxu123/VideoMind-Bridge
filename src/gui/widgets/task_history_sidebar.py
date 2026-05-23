@@ -200,9 +200,16 @@ class TaskHistorySidebar(QWidget):
     task_selected = Signal(str)  # 任务ID
     task_reprocess = Signal(str)  # 任务ID
 
+    # 分页配置
+    PAGE_SIZE = 20  # 每页显示数量
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.db = get_task_database()
+        self.current_page = 0
+        self.total_records = 0
+        self.current_filter = "all"
+        self.search_keyword = ""
         self._setup_ui()
         self._load_history()
 
@@ -287,6 +294,26 @@ class TaskHistorySidebar(QWidget):
         self.stats_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.stats_label)
 
+        # 分页控制
+        pagination_layout = QHBoxLayout()
+
+        self.prev_btn = QPushButton("◀ 上一页")
+        self.prev_btn.setEnabled(False)
+        self.prev_btn.clicked.connect(self._on_prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+
+        self.page_label = QLabel("第 1 页")
+        self.page_label.setStyleSheet("color: #666; font-size: 12px;")
+        self.page_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pagination_layout.addWidget(self.page_label, stretch=1)
+
+        self.next_btn = QPushButton("下一页 ▶")
+        self.next_btn.setEnabled(False)
+        self.next_btn.clicked.connect(self._on_next_page)
+        pagination_layout.addWidget(self.next_btn)
+
+        layout.addLayout(pagination_layout)
+
         # 底部按钮
         bottom_layout = QHBoxLayout()
 
@@ -332,11 +359,44 @@ class TaskHistorySidebar(QWidget):
         self.setMinimumWidth(400)
 
     def _load_history(self):
-        """加载历史记录"""
+        """加载历史记录（分页）"""
         try:
-            tasks = self.db.get_tasks(limit=HistoryConfig.MAX_DISPLAY_ITEMS)
+            # 计算偏移量
+            offset = self.current_page * self.PAGE_SIZE
+
+            # 根据当前筛选条件加载数据
+            if self.search_keyword:
+                # 搜索模式（暂不支持分页，加载前100条）
+                tasks = self.db.search_tasks(self.search_keyword, limit=100)
+                self.total_records = len(tasks)
+            elif self.current_filter == "completed":
+                tasks = self.db.get_tasks(
+                    status=TaskStatus.COMPLETED,
+                    limit=self.PAGE_SIZE,
+                    offset=offset
+                )
+                # 获取总数
+                all_completed = self.db.get_tasks(status=TaskStatus.COMPLETED, limit=10000)
+                self.total_records = len(all_completed)
+            elif self.current_filter == "failed":
+                tasks = self.db.get_tasks(
+                    status=TaskStatus.FAILED,
+                    limit=self.PAGE_SIZE,
+                    offset=offset
+                )
+                all_failed = self.db.get_tasks(status=TaskStatus.FAILED, limit=10000)
+                self.total_records = len(all_failed)
+            else:
+                tasks = self.db.get_tasks(
+                    limit=self.PAGE_SIZE,
+                    offset=offset
+                )
+                stats = self.db.get_statistics()
+                self.total_records = stats.get("total", 0)
+
             self._display_tasks(tasks)
             self._update_stats()
+            self._update_pagination()
         except Exception as e:
             logger.error(f"加载历史记录失败: {e}")
 
@@ -373,23 +433,39 @@ class TaskHistorySidebar(QWidget):
     def _update_stats(self):
         """更新统计信息"""
         try:
-            stats = self.db.get_statistics()
-            total = stats.get("total", 0)
-            self.stats_label.setText(f"共 {total} 条记录")
+            start = self.current_page * self.PAGE_SIZE + 1
+            end = min(start + self.PAGE_SIZE - 1, self.total_records)
+            self.stats_label.setText(f"显示 {start}-{end} 条，共 {self.total_records} 条")
         except Exception as e:
             logger.error(f"更新统计信息失败: {e}")
 
+    def _update_pagination(self):
+        """更新分页按钮状态"""
+        total_pages = (self.total_records + self.PAGE_SIZE - 1) // self.PAGE_SIZE
+        total_pages = max(1, total_pages)
+
+        self.page_label.setText(f"第 {self.current_page + 1} / {total_pages} 页")
+        self.prev_btn.setEnabled(self.current_page > 0)
+        self.next_btn.setEnabled(self.current_page < total_pages - 1)
+
+    def _on_prev_page(self):
+        """上一页"""
+        if self.current_page > 0:
+            self.current_page -= 1
+            self._load_history()
+
+    def _on_next_page(self):
+        """下一页"""
+        total_pages = (self.total_records + self.PAGE_SIZE - 1) // self.PAGE_SIZE
+        if self.current_page < total_pages - 1:
+            self.current_page += 1
+            self._load_history()
+
     def _on_search(self):
         """搜索"""
-        keyword = self.search_input.text().strip()
-        if keyword:
-            try:
-                tasks = self.db.search_tasks(keyword)
-                self._display_tasks(tasks)
-            except Exception as e:
-                logger.error(f"搜索失败: {e}")
-        else:
-            self._load_history()
+        self.search_keyword = self.search_input.text().strip()
+        self.current_page = 0  # 重置到第一页
+        self._load_history()
 
     def _on_filter(self, filter_type: str):
         """筛选"""
@@ -398,19 +474,9 @@ class TaskHistorySidebar(QWidget):
         self.filter_completed_btn.setChecked(filter_type == "completed")
         self.filter_failed_btn.setChecked(filter_type == "failed")
 
-        try:
-            if filter_type == "all":
-                tasks = self.db.get_tasks(limit=50)
-            elif filter_type == "completed":
-                tasks = self.db.get_tasks(status=TaskStatus.COMPLETED, limit=50)
-            elif filter_type == "failed":
-                tasks = self.db.get_tasks(status=TaskStatus.FAILED, limit=50)
-            else:
-                tasks = []
-
-            self._display_tasks(tasks)
-        except Exception as e:
-            logger.error(f"筛选失败: {e}")
+        self.current_filter = filter_type
+        self.current_page = 0  # 重置到第一页
+        self._load_history()
 
     def _on_task_clicked(self, task_id: str):
         """任务点击"""

@@ -21,6 +21,9 @@ wheels/
 *.bak
 *.backup
 
+# Virtual environments
+venv/
+
 # Test directories (keep tests/ but ignore test data directories)
 test_cli/
 test_fix/
@@ -29,6 +32,21 @@ test_full_flow/
 test_html_player/
 test_real_url/
 test_video_keep/
+test_output/
+
+# Coverage data
+.coverage
+htmlcov/
+coverage/
+
+# Build artifacts
+*.spec
+build/
+dist/
+*.dmg
+
+# yt-dlp cookie file (sensitive)
+-
 
 # Output directory
 output/

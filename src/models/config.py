@@ -69,6 +69,23 @@ class DownloadConfig:
 
 
 @dataclass
+class TranscribeConfig:
+    """转录配置"""
+    whisper_model: str = "small"
+    language: Optional[str] = None  # None 表示自动检测
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "TranscribeConfig":
+        return cls(
+            whisper_model=data.get("whisper_model", "small"),
+            language=data.get("language")
+        )
+
+
+@dataclass
 class ObsidianConfig:
     """Obsidian 导出配置"""
     enabled: bool = False
@@ -103,16 +120,45 @@ class LocalExportConfig:
 
 
 @dataclass
+class WebhookConfig:
+    """Webhook 导出配置"""
+    enabled: bool = False
+    url: str = ""
+    headers: Dict[str, str] = field(default_factory=dict)
+    timeout: int = 30
+    max_retries: int = 3
+    retry_delay: float = 1.0
+    events: List[str] = field(default_factory=lambda: ["on_completed"])
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "WebhookConfig":
+        return cls(
+            enabled=data.get("enabled", False),
+            url=data.get("url", ""),
+            headers=data.get("headers", {}),
+            timeout=data.get("timeout", 30),
+            max_retries=data.get("max_retries", 3),
+            retry_delay=data.get("retry_delay", 1.0),
+            events=data.get("events", ["on_completed"])
+        )
+
+
+@dataclass
 class ExportConfig:
     """导出配置"""
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     local: LocalExportConfig = field(default_factory=LocalExportConfig)
+    webhook: WebhookConfig = field(default_factory=WebhookConfig)
     default_targets: List[str] = field(default_factory=lambda: ["local"])
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "obsidian": self.obsidian.to_dict(),
             "local": self.local.to_dict(),
+            "webhook": self.webhook.to_dict(),
             "default_targets": self.default_targets
         }
 
@@ -121,6 +167,7 @@ class ExportConfig:
         return cls(
             obsidian=ObsidianConfig.from_dict(data.get("obsidian", {})),
             local=LocalExportConfig.from_dict(data.get("local", {})),
+            webhook=WebhookConfig.from_dict(data.get("webhook", {})),
             default_targets=data.get("default_targets", ["local"])
         )
 
@@ -143,21 +190,44 @@ class UIConfig:
 
 
 @dataclass
+class PerformanceConfig:
+    """性能配置"""
+    max_concurrent_tasks: int = 2  # 最大并发任务数
+    enable_model_cache: bool = True  # 启用模型缓存
+    auto_clear_cache_on_exit: bool = False  # 退出时自动清理缓存
+
+    def to_dict(self) -> Dict[str, Any]:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "PerformanceConfig":
+        return cls(
+            max_concurrent_tasks=data.get("max_concurrent_tasks", 2),
+            enable_model_cache=data.get("enable_model_cache", True),
+            auto_clear_cache_on_exit=data.get("auto_clear_cache_on_exit", False)
+        )
+
+
+@dataclass
 class AppConfig:
     """应用主配置"""
     version: str = "1"
     ai: AIConfig = field(default_factory=AIConfig)
     download: DownloadConfig = field(default_factory=DownloadConfig)
+    transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
     export: ExportConfig = field(default_factory=ExportConfig)
     ui: UIConfig = field(default_factory=UIConfig)
+    performance: PerformanceConfig = field(default_factory=PerformanceConfig)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "version": self.version,
             "ai": self.ai.to_dict(),
             "download": self.download.to_dict(),
+            "transcribe": self.transcribe.to_dict(),
             "export": self.export.to_dict(),
-            "ui": self.ui.to_dict()
+            "ui": self.ui.to_dict(),
+            "performance": self.performance.to_dict()
         }
 
     @classmethod
@@ -166,8 +236,10 @@ class AppConfig:
             version=data.get("version", "1"),
             ai=AIConfig.from_dict(data.get("ai", {})),
             download=DownloadConfig.from_dict(data.get("download", {})),
+            transcribe=TranscribeConfig.from_dict(data.get("transcribe", {})),
             export=ExportConfig.from_dict(data.get("export", {})),
-            ui=UIConfig.from_dict(data.get("ui", {}))
+            ui=UIConfig.from_dict(data.get("ui", {})),
+            performance=PerformanceConfig.from_dict(data.get("performance", {}))
         )
 
     @classmethod

@@ -1,9 +1,24 @@
 """统一日志模块"""
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
+
+
+LOG_LEVELS = {
+    "DEBUG": logging.DEBUG,
+    "INFO": logging.INFO,
+    "WARNING": logging.WARNING,
+    "ERROR": logging.ERROR,
+    "CRITICAL": logging.CRITICAL,
+}
+
+_LOG_LEVEL_NAME = os.getenv("VIDEOMIND_LOG_LEVEL", "INFO").upper()
+_LOG_LEVEL = LOG_LEVELS.get(_LOG_LEVEL_NAME, logging.INFO)
+
+_initialized = False
 
 
 def setup_logging(
@@ -22,29 +37,32 @@ def setup_logging(
     if format_string is None:
         format_string = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    # 创建格式化器
     formatter = logging.Formatter(format_string)
 
-    # 配置根日志记录器
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
 
-    # 清除现有处理器
     root_logger.handlers.clear()
 
-    # 添加控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
     console_handler.setFormatter(formatter)
     root_logger.addHandler(console_handler)
 
-    # 添加文件处理器（如果指定）
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
         file_handler = logging.FileHandler(log_file, encoding="utf-8")
         file_handler.setLevel(level)
         file_handler.setFormatter(formatter)
         root_logger.addHandler(file_handler)
+
+
+def _ensure_initialized() -> None:
+    """确保日志系统已初始化"""
+    global _initialized
+    if not _initialized:
+        setup_logging(level=_LOG_LEVEL)
+        _initialized = True
 
 
 def get_logger(name: str) -> logging.Logger:
@@ -57,20 +75,14 @@ def get_logger(name: str) -> logging.Logger:
     Returns:
         logging.Logger: 配置好的日志记录器
     """
+    _ensure_initialized()
     return logging.getLogger(name)
-
-
-# 默认日志级别映射
-LOG_LEVELS = {
-    "DEBUG": logging.DEBUG,
-    "INFO": logging.INFO,
-    "WARNING": logging.WARNING,
-    "ERROR": logging.ERROR,
-    "CRITICAL": logging.CRITICAL,
-}
 
 
 def set_log_level(level_name: str) -> None:
     """设置全局日志级别"""
     level = LOG_LEVELS.get(level_name.upper(), logging.INFO)
     logging.getLogger().setLevel(level)
+
+
+_ensure_initialized()

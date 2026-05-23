@@ -1,7 +1,9 @@
 """转录服务实现 - 基于 faster-whisper"""
 
 import os
+import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -34,6 +36,110 @@ class TranscriptResult:
     formatted_text: str  # 带时间戳的格式
 
 
+class ModelCache:
+    """
+    Whisper 模型缓存管理器
+    
+    使用 LRU (Least Recently Used) 策略管理模型缓存，
+    防止内存无限增长。
+    """
+    
+    MAX_CACHE_SIZE = 2  # 最多缓存 2 个模型
+    
+    def __init__(self, max_size: int = 2):
+        self._cache: OrderedDict[str, WhisperModel] = OrderedDict()
+        self._lock = threading.Lock()
+        self._max_size = max_size
+    
+    def get(self, model_size: str) -> WhisperModel:
+        """
+        获取模型（如果不存在则加载）
+        
+        使用 LRU 策略：访问时移动到末尾，淘汰最旧的
+        """
+        with self._lock:
+            if model_size in self._cache:
+                self._cache.move_to_end(model_size)
+                logger.debug(f"模型 {model_size} 命中缓存")
+                return self._cache[model_size]
+            
+            if len(self._cache) >= self._max_size:
+                oldest_key = next(iter(self._cache))
+                del self._cache[oldest_key]
+                logger.info(f"缓存已满，移除最旧的模型: {oldest_key}")
+            
+            model = self._load_model(model_size)
+            self._cache[model_size] = model
+            return model
+    
+    def _load_model(self, model_size: str) -> WhisperModel:
+        """加载模型"""
+        logger.info(f"加载 Whisper {model_size} 模型...")
+        
+        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
+        
+        device = "auto"
+        compute_type = "int8"
+        
+        model = WhisperModel(
+            model_size,
+            device=device,
+            compute_type=compute_type,
+            download_root=str(Path.home() / ".cache" / "whisper")
+        )
+        
+        logger.info(f"Whisper {model_size} 模型已加载")
+        return model
+    
+    def clear(self) -> int:
+        """清空缓存，返回清理的模型数量"""
+        with self._lock:
+            count = len(self._cache)
+            self._cache.clear()
+            logger.info(f"已清理 {count} 个缓存的 Whisper 模型")
+            return count
+    
+    def get_cached_sizes(self) -> List[str]:
+        """获取已缓存的模型大小列表"""
+        with self._lock:
+            return list(self._cache.keys())
+    
+    @property
+    def size(self) -> int:
+        """当前缓存大小"""
+        with self._lock:
+            return len(self._cache)
+
+
+_model_cache: Optional[ModelCache] = None
+_model_cache_lock = threading.Lock()
+
+
+def _get_model_cache() -> ModelCache:
+    """获取全局模型缓存实例"""
+    global _model_cache
+    if _model_cache is None:
+        with _model_cache_lock:
+            if _model_cache is None:
+                _model_cache = ModelCache()
+    return _model_cache
+
+
+def _get_cached_model(model_size: str) -> WhisperModel:
+    """获取缓存的模型（线程安全）"""
+    return _get_model_cache().get(model_size)
+
+
+def clear_model_cache() -> int:
+    """清理模型缓存（释放内存），返回清理的模型数量"""
+    return _get_model_cache().clear()
+
+
+def get_cached_model_sizes() -> List[str]:
+    """获取已缓存的模型大小列表"""
+    return _get_model_cache().get_cached_sizes()
+
+
 class TranscribeService:
     """语音转录服务 - 基于 faster-whisper"""
 
@@ -52,26 +158,15 @@ class TranscribeService:
         self._model: Optional[WhisperModel] = None
 
     def _load_model(self, progress_callback: Optional[ProgressCallback] = None):
-        """懒加载模型"""
+        """懒加载模型（使用全局缓存）"""
         if self._model is not None:
             return
 
         if progress_callback:
             progress_callback(f"加载 Whisper {self.model_size} 模型...", 0)
 
-        # 设置 HuggingFace 镜像源（国内加速）
-        os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
-        # Apple Silicon 使用 Metal 加速
-        device = "auto"
-        compute_type = "int8"
-
-        self._model = WhisperModel(
-            self.model_size,
-            device=device,
-            compute_type=compute_type,
-            download_root=str(Path.home() / ".cache" / "whisper")
-        )
+        # 使用全局缓存获取模型
+        self._model = _get_cached_model(self.model_size)
 
         if progress_callback:
             progress_callback(f"Whisper {self.model_size} 模型加载完成", 10)

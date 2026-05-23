@@ -1,11 +1,15 @@
-"""服务层接口定义"""
+"""服务层接口定义
+
+定义核心服务的抽象接口，支持多种实现方式。
+遵循依赖倒置原则：高层模块依赖抽象，不依赖具体实现。
+"""
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Protocol
+from typing import Callable, List, Optional, Protocol, runtime_checkable
 
-from ..models.task import TranscriptSegment, VideoMetadata
+from ..models.task import TranscriptSegment, VideoMetadata, Highlight
 
 
 # ============ 回调类型定义 ============
@@ -26,13 +30,38 @@ Args:
 class DownloadResult:
     """下载结果"""
     audio_path: Path
-    video_path: Optional[Path]  # 如果用户选择保留视频
-    metadata: VideoMetadata
+    video_path: Optional[Path] = None
+    metadata: Optional[VideoMetadata] = None
+
+
+class IDownloadService(Protocol):
+    """
+    视频下载服务接口 (Protocol 版本)
+    
+    支持静态类型检查，任何实现以下方法的类都被视为有效实现。
+    """
+    
+    def download(
+        self,
+        url: str,
+        progress_callback: Optional[ProgressCallback] = None,
+        keep_video: bool = False
+    ) -> DownloadResult:
+        """下载视频/音频"""
+        ...
+    
+    def get_metadata(self, url: str) -> Optional[VideoMetadata]:
+        """获取视频元数据"""
+        ...
+    
+    def supports(self, url: str) -> bool:
+        """检查是否支持该 URL"""
+        ...
 
 
 class DownloadServiceInterface(ABC):
     """
-    视频下载服务接口
+    视频下载服务接口 (ABC 版本)
     
     负责从各种平台下载视频/音频
     """
@@ -57,12 +86,12 @@ class DownloadServiceInterface(ABC):
             
         Raises:
             DownloadError: 下载失败
-            UnsupportedPlatformError: 不支持的平
+            UnsupportedPlatformError: 不支持的平台
         """
         raise NotImplementedError()
     
     @abstractmethod
-    def get_metadata(self, url: str) -> VideoMetadata:
+    def get_metadata(self, url: str) -> Optional[VideoMetadata]:
         """
         获取视频元数据（不下载）
         
@@ -96,7 +125,23 @@ class TranscriptResult:
     segments: List[TranscriptSegment]
     language: str
     language_probability: float
-    full_text: str  # 完整文本（去时间戳）
+    full_text: str
+
+
+class ITranscribeService(Protocol):
+    """
+    语音转录服务接口 (Protocol 版本)
+    """
+    
+    def transcribe(
+        self,
+        audio_path: Path,
+        model_size: str = "small",
+        language: Optional[str] = "zh",
+        progress_callback: Optional[ProgressCallback] = None
+    ) -> TranscriptResult:
+        """转录音频为文本"""
+        ...
 
 
 class TranscribeServiceInterface(ABC):
@@ -147,15 +192,52 @@ class TranscribeServiceInterface(ABC):
 @dataclass
 class SummaryResult:
     """摘要结果"""
+    title: str
     summary: str
-    model: str
+    highlights: List[Highlight] = field(default_factory=list)
+    model: str = ""
     tokens_used: Optional[int] = None
-    cost: Optional[float] = None  # 估算成本
+    cost: Optional[float] = None
+
+
+@dataclass
+class AISummaryInput:
+    """AI 摘要输入"""
+    transcript: str
+    title: Optional[str] = None
+    author: Optional[str] = None
+    platform: Optional[str] = None
+    duration: Optional[int] = None
+    language: str = "zh"
+
+
+class IAIProvider(Protocol):
+    """
+    AI 提供商接口 (Protocol 版本)
+    
+    支持多种 AI 模型实现，包括：
+    - AIService (原有实现)
+    - DeepSeekSkill (Skills 实现)
+    - OpenAISkill (未来实现)
+    - OllamaSkill (未来实现)
+    """
+    
+    def generate_summary(
+        self,
+        input_data: AISummaryInput,
+        progress_callback: Optional[ProgressCallback] = None
+    ) -> SummaryResult:
+        """生成摘要"""
+        ...
+    
+    def is_available(self) -> bool:
+        """检查服务是否可用"""
+        ...
 
 
 class AIServiceInterface(ABC):
     """
-    AI 服务接口
+    AI 服务接口 (ABC 版本)
     
     支持多厂商 LLM (OpenAI/DeepSeek/Anthropic/本地Ollama)
     """
@@ -210,3 +292,80 @@ class AIServiceInterface(ABC):
             bool: 配置是否有效
         """
         raise NotImplementedError()
+
+
+# ============ 导出服务接口 ============
+
+@dataclass
+class ExportInput:
+    """导出输入"""
+    title: str
+    author: str
+    platform: str
+    url: str
+    transcript: Optional[str] = None
+    summary: Optional[str] = None
+    highlights: List[Highlight] = field(default_factory=list)
+    audio_path: Optional[Path] = None
+    video_path: Optional[Path] = None
+    duration: int = 0
+    created_at: Optional[str] = None
+
+
+@dataclass
+class ExportOutput:
+    """导出输出"""
+    success: bool
+    output_path: Optional[Path] = None
+    error_message: Optional[str] = None
+    format: str = ""
+
+
+class IExporter(Protocol):
+    """
+    导出器接口 (Protocol 版本)
+    
+    支持多种导出目标，包括：
+    - LocalExporter (原有实现)
+    - ObsidianExporter (原有实现)
+    - LocalExportSkill (Skills 实现)
+    - ObsidianExportSkill (Skills 实现)
+    - NotionExporter (未来实现)
+    """
+    
+    @property
+    def name(self) -> str:
+        """导出器名称"""
+        ...
+    
+    def export(
+        self,
+        input_data: ExportInput,
+        progress_callback: Optional[ProgressCallback] = None
+    ) -> ExportOutput:
+        """执行导出"""
+        ...
+    
+    def is_available(self) -> bool:
+        """检查导出器是否可用"""
+        ...
+
+
+class IExportOrchestrator(Protocol):
+    """
+    导出编排器接口 (Protocol 版本)
+    
+    管理多个导出目标，协调并发导出。
+    """
+    
+    def export_all(
+        self,
+        input_data: ExportInput,
+        progress_callback: Optional[ProgressCallback] = None
+    ) -> List[ExportOutput]:
+        """执行所有导出"""
+        ...
+    
+    def get_exporters(self) -> List[IExporter]:
+        """获取所有导出器"""
+        ...
