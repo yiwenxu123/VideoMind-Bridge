@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
     QLabel, QLineEdit, QComboBox, QPushButton, QSpinBox,
     QCheckBox, QFileDialog, QMessageBox,
     QDialogButtonBox, QFormLayout, QGroupBox, QWidget,
-    QSlider, QSizePolicy
+    QSlider, QSizePolicy, QScrollArea
 )
 from PySide6.QtCore import Qt
 from pathlib import Path
@@ -94,6 +94,10 @@ class SettingsDialog(QDialog):
         # 下载设置标签页
         self.download_tab = self._create_download_tab()
         self.tab_widget.addTab(self.download_tab, "⬇️ 下载")
+
+        # 提取器 Key 标签页
+        self.extractor_tab = self._create_extractor_tab()
+        self.tab_widget.addTab(self.extractor_tab, "🔌 提取器 Keys")
         
         layout.addWidget(self.tab_widget)
 
@@ -490,6 +494,169 @@ class SettingsDialog(QDialog):
         
         return tab
 
+    def _create_extractor_tab(self) -> QWidget:
+        """创建提取器 Key 管理标签页"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        layout.setSpacing(20)
+        layout.setContentsMargins(15, 15, 15, 15)
+
+        # 说明文本
+        hint = QLabel("💡 配置提取器 API Key 后可启用对应提取能力，Key 将安全存储在系统密钥环中")
+        hint.setStyleSheet("color: #666; font-size: 12px;")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        # 滚动区域
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(20)
+        scroll_layout.setContentsMargins(0, 0, 0, 0)
+
+        # 存储状态标签和输入框的引用
+        self._extractor_status_labels: dict[str, QLabel] = {}
+        self._extractor_inputs: dict[str, QLineEdit] = {}
+
+        # 动态遍历 EXTRACTOR_GROUPS 构建 UI
+        groups = self.config_manager.EXTRACTOR_GROUPS
+        providers = self.config_manager.EXTRACTOR_PROVIDERS
+
+        for group_name, group in groups.items():
+            group_box = QGroupBox(group["label"])
+            group_box.setStyleSheet("QGroupBox { font-weight: bold; font-size: 13px; }")
+            group_layout = QVBoxLayout(group_box)
+            group_layout.setSpacing(10)
+
+            for key_name in group["keys"]:
+                info = providers.get(key_name, {})
+                label_text = info.get("label", key_name)
+
+                key_row = QHBoxLayout()
+                key_row.setSpacing(8)
+
+                # Key 名称标签
+                name_label = QLabel(label_text)
+                name_label.setMinimumWidth(140)
+                key_row.addWidget(name_label)
+
+                # 状态指示器
+                status_label = QLabel("⏳")
+                status_label.setFixedWidth(30)
+                key_row.addWidget(status_label)
+                self._extractor_status_labels[key_name] = status_label
+
+                # 密码输入框
+                input_field = QLineEdit()
+                input_field.setEchoMode(QLineEdit.EchoMode.Password)
+                input_field.setPlaceholderText(f"输入 {label_text}...")
+                input_field.setMinimumWidth(280)
+                key_row.addWidget(input_field)
+                self._extractor_inputs[key_name] = input_field
+
+                # 显示/隐藏按钮
+                toggle_btn = QPushButton("显示")
+                toggle_btn.setCheckable(True)
+                toggle_btn.setFixedWidth(60)
+                toggle_btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 5px 10px;
+                        border: 1px solid #ccc;
+                        border-radius: 4px;
+                        background: #f5f5f5;
+                    }
+                    QPushButton:hover {
+                        background: #e0e0e0;
+                    }
+                """)
+                toggle_btn.toggled.connect(
+                    lambda checked, inp=input_field, btn=toggle_btn: (
+                        inp.setEchoMode(
+                            QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
+                        ),
+                        btn.setText("隐藏" if checked else "显示")
+                    )
+                )
+                key_row.addWidget(toggle_btn)
+
+                # 保存按钮
+                save_btn = QPushButton("保存")
+                save_btn.setFixedWidth(60)
+                save_btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 5px 10px;
+                        border: 1px solid #4CAF50;
+                        border-radius: 4px;
+                        background: #E8F5E9;
+                        color: #2E7D32;
+                    }
+                    QPushButton:hover {
+                        background: #C8E6C9;
+                    }
+                """)
+                save_btn.clicked.connect(
+                    lambda checked, kn=key_name, inp=input_field: self._on_save_extractor_key(kn, inp)
+                )
+                key_row.addWidget(save_btn)
+
+                # 删除按钮
+                delete_btn = QPushButton("删除")
+                delete_btn.setFixedWidth(60)
+                delete_btn.setStyleSheet("""
+                    QPushButton {
+                        padding: 5px 10px;
+                        border: 1px solid #f44336;
+                        border-radius: 4px;
+                        background: #FFEBEE;
+                        color: #C62828;
+                    }
+                    QPushButton:hover {
+                        background: #FFCDD2;
+                    }
+                """)
+                delete_btn.clicked.connect(
+                    lambda checked, kn=key_name, inp=input_field: self._on_delete_extractor_key(kn, inp)
+                )
+                key_row.addWidget(delete_btn)
+
+                group_layout.addLayout(key_row)
+
+            scroll_layout.addWidget(group_box)
+
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_content)
+        layout.addWidget(scroll, 1)
+
+        return tab
+
+    def _on_save_extractor_key(self, name: str, input_field: QLineEdit):
+        """保存单个提取器 Key"""
+        value = input_field.text().strip()
+        if not value:
+            return
+        self.config_manager.set_extractor_key(name, value)
+        self._refresh_extractor_status()
+
+    def _on_delete_extractor_key(self, name: str, input_field: QLineEdit):
+        """删除单个提取器 Key"""
+        self.config_manager.delete_extractor_key(name)
+        input_field.clear()
+        self._refresh_extractor_status()
+
+    def _refresh_extractor_status(self):
+        """刷新所有提取器 Key 的状态指示器"""
+        status = self.config_manager.list_extractor_key_status()
+        for group_name, group in status.items():
+            for key_info in group["keys"]:
+                key_name = key_info["name"]
+                configured = key_info["configured"]
+                label = self._extractor_status_labels.get(key_name)
+                if label:
+                    label.setText("✅" if configured else "❌")
+
     def _browse_obsidian_vault(self):
         """浏览 Obsidian Vault 路径"""
         path = QFileDialog.getExistingDirectory(self, "选择 Obsidian Vault")
@@ -557,6 +724,10 @@ class SettingsDialog(QDialog):
         self.video_quality_combo.setCurrentText(self.QUALITY_MAP.to_display(config.download.video_quality, "最佳质量"))
         
         self.download_video_check.setChecked(config.download.download_video)
+
+        # 提取器 Key 状态
+        if hasattr(self, "_extractor_status_labels"):
+            self._refresh_extractor_status()
 
     def _on_save(self):
         """保存设置"""

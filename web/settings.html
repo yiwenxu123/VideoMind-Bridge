@@ -43,6 +43,24 @@
     .api-key-row { display:flex; gap:8px; }
     .api-key-row input { flex:1; }
     .api-key-row .btn-toggle-key { background:none; border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:4px 10px; font-size:12px; white-space:nowrap; }
+    /* Extractor key management */
+    .key-group { margin-bottom:16px; padding:12px; background:#fafafa; border-radius:8px; border:1px solid var(--border); }
+    .key-group-header { display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:14px; font-weight:600; }
+    .key-group-status { font-size:12px; font-weight:400; color:#666; }
+    .key-entry { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+    .key-entry:last-child { margin-bottom:0; }
+    .key-entry-label { font-size:12px; font-weight:600; color:#555; min-width:110px; flex-shrink:0; }
+    .key-entry-status { font-size:12px; min-width:72px; flex-shrink:0; }
+    .key-entry-input { flex:1; min-width:160px; }
+    .key-entry-input input { width:100%; padding:6px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; box-sizing:border-box; }
+    .key-entry-input input:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(99,102,241,0.15); }
+    .key-entry .btn-toggle-key { background:none; border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:4px 8px; font-size:12px; white-space:nowrap; }
+    .key-entry .btn-small { padding:6px 12px; border-radius:6px; cursor:pointer; font-size:12px; border:none; font-weight:600; }
+    .key-entry .btn-save-key { background:var(--primary); color:#fff; }
+    .key-entry .btn-save-key:hover { opacity:0.9; }
+    .key-entry .btn-delete-key { background:#fee2e2; color:#dc2626; }
+    .key-entry .btn-delete-key:hover { background:#fecaca; }
+    .key-entry .btn-small:disabled { opacity:0.5; cursor:not-allowed; }
   </style>
 </head>
 <body>
@@ -158,6 +176,15 @@
           <label><input type="checkbox" id="save-srt" checked> 保存 SRT 字幕</label>
           <label><input type="checkbox" id="save-transcript" checked> 保存纯文本转录</label>
           <label><input type="checkbox" id="save-markdown" checked> 保存 Markdown</label>
+        </div>
+      </section>
+
+      <!-- 提取器 API Key 设置 -->
+      <section class="card settings-section">
+        <h2>🔌 提取器 API Key</h2>
+        <p style="font-size:12px;color:#888;margin:-8px 0 12px">管理各提取器的 API Key 配置</p>
+        <div id="extractor-keys-container">
+          <p style="font-size:13px;color:#999">加载中...</p>
         </div>
       </section>
 
@@ -290,16 +317,94 @@
       }
     }
 
-    // 切换 API Key 可见性
-    function toggleKeyVisibility() {
-      const input = document.getElementById('ai-api-key');
-      const btn = document.getElementById('toggle-key-btn');
+    // 切换 API Key 可见性（通用版本，兼容 AI API Key 无参调用）
+    function toggleKeyVisibility(inputId, btnId) {
+      inputId = inputId || 'ai-api-key';
+      btnId = btnId || 'toggle-key-btn';
+      const input = document.getElementById(inputId);
+      const btn = document.getElementById(btnId);
       if (input.type === 'password') {
         input.type = 'text';
         btn.textContent = '隐藏';
       } else {
         input.type = 'password';
         btn.textContent = '显示';
+      }
+    }
+
+    // 加载提取器 Key 状态
+    async function loadKeys() {
+      const container = document.getElementById('extractor-keys-container');
+      try {
+        const data = await fetchJSON(`${API}/keys`);
+        const groups = data.groups || {};
+        let html = '';
+        for (const [groupName, group] of Object.entries(groups)) {
+          const statusIcon = group.all_configured ? '✅' : '❌';
+          const statusText = group.all_configured ? '全部已配置' : '部分未配置';
+          html += `<div class="key-group">
+            <div class="key-group-header">
+              <span>${group.label}</span>
+              <span class="key-group-status">${statusIcon} ${statusText}</span>
+            </div>`;
+          for (const key of group.keys) {
+            const configured = key.configured ? '✅ 已配置' : '❌ 未配置';
+            const inputId = `key-input-${key.name}`;
+            const btnId = `key-toggle-${key.name}`;
+            html += `<div class="key-entry">
+              <span class="key-entry-label">${key.label}</span>
+              <span class="key-entry-status">${configured}</span>
+              <div class="key-entry-input">
+                <input type="password" id="${inputId}" placeholder="输入新的 ${key.label}">
+              </div>
+              <button class="btn-toggle-key" id="${btnId}" onclick="toggleKeyVisibility('${inputId}', '${btnId}')">显示</button>
+              <button class="btn-small btn-save-key" onclick="saveExtractorKey('${key.name}')">保存</button>
+              <button class="btn-small btn-delete-key" onclick="deleteExtractorKey('${key.name}')">删除</button>
+            </div>`;
+          }
+          html += `</div>`;
+        }
+        container.innerHTML = html;
+      } catch (e) {
+        container.innerHTML = `<p style="font-size:13px;color:var(--danger)">❌ 加载失败: ${e.message}</p>`;
+      }
+    }
+
+    async function saveExtractorKey(name) {
+      const input = document.getElementById(`key-input-${name}`);
+      const value = input.value.trim();
+      if (!value) {
+        input.focus();
+        return;
+      }
+      const btns = document.querySelectorAll('.btn-save-key');
+      btns.forEach(b => b.disabled = true);
+      try {
+        await fetchJSON(`${API}/keys`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name, value }),
+        });
+        input.value = '';
+        await loadKeys();
+      } catch (e) {
+        alert('保存失败: ' + e.message);
+      } finally {
+        btns.forEach(b => b.disabled = false);
+      }
+    }
+
+    async function deleteExtractorKey(name) {
+      if (!confirm(`确定要删除 "${name}" 的配置吗？`)) return;
+      const btns = document.querySelectorAll('.btn-delete-key');
+      btns.forEach(b => b.disabled = true);
+      try {
+        await fetchJSON(`${API}/keys/${name}`, { method: 'DELETE' });
+        await loadKeys();
+      } catch (e) {
+        alert('删除失败: ' + e.message);
+      } finally {
+        btns.forEach(b => b.disabled = false);
       }
     }
 
@@ -315,6 +420,7 @@
     }
 
     loadSettings();
+    loadKeys();
     loadStatus();
     setInterval(loadStatus, 10000);
   </script>
