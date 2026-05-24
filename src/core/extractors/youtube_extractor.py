@@ -9,13 +9,13 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # YouTube 视频 ID 模式
 _VIDEO_ID_RE = re.compile(
@@ -85,7 +85,7 @@ class YouTubeExtractor(ContentExtractor):
                 error=f"YouTube 提取失败: {e}",
             )
 
-    def _extract_video_id(self, url: str) -> Optional[str]:
+    def _extract_video_id(self, url: str) -> str | None:
         """从 URL 提取视频 ID"""
         m = _VIDEO_ID_RE.search(url)
         if m:
@@ -110,7 +110,7 @@ class YouTubeExtractor(ContentExtractor):
         except Exception:
             return ""
 
-    def _get_transcript(self, video_id: str) -> Tuple[str, List[Dict[str, Any]], Optional[str]]:
+    def _get_transcript(self, video_id: str) -> tuple[str, list[dict[str, Any]], str | None]:
         """通过 youtube-transcript-api 获取字幕
 
         直接调用 youtube-transcript-api 的内置 API 端点。
@@ -125,8 +125,8 @@ class YouTubeExtractor(ContentExtractor):
                 return self._get_transcript_via_youtube_api(video_id)
 
             data = resp.json()
-            segments: List[Dict[str, Any]] = []
-            text_parts: List[str] = []
+            segments: list[dict[str, Any]] = []
+            text_parts: list[str] = []
 
             for item in data:
                 text = item.get("text", "")
@@ -145,7 +145,7 @@ class YouTubeExtractor(ContentExtractor):
 
     def _get_transcript_via_youtube_api(
         self, video_id: str,
-    ) -> Tuple[str, List[Dict[str, Any]], Optional[str]]:
+    ) -> tuple[str, list[dict[str, Any]], str | None]:
         """通过 YouTube 内部字幕 API 获取"""
         try:
             watch_url = f"https://www.youtube.com/watch?v={video_id}"
@@ -193,8 +193,8 @@ class YouTubeExtractor(ContentExtractor):
             # YouTube 字幕 XML 命名空间
             ns = {"": "http://www.w3.org/ns/ttml"}
 
-            text_parts: List[str] = []
-            segments: List[Dict[str, Any]] = []
+            text_parts: list[str] = []
+            segments: list[dict[str, Any]] = []
 
             for p_elem in root.findall(".//p", ns):
                 text = "".join(p_elem.itertext()).strip()

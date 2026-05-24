@@ -1,16 +1,22 @@
 """重试机制 - 自动重试装饰器和策略"""
 
-import time
 import random
-from functools import wraps
-from typing import Callable, Optional, Type, Tuple, Any
+import time
+from collections.abc import Callable
 from enum import Enum
+from functools import wraps
+from typing import Any
 
-from .exceptions import (
-    RetryableError, NetworkError, ServiceUnavailableError, TimeoutError,
-    DownloadError, TranscribeError, AIError
-)
 from . import get_logger
+from .exceptions import (
+    AIError,
+    DownloadError,
+    NetworkError,
+    RetryableError,
+    ServiceUnavailableError,
+    TimeoutError,
+    TranscribeError,
+)
 
 logger = get_logger(__name__)
 
@@ -38,8 +44,8 @@ class RetryConfig:
         max_delay: float = DEFAULT_MAX_DELAY,
         strategy: RetryStrategy = RetryStrategy.EXPONENTIAL,
         jitter: float = DEFAULT_JITTER,
-        retryable_exceptions: Tuple[Type[Exception], ...] = (RetryableError,),
-        on_retry: Optional[Callable[[Exception, int, float], None]] = None
+        retryable_exceptions: tuple[type[Exception], ...] = (RetryableError,),
+        on_retry: Callable[[Exception, int, float], None] | None = None
     ):
         self.max_retries = max_retries
         self.base_delay = base_delay
@@ -157,8 +163,8 @@ def retry(
     base_delay: float = RetryConfig.DEFAULT_BASE_DELAY,
     max_delay: float = RetryConfig.DEFAULT_MAX_DELAY,
     strategy: RetryStrategy = RetryStrategy.EXPONENTIAL,
-    retryable_exceptions: Tuple[Type[Exception], ...] = (RetryableError,),
-    on_retry: Optional[Callable[[Exception, int, float], None]] = None
+    retryable_exceptions: tuple[type[Exception], ...] = (RetryableError,),
+    on_retry: Callable[[Exception, int, float], None] | None = None
 ):
     """
     简化版重试装饰器
@@ -193,7 +199,7 @@ class RetryableOperation:
         self,
         operation: Callable,
         config: RetryConfig,
-        name: Optional[str] = None
+        name: str | None = None
     ):
         self.operation = operation
         self.config = config
@@ -284,8 +290,7 @@ def is_retryable_error(error: Exception) -> bool:
             # 转录错误
             'MODEL_LOAD_FAILED', 'TRANSCRIBE_FAILED',
             # AI 错误
-            'RATE_LIMIT_EXCEEDED', 'TIMEOUT', 'NETWORK_ERROR',
-            'GENERATION_FAILED'
+            'RATE_LIMIT_EXCEEDED', 'TIMEOUT', 'GENERATION_FAILED'
         }
         if error.error_code in retryable_codes:
             return True

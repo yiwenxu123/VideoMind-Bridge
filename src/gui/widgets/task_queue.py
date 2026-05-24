@@ -1,21 +1,24 @@
 """任务队列可视化组件"""
 
 import logging
-from enum import Enum, auto
 from dataclasses import dataclass
-from typing import Optional
+from enum import Enum, auto
 from uuid import uuid4
 
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QProgressBar,
-    QListWidget, QListWidgetItem, QFrame
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QProgressBar,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal, QThread, QSize
-from PySide6.QtGui import QFont
 
 from .mode_selector import ProcessingMode
-from .target_selector import ExportTarget
 
 logger = logging.getLogger(__name__)
 
@@ -357,7 +360,7 @@ class TaskQueueWidget(QWidget):
         # 使用固定大小，避免动态计算sizeHint导致的问题
         item.setSizeHint(QSize(400, 80))
         self.list_widget.addItem(item)
-        
+
         # 使用QTimer延迟设置widget，确保item已完全初始化
         from PySide6.QtCore import QTimer
         QTimer.singleShot(0, lambda: self._set_task_widget(item, task_widget))
@@ -398,7 +401,7 @@ class TaskQueueWidget(QWidget):
         if task_id in self.tasks:
             self.tasks[task_id].update_title(title)
 
-    def get_task_info(self, task_id: str) -> Optional[TaskInfo]:
+    def get_task_info(self, task_id: str) -> TaskInfo | None:
         """获取任务信息"""
         if task_id in self.tasks:
             return self.tasks[task_id].get_task_info()

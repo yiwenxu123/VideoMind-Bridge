@@ -13,13 +13,13 @@ import json
 import os
 import re
 import time
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # 环境变量名称
 ENV_COZE_FLOW_ID = "COZE_BOT_ID"  # Coze workflow/bot ID
@@ -125,7 +125,7 @@ class CozeExtractor(ContentExtractor):
                 error=f"Coze 提取异常: {e}",
             )
 
-    def _call_coze_workflow(self, url: str) -> Optional[Dict[str, Any]]:
+    def _call_coze_workflow(self, url: str) -> dict[str, Any] | None:
         """调用 Coze 工作流 API
 
         参考: Hermes coze-workflow.md 的 chat API 流程
@@ -135,7 +135,7 @@ class CozeExtractor(ContentExtractor):
 
         return self._call_chat_api(url)
 
-    def _call_chat_api(self, url: str) -> Optional[Dict[str, Any]]:
+    def _call_chat_api(self, url: str) -> dict[str, Any] | None:
         """通过 Coze Chat API 调用工作流"""
         headers = {
             "Authorization": f"Bearer {self._api_key}",
@@ -210,7 +210,7 @@ class CozeExtractor(ContentExtractor):
                 "source": "coze_chat",
             }
 
-    def _call_workflow_run(self, url: str) -> Optional[Dict[str, Any]]:
+    def _call_workflow_run(self, url: str) -> dict[str, Any] | None:
         """通过 Coze Workflow Run API (简化版, 同步)"""
         headers = {
             "Authorization": f"Bearer {self._api_key}",

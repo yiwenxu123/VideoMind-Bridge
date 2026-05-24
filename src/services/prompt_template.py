@@ -1,13 +1,13 @@
 """Prompt 模板系统 - 支持多种摘要风格"""
 
+import logging
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Any
 from enum import Enum
 from pathlib import Path
-import yaml
-import logging
+from typing import Any
 
-from jinja2 import Template, Environment, BaseLoader
+import yaml
+from jinja2 import BaseLoader, Environment
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +31,11 @@ class PromptTemplate:
     description: str              # 描述
     template: str                 # Jinja2 模板内容
     style: TemplateStyle          # 模板风格
-    variables: List[str] = field(default_factory=list)  # 模板变量列表
+    variables: list[str] = field(default_factory=list)  # 模板变量列表
     is_default: bool = False      # 是否为默认模板
     is_builtin: bool = True       # 是否为内置模板
-    created_at: Optional[str] = None  # 创建时间
-    updated_at: Optional[str] = None  # 更新时间
+    created_at: str | None = None  # 创建时间
+    updated_at: str | None = None  # 更新时间
 
     def render(self, **kwargs) -> str:
         """渲染模板"""
@@ -43,7 +43,7 @@ class PromptTemplate:
         template = env.from_string(self.template)
         return template.render(**kwargs)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转换为字典"""
         return {
             "id": self.id,
@@ -59,7 +59,7 @@ class PromptTemplate:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PromptTemplate":
+    def from_dict(cls, data: dict[str, Any]) -> "PromptTemplate":
         """从字典创建"""
         return cls(
             id=data["id"],
@@ -78,7 +78,7 @@ class PromptTemplate:
 class PromptTemplateManager:
     """Prompt 模板管理器"""
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(self, storage_path: Path | None = None):
         """
         初始化模板管理器
 
@@ -91,7 +91,7 @@ class PromptTemplateManager:
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
-        self._templates: Dict[str, PromptTemplate] = {}
+        self._templates: dict[str, PromptTemplate] = {}
         self._load_builtin_templates()
         self._load_custom_templates()
 
@@ -106,7 +106,7 @@ class PromptTemplateManager:
         custom_file = self.storage_path / "custom_templates.yaml"
         if custom_file.exists():
             try:
-                with open(custom_file, "r", encoding="utf-8") as f:
+                with open(custom_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
 
                 if data and isinstance(data, dict):
@@ -139,7 +139,7 @@ class PromptTemplateManager:
             logger.error(f"保存自定义模板失败: {e}")
             return False
 
-    def _create_builtin_templates(self) -> List[PromptTemplate]:
+    def _create_builtin_templates(self) -> list[PromptTemplate]:
         """创建内置模板"""
         from datetime import datetime
         now = datetime.now().isoformat()
@@ -214,7 +214,7 @@ class PromptTemplateManager:
             ),
         ]
 
-    def get_template(self, template_id: str) -> Optional[PromptTemplate]:
+    def get_template(self, template_id: str) -> PromptTemplate | None:
         """获取指定模板"""
         return self._templates.get(template_id)
 
@@ -227,11 +227,11 @@ class PromptTemplateManager:
         # 如果没有设置默认，返回第一个
         return next(iter(self._templates.values()))
 
-    def get_all_templates(self) -> List[PromptTemplate]:
+    def get_all_templates(self) -> list[PromptTemplate]:
         """获取所有模板"""
         return list(self._templates.values())
 
-    def get_templates_by_style(self, style: TemplateStyle) -> List[PromptTemplate]:
+    def get_templates_by_style(self, style: TemplateStyle) -> list[PromptTemplate]:
         """按风格获取模板"""
         return [t for t in self._templates.values() if t.style == style]
 
@@ -241,14 +241,13 @@ class PromptTemplateManager:
         description: str,
         template: str,
         style: TemplateStyle = TemplateStyle.DEFAULT,
-        variables: Optional[List[str]] = None,
+        variables: list[str] | None = None,
         set_as_default: bool = False
     ) -> PromptTemplate:
         """创建自定义模板"""
-        from datetime import datetime
-
         # 生成唯一 ID
         import uuid
+        from datetime import datetime
         template_id = f"custom_{uuid.uuid4().hex[:8]}"
 
         new_template = PromptTemplate(
@@ -277,11 +276,11 @@ class PromptTemplateManager:
     def update_template(
         self,
         template_id: str,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
-        template: Optional[str] = None,
-        style: Optional[TemplateStyle] = None,
-        set_as_default: Optional[bool] = None
+        name: str | None = None,
+        description: str | None = None,
+        template: str | None = None,
+        style: TemplateStyle | None = None,
+        set_as_default: bool | None = None
     ) -> bool:
         """更新模板"""
         if template_id not in self._templates:
@@ -371,10 +370,10 @@ class PromptTemplateManager:
             logger.error(f"导出模板失败: {e}")
             return False
 
-    def import_template(self, file_path: Path) -> Optional[PromptTemplate]:
+    def import_template(self, file_path: Path) -> PromptTemplate | None:
         """从文件导入模板"""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
 
             if isinstance(data, dict):
@@ -607,7 +606,7 @@ A: [一句话回答]
 
 
 # 全局模板管理器实例
-_template_manager: Optional[PromptTemplateManager] = None
+_template_manager: PromptTemplateManager | None = None
 
 
 def get_prompt_template_manager() -> PromptTemplateManager:

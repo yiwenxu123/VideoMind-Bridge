@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ContentGrade(Enum):
@@ -65,8 +65,8 @@ class PrescreenResult:
     duration_seconds: float = 0.0
     grade: ContentGrade = ContentGrade.C
     score: float = 50.0  # 0-100
-    reasons: List[str] = field(default_factory=list)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    reasons: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -92,14 +92,14 @@ class ExtractResult:
     url: str
     cost_tier: CostTier
     duration_seconds: float = 0.0  # 视频时长(秒)
-    language: Optional[str] = None
-    segments: Optional[List[Dict[str, Any]]] = None  # 字幕片段
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    language: str | None = None
+    segments: list[dict[str, Any]] | None = None  # 字幕片段
+    metadata: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """转为字典 (Hermes 兼容)"""
-        d: Dict[str, Any] = {
+        d: dict[str, Any] = {
             "success": self.success,
             "platform": self.platform,
             "title": self.title,

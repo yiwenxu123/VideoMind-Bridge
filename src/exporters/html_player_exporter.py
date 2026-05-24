@@ -2,14 +2,11 @@
 
 import html
 import json
-from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple, List
 
-from .base import BaseExporter
 from ..models.task import ExportContext, ExportResult, ExportTarget
 from ..services.ai_service import Highlight
+from .base import BaseExporter
 
 
 class HTMLPlayerExporter(BaseExporter):
@@ -35,7 +32,7 @@ class HTMLPlayerExporter(BaseExporter):
     def __init__(self):
         pass
 
-    def validate_config(self) -> Tuple[bool, str]:
+    def validate_config(self) -> tuple[bool, str]:
         """验证配置 - 此导出器无需特殊配置"""
         return True, ""
 
@@ -46,7 +43,7 @@ class HTMLPlayerExporter(BaseExporter):
         输出文件:
         - player.html: 独立的播放器页面
         """
-        output_dir: Optional[Path] = None
+        output_dir: Path | None = None
         if context.video_path:
             output_dir = context.video_path.parent
         elif context.audio_path:
@@ -99,7 +96,7 @@ class HTMLPlayerExporter(BaseExporter):
             title = title.replace(char, '_')
         return title[:100] if title else "untitled"
 
-    def _extract_highlights_from_context(self, context: ExportContext) -> List[Highlight]:
+    def _extract_highlights_from_context(self, context: ExportContext) -> list[Highlight]:
         """从 ExportContext 提取时间轴数据"""
         highlights_data = context.config.get("highlights", [])
         highlights = []
@@ -112,7 +109,7 @@ class HTMLPlayerExporter(BaseExporter):
                 ))
         return highlights
 
-    def _extract_subtitles_from_context(self, context: ExportContext) -> List[dict]:
+    def _extract_subtitles_from_context(self, context: ExportContext) -> list[dict]:
         """从 ExportContext 提取字幕数据"""
         subtitles = []
         for seg in context.transcript_segments:
@@ -136,8 +133,8 @@ class HTMLPlayerExporter(BaseExporter):
         metadata,
         video_filename: str,
         audio_filename: str,
-        highlights: List[Highlight],
-        subtitles: List[dict],
+        highlights: list[Highlight],
+        subtitles: list[dict],
         summary: str
     ) -> str:
         """生成完整的 HTML 播放器页面"""
@@ -536,11 +533,10 @@ class HTMLPlayerExporter(BaseExporter):
 
 # 测试代码
 if __name__ == "__main__":
-    import sys
     from pathlib import Path
     from uuid import uuid4
 
-    from ..models.task import VideoMetadata, ExportContext, TranscriptSegment
+    from ..models.task import ExportContext, TranscriptSegment, VideoMetadata
 
     # 创建测试上下文
     context = ExportContext(

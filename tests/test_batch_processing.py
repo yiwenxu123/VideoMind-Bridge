@@ -1,9 +1,7 @@
 """批量处理功能测试"""
 
 import sys
-from pathlib import Path
 
-from src.gui.widgets.url_input import URLInputWidget
 from PySide6.QtWidgets import QApplication
 
 

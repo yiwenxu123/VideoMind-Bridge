@@ -1,10 +1,9 @@
 """平台相关工具函数 - 处理跨平台操作"""
 
+import logging
 import platform
 import subprocess
 from pathlib import Path
-from typing import Optional
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +157,7 @@ class URLValidator:
             return False
 
     @staticmethod
-    def get_platform_from_url(url: str) -> Optional[str]:
+    def get_platform_from_url(url: str) -> str | None:
         """
         从 URL 识别视频平台
 

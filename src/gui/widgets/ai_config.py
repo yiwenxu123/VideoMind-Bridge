@@ -1,15 +1,21 @@
 """AI 引擎配置组件"""
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QComboBox, QPushButton, QLineEdit,
-    QGroupBox, QMessageBox, QDialog, QTextEdit,
-    QDialogButtonBox, QFormLayout
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
 )
-from PySide6.QtCore import Qt
 
-from ...services.prompt_template import get_prompt_template_manager, TemplateStyle
 from ...services.config_manager import get_config_manager
+from ...services.prompt_template import get_prompt_template_manager
 from ...utils import get_logger
 
 logger = get_logger(__name__)

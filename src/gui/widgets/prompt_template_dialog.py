@@ -1,16 +1,26 @@
 """Prompt 模板管理对话框"""
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem,
-    QLabel, QPushButton, QTextEdit, QLineEdit, QComboBox, QMessageBox,
-    QFormLayout, QDialogButtonBox, QSplitter, QWidget, QCheckBox
-)
 from PySide6.QtCore import Qt
-
-from ...services.prompt_template import (
-    get_prompt_template_manager, TemplateStyle, PromptTemplate
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QFormLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QSplitter,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from ...config.constants import DialogConfig, Icons, SliderConfig, SpinBoxConfig
+
+from ...config.constants import DialogConfig, Icons
+from ...services.prompt_template import TemplateStyle, get_prompt_template_manager
 
 
 class PromptTemplateDialog(QDialog):

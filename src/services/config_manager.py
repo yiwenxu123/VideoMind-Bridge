@@ -3,11 +3,12 @@
 import logging
 import os
 import threading
-import yaml
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Optional
 
-from ..models.config import AppConfig, AIConfig, DownloadConfig, ExportConfig, UIConfig
+import yaml
+
+from ..models.config import AIConfig, AppConfig, DownloadConfig, ExportConfig, UIConfig
 from ..utils.credential_manager import CredentialManager
 
 logger = logging.getLogger(__name__)
@@ -49,7 +50,7 @@ class ConfigManager:
         """从 YAML 文件加载配置"""
         if self._config_file.exists():
             try:
-                with open(self._config_file, "r", encoding="utf-8") as f:
+                with open(self._config_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                 if data:
                     return AppConfig.from_dict(data)
@@ -71,9 +72,9 @@ class ConfigManager:
                 # 迁移成功后，清空配置文件中的 API Key
                 ai_config.api_key = ""
                 self.save()
-                logger.info(f"API Key 已迁移到系统密钥环，配置文件中的明文已清除")
+                logger.info("API Key 已迁移到系统密钥环，配置文件中的明文已清除")
 
-    def get_api_key(self, provider: Optional[str] = None) -> Optional[str]:
+    def get_api_key(self, provider: str | None = None) -> str | None:
         """
         获取 API Key（从密钥环）
 
@@ -87,7 +88,7 @@ class ConfigManager:
             provider = self._config.ai.engine.lower()
         return CredentialManager.get_api_key(provider)
 
-    def set_api_key(self, api_key: str, provider: Optional[str] = None) -> bool:
+    def set_api_key(self, api_key: str, provider: str | None = None) -> bool:
         """
         设置 API Key（保存到密钥环）
 
@@ -104,7 +105,7 @@ class ConfigManager:
 
     # ── 提取器 API Key 管理 ──────────────────────────────────────
 
-    EXTRACTOR_PROVIDERS: Dict[str, Dict[str, str]] = {
+    EXTRACTOR_PROVIDERS: dict[str, dict[str, str]] = {
         "coze": {"env": "COZE_API_KEY", "label": "Coze API Token"},
         "tikhub": {"env": "TIKHUB_API_KEY", "label": "Tikhub.io API Key"},
         "apify": {"env": "APIFY_API_KEY", "label": "Apify API Token"},
@@ -113,7 +114,7 @@ class ConfigManager:
         "aliyun_appkey": {"env": "ALIYUN_APPKEY", "label": "阿里云 AppKey"},
     }
 
-    EXTRACTOR_GROUPS: Dict[str, Dict[str, Any]] = {
+    EXTRACTOR_GROUPS: dict[str, dict[str, Any]] = {
         "coze": {"label": "Coze 提取加速", "keys": ["coze"]},
         "tikhub": {"label": "Tikhub.io 商业 API", "keys": ["tikhub"]},
         "apify": {"label": "Apify 商业爬虫", "keys": ["apify"]},
@@ -127,7 +128,7 @@ class ConfigManager:
         """提取器 Key 在密钥环中的命名空间"""
         return f"extractor_{name}"
 
-    def get_extractor_key(self, name: str) -> Optional[str]:
+    def get_extractor_key(self, name: str) -> str | None:
         """获取提取器 Key: 密钥环 → 环境变量 → None"""
         key = CredentialManager.get_api_key(self._keyring_name(name))
         if key:
@@ -149,9 +150,9 @@ class ConfigManager:
         """删除提取器 Key"""
         return CredentialManager.delete_api_key(self._keyring_name(name))
 
-    def list_extractor_key_status(self) -> Dict[str, Any]:
+    def list_extractor_key_status(self) -> dict[str, Any]:
         """列出所有提取器 Key 的配置状态"""
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for group_name, group in self.EXTRACTOR_GROUPS.items():
             key_details = []
             all_configured = True
@@ -288,7 +289,7 @@ class ConfigManager:
     def import_config(self, file_path: Path) -> bool:
         """从文件导入配置"""
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 data = yaml.safe_load(f)
             if data:
                 self._config = AppConfig.from_dict(data)

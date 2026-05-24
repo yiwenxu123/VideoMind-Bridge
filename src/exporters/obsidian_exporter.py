@@ -1,21 +1,19 @@
 """Obsidian 导出器实现"""
 
-import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Optional, List
 
-from .base import BaseExporter
 from ..models.task import ExportContext, ExportResult, ExportTarget
 from ..utils import (
-    get_logger,
-    sanitize_filename,
-    safe_create_symlink,
-    safe_copy_file,
-    format_time_for_media_extended,
-    extract_highlights_from_context,
     Highlight,
+    extract_highlights_from_context,
+    format_time_for_media_extended,
+    get_logger,
+    safe_copy_file,
+    safe_create_symlink,
+    sanitize_filename,
 )
+from .base import BaseExporter
 
 logger = get_logger(__name__)
 
@@ -28,9 +26,9 @@ class ObsidianExporter(BaseExporter):
 
     def __init__(
         self,
-        vault_path: Optional[Path] = None,
+        vault_path: Path | None = None,
         subfolder: str = "Inbox/Videos",
-        template_path: Optional[Path] = None
+        template_path: Path | None = None
     ):
         """
         初始化 Obsidian 导出器
@@ -40,11 +38,11 @@ class ObsidianExporter(BaseExporter):
             subfolder: 子文件夹路径
             template_path: Markdown 模板路径（可选）
         """
-        self.vault_path: Optional[Path] = Path(vault_path) if vault_path else None
+        self.vault_path: Path | None = Path(vault_path) if vault_path else None
         self.subfolder = subfolder
         self.template_path = template_path
 
-    def validate_config(self) -> Tuple[bool, str]:
+    def validate_config(self) -> tuple[bool, str]:
         """验证配置"""
         if not self.vault_path:
             return False, "未配置 Obsidian Vault 路径"
@@ -68,7 +66,6 @@ class ObsidianExporter(BaseExporter):
         生成标准 Markdown，包含 YAML Frontmatter 和可点击时间戳
         媒体文件放入 Vault 根目录的 Attachments 文件夹，与笔记完全隔离
         """
-        import shutil
 
         # 验证配置
         valid, error = self.validate_config()
@@ -165,7 +162,7 @@ class ObsidianExporter(BaseExporter):
         # 如果没有本地视频，使用标题作为占位
         return f"{sanitize_filename(context.video_metadata.title)}.mp4"
 
-    def _generate_note(self, context: ExportContext, video_filename: Optional[str] = None, audio_filename: Optional[str] = None) -> str:
+    def _generate_note(self, context: ExportContext, video_filename: str | None = None, audio_filename: str | None = None) -> str:
         """生成 Obsidian Markdown 笔记（包含可点击时间戳）"""
         meta = context.video_metadata
         now = datetime.now()
@@ -259,7 +256,7 @@ tags:
 
         return frontmatter + body + attachments_section + footer
 
-    def _format_highlights(self, context: ExportContext, video_filename: Optional[str] = None) -> str:
+    def _format_highlights(self, context: ExportContext, video_filename: str | None = None) -> str:
         """格式化时间轴要点为可点击链接"""
         # 从 context 获取 highlights（需要确保 ExportContext 包含 highlights）
         highlights = self._extract_highlights_from_context(context)
@@ -301,7 +298,7 @@ tags:
                 link = f"[[{video_filename}#t={time_str}|{h.time}]]"
                 lines.append(f"- {link} - {h.content}")
             lines.append("")
-            lines.append(f"> 💡 **提示**: 安装 [[Media Extended]] 插件后，点击时间戳可直接跳转到视频对应位置")
+            lines.append("> 💡 **提示**: 安装 [[Media Extended]] 插件后，点击时间戳可直接跳转到视频对应位置")
             lines.append(f"> 视频文件位置：`{context.video_path}`")
         else:
             # 无本地视频: 链接到线上 URL
@@ -314,7 +311,7 @@ tags:
 
         return "\n".join(lines)
 
-    def _extract_highlights_from_context(self, context: ExportContext) -> List[Highlight]:
+    def _extract_highlights_from_context(self, context: ExportContext) -> list[Highlight]:
         """从 ExportContext 提取时间轴数据"""
         # 使用共享工具函数
         return extract_highlights_from_context(context.config)
@@ -322,11 +319,10 @@ tags:
 
 # 测试代码
 if __name__ == "__main__":
-    import sys
     from pathlib import Path
     from uuid import uuid4
 
-    from ..models.task import VideoMetadata, ExportContext
+    from ..models.task import ExportContext, VideoMetadata
     from ..services.ai_service import Highlight
 
     # 创建测试上下文

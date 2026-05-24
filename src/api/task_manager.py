@@ -5,31 +5,32 @@
 """
 
 import asyncio
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from ..models.task import (
-    VideoTask,
-    TaskStatus,
-    ProcessingMode,
     ExportTarget,
-    VideoMetadata,
+    ProcessingMode,
     TaskHistory,
+    TaskStatus,
+    VideoMetadata,
+    VideoTask,
 )
-from ..services.task_database import TaskDatabase, get_task_database
-from ..services.download_service import DownloadService
-from ..services.transcribe_service import TranscribeService
 from ..services.ai_service import AIService
-from ..services.export_orchestrator import ExportOrchestrator
 from ..services.config_manager import get_config_manager
+from ..services.download_service import DownloadService
+from ..services.export_orchestrator import ExportOrchestrator
 from ..services.interfaces import (
-    IDownloadService,
-    ITranscribeService,
     IAIProvider,
+    IDownloadService,
     IExportOrchestrator,
+    ITranscribeService,
 )
+from ..services.task_database import get_task_database
+from ..services.transcribe_service import TranscribeService
 from ..utils import get_logger
 
 if TYPE_CHECKING:
@@ -47,7 +48,7 @@ class TaskManager:
     服务组件通过接口类型声明，支持未来替换为 Skills 实现。
     """
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Path | None = None):
         """
         初始化任务管理器
 
@@ -62,24 +63,24 @@ class TaskManager:
 
         self.db = get_task_database()
 
-        self._tasks: Dict[UUID, VideoTask] = {}
-        self._task_callbacks: Dict[UUID, List[Callable]] = {}
+        self._tasks: dict[UUID, VideoTask] = {}
+        self._task_callbacks: dict[UUID, list[Callable]] = {}
 
         self._download_service: IDownloadService = DownloadService(self.output_dir)
         self._transcribe_service: ITranscribeService = TranscribeService()
-        
+
         self._config_manager = get_config_manager()
         api_key = self._config_manager.get_api_key()
         if api_key:
             self._ai_service: IAIProvider = AIService(
-                api_key=api_key, 
+                api_key=api_key,
                 model=self._config_manager.ai.model
             )
             logger.info(f"AI服务已启用，模型: {self._config_manager.ai.model}")
         else:
             self._ai_service = AIService(mock=True)
             logger.warning("AI服务使用mock模式，未配置API Key")
-        
+
         self._export_orchestrator: IExportOrchestrator = ExportOrchestrator(
             targets=[ExportTarget.LOCAL],
             config={"local_output_path": self.output_dir}
@@ -87,7 +88,7 @@ class TaskManager:
 
         self._running = False
         self._task_queue: asyncio.Queue = asyncio.Queue()
-        self._worker_task: Optional[asyncio.Task] = None
+        self._worker_task: asyncio.Task | None = None
 
     def is_ai_available(self) -> bool:
         """AI 服务是否已配置可用"""
@@ -124,10 +125,10 @@ class TaskManager:
         self,
         url: str,
         mode: ProcessingMode = ProcessingMode.FULL,
-        targets: Optional[Set[ExportTarget]] = None,
-        ai_provider: Optional[str] = None,
-        ai_prompt: Optional[str] = None,
-        cookies_from_browser: Optional[str] = None,
+        targets: set[ExportTarget] | None = None,
+        ai_provider: str | None = None,
+        ai_prompt: str | None = None,
+        cookies_from_browser: str | None = None,
         allow_downgrade: bool = False,
     ) -> VideoTask:
         """
@@ -177,7 +178,7 @@ class TaskManager:
         logger.info(f"任务已创建: {task.id}")
         return task
 
-    async def get_task(self, task_id: UUID) -> Optional[VideoTask]:
+    async def get_task(self, task_id: UUID) -> VideoTask | None:
         """
         获取任务
 
@@ -191,10 +192,10 @@ class TaskManager:
 
     async def get_tasks(
         self,
-        status: Optional[TaskStatus] = None,
+        status: TaskStatus | None = None,
         limit: int = 100,
         offset: int = 0,
-    ) -> List[VideoTask]:
+    ) -> list[VideoTask]:
         """
         获取任务列表
 
@@ -319,7 +320,7 @@ class TaskManager:
                     timeout=1.0,
                 )
                 await self._execute_task(task_id)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
@@ -418,11 +419,11 @@ class TaskManager:
 
         self._notify_task_update(task)
 
-    async def _download_audio(self, task: VideoTask) -> Optional[Path]:
+    async def _download_audio(self, task: VideoTask) -> Path | None:
         """下载音频"""
         try:
             loop = asyncio.get_event_loop()
-            
+
             def do_download():
                 result = self._download_service.download(
                     task.url,
@@ -433,12 +434,12 @@ class TaskManager:
                 return result
 
             result = await loop.run_in_executor(None, do_download)
-            
+
             if result and result.audio_path:
                 if result.metadata:
                     task.metadata = result.metadata
                 return result.audio_path
-            
+
             return None
         except Exception as e:
             logger.error(f"下载音频失败: {e}")
@@ -453,19 +454,19 @@ class TaskManager:
         self,
         task: VideoTask,
         audio_path: Path,
-    ) -> List:
+    ) -> list:
         """转录音频"""
         try:
             loop = asyncio.get_event_loop()
-            
+
             def do_transcribe():
                 return self._transcribe_service.transcribe(
                     audio_path,
                     language="zh",
                 )
-            
+
             result = await loop.run_in_executor(None, do_transcribe)
-            
+
             if result and hasattr(result, 'segments'):
                 return result.segments
             return []
@@ -481,16 +482,16 @@ class TaskManager:
             ])
 
             loop = asyncio.get_event_loop()
-            
+
             def do_summarize():
                 result = self._ai_service.summarize(
                     transcript=transcript_text,
                     title=task.metadata.title if task.metadata else "",
                 )
                 return result
-            
+
             result = await loop.run_in_executor(None, do_summarize)
-            
+
             if result and hasattr(result, 'summary'):
                 return result.summary
             return ""
@@ -502,13 +503,13 @@ class TaskManager:
         """导出结果"""
         try:
             task.output_files = []
-            
+
             if not task.audio_path or not task.audio_path.exists():
                 logger.warning(f"音频文件不存在，跳过导出: {task.audio_path}")
                 return
-            
+
             from ..models.task import ExportContext, VideoMetadata
-            
+
             metadata = task.metadata or VideoMetadata(
                 title="未知标题",
                 author="",
@@ -516,7 +517,7 @@ class TaskManager:
                 platform="unknown",
                 url=task.url,
             )
-            
+
             context = ExportContext(
                 task_id=task.id,
                 video_metadata=metadata,
@@ -527,16 +528,16 @@ class TaskManager:
                 transcript_text="\n".join([s.text for s in task.transcript_segments]) if task.transcript_segments else "",
                 ai_summary=task.ai_summary,
             )
-            
+
             results = self._export_orchestrator.export_all(context)
-            
+
             for result in results:
                 if result.success and result.output_path:
                     task.output_files.append(result.output_path)
                     logger.info(f"导出成功: {result.output_path}")
                 elif not result.success:
                     logger.warning(f"导出失败: {result.error_msg}")
-            
+
             logger.info(f"导出完成，共 {len(task.output_files)} 个文件")
         except Exception as e:
             logger.error(f"导出失败: {e}")
@@ -569,7 +570,7 @@ class TaskManager:
         except Exception as e:
             logger.error(f"保存任务到数据库失败: {e}")
 
-    def get_statistics(self) -> Dict:
+    def get_statistics(self) -> dict:
         """获取统计信息"""
         stats = {
             "total": len(self._tasks),

@@ -9,15 +9,13 @@
 
 from __future__ import annotations
 
-import json
 import re
-from typing import Any, Optional
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 APIFY_API_BASE = "https://api.apify.com/v2"
 
@@ -39,7 +37,7 @@ _SUPPORTED_PATTERNS = {
 }
 
 
-def _detect_apify_platform(url: str) -> Optional[str]:
+def _detect_apify_platform(url: str) -> str | None:
     for platform, pattern in _SUPPORTED_PATTERNS.items():
         if pattern.search(url):
             return platform
@@ -54,7 +52,7 @@ class ApifyExtractor(ContentExtractor):
     url_pattern = re.compile(r"|".join(p.pattern for p in _SUPPORTED_PATTERNS.values()))
 
     def __init__(self) -> None:
-        self._api_key: Optional[str] = None
+        self._api_key: str | None = None
         self._client = httpx.Client(timeout=120.0)
 
     def is_available(self) -> bool:

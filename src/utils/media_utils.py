@@ -1,11 +1,12 @@
 """媒体工具模块"""
 
-from typing import List, Optional, Dict, Any
-from ..models.task import TranscriptSegment, Highlight
+from typing import Any
+
+from ..models.task import Highlight, TranscriptSegment
 from .time_utils import format_time_for_srt
 
 
-def generate_srt(segments: List[TranscriptSegment]) -> str:
+def generate_srt(segments: list[TranscriptSegment]) -> str:
     """
     生成 SRT 字幕格式
 
@@ -26,7 +27,7 @@ def generate_srt(segments: List[TranscriptSegment]) -> str:
     return "\n".join(lines)
 
 
-def extract_highlights_from_context(context: Dict[str, Any]) -> List[Highlight]:
+def extract_highlights_from_context(context: dict[str, Any]) -> list[Highlight]:
     """
     从上下文提取时间轴数据
 

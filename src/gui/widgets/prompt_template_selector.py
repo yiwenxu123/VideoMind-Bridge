@@ -1,9 +1,6 @@
 """简化的 Prompt 模板选择组件"""
 
-from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QLabel, QComboBox, QPushButton
-)
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from ...services.prompt_template import get_prompt_template_manager
 
@@ -110,7 +107,6 @@ class PromptTemplateSelector(QWidget):
 
     def _on_manage_clicked(self):
         """打开模板管理对话框"""
-        from PySide6.QtWidgets import QDialog
         from .prompt_template_dialog import PromptTemplateDialog
 
         dialog = PromptTemplateDialog(self)

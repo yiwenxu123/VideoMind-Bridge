@@ -1,33 +1,32 @@
 """API数据模型"""
 
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl
 
-from ..models.task import ProcessingMode, ExportTarget, TaskStatus
+from ..models.task import ExportTarget, ProcessingMode, TaskStatus
 
 
 class APIError(BaseModel):
     """API错误响应"""
     error: str = Field(..., description="错误类型")
     message: str = Field(..., description="错误信息")
-    details: Optional[Dict[str, Any]] = Field(None, description="详细错误信息")
+    details: dict[str, Any] | None = Field(None, description="详细错误信息")
 
 
 class TaskCreateRequest(BaseModel):
     """创建任务请求"""
     url: HttpUrl = Field(..., description="视频链接")
     mode: ProcessingMode = Field(default=ProcessingMode.FULL, description="处理模式")
-    targets: List[ExportTarget] = Field(
+    targets: list[ExportTarget] = Field(
         default=[ExportTarget.LOCAL],
         description="导出目标列表"
     )
-    ai_provider: Optional[str] = Field(None, description="AI提供商名称")
-    ai_prompt: Optional[str] = Field(None, description="自定义Prompt模板")
-    cookies_from_browser: Optional[str] = Field(
+    ai_provider: str | None = Field(None, description="AI提供商名称")
+    ai_prompt: str | None = Field(None, description="自定义Prompt模板")
+    cookies_from_browser: str | None = Field(
         None, description="浏览器名称（chrome/safari/firefox，国内平台需要）"
     )
     allow_downgrade: bool = Field(
@@ -52,18 +51,18 @@ class TaskResponse(BaseModel):
     url: str = Field(..., description="视频链接")
     status: TaskStatus = Field(..., description="任务状态")
     mode: ProcessingMode = Field(..., description="处理模式")
-    targets: List[ExportTarget] = Field(..., description="导出目标")
+    targets: list[ExportTarget] = Field(..., description="导出目标")
     progress: float = Field(..., ge=0.0, le=100.0, description="进度百分比")
     current_step: str = Field(..., description="当前步骤")
-    title: Optional[str] = Field(None, description="视频标题")
-    author: Optional[str] = Field(None, description="视频作者")
-    platform: Optional[str] = Field(None, description="视频平台")
+    title: str | None = Field(None, description="视频标题")
+    author: str | None = Field(None, description="视频作者")
+    platform: str | None = Field(None, description="视频平台")
     created_at: datetime = Field(..., description="创建时间")
     updated_at: datetime = Field(..., description="更新时间")
-    completed_at: Optional[datetime] = Field(None, description="完成时间")
-    error_msg: Optional[str] = Field(None, description="错误信息")
-    summary: Optional[str] = Field(None, description="AI摘要")
-    output_files: List[str] = Field(default=[], description="输出文件路径列表")
+    completed_at: datetime | None = Field(None, description="完成时间")
+    error_msg: str | None = Field(None, description="错误信息")
+    summary: str | None = Field(None, description="AI摘要")
+    output_files: list[str] = Field(default=[], description="输出文件路径列表")
 
     class Config:
         json_schema_extra = {
@@ -85,7 +84,7 @@ class TaskResponse(BaseModel):
 class TaskListResponse(BaseModel):
     """任务列表响应"""
     total: int = Field(..., description="总任务数")
-    tasks: List[TaskResponse] = Field(..., description="任务列表")
+    tasks: list[TaskResponse] = Field(..., description="任务列表")
     page: int = Field(default=1, description="当前页码")
     page_size: int = Field(default=20, description="每页数量")
 
@@ -96,7 +95,7 @@ class ProgressUpdate(BaseModel):
     status: TaskStatus = Field(..., description="任务状态")
     progress: float = Field(..., ge=0.0, le=100.0, description="进度百分比")
     current_step: str = Field(..., description="当前步骤描述")
-    message: Optional[str] = Field(None, description="附加消息")
+    message: str | None = Field(None, description="附加消息")
     timestamp: datetime = Field(default_factory=datetime.now, description="时间戳")
 
     class Config:
@@ -120,7 +119,7 @@ class TaskSearchRequest(BaseModel):
 class ExportRequest(BaseModel):
     """导出请求"""
     task_id: UUID = Field(..., description="任务ID")
-    targets: List[ExportTarget] = Field(..., description="导出目标列表")
+    targets: list[ExportTarget] = Field(..., description="导出目标列表")
 
 
 class SystemStatusResponse(BaseModel):
@@ -159,27 +158,27 @@ class SettingsResponse(BaseModel):
     obsidian_enabled: bool = Field(default=False, description="启用 Obsidian 导出")
     obsidian_vault_path: str = Field(default="", description="Obsidian Vault 路径")
     obsidian_subfolder: str = Field(default="Inbox/Videos", description="笔记保存的子文件夹")
-    available_engines: List[str] = Field(default=["DeepSeek-V3", "Ollama"], description="可用引擎列表")
+    available_engines: list[str] = Field(default=["DeepSeek-V3", "Ollama"], description="可用引擎列表")
 
 
 class SettingsUpdateRequest(BaseModel):
     """设置更新请求"""
-    ai_engine: Optional[str] = Field(None, description="AI 引擎")
-    ai_model: Optional[str] = Field(None, description="模型名称")
-    ai_base_url: Optional[str] = Field(None, description="API 地址")
-    ai_api_key: Optional[str] = Field(None, description="API Key（传入时更新密钥环）")
-    ai_temperature: Optional[float] = Field(None, ge=0.0, le=2.0, description="温度参数")
-    ai_max_tokens: Optional[int] = Field(None, ge=1, le=128000, description="最大 Token 数")
-    ai_timeout: Optional[int] = Field(None, ge=10, le=300, description="超时时间（秒）")
-    output_dir: Optional[str] = Field(None, description="输出目录")
-    download_quality: Optional[str] = Field(None, description="下载画质")
-    whisper_model: Optional[str] = Field(None, description="Whisper 模型")
-    save_srt: Optional[bool] = Field(None, description="保存 SRT 字幕")
-    save_transcript: Optional[bool] = Field(None, description="保存纯文本转录")
-    save_markdown: Optional[bool] = Field(None, description="保存 Markdown")
-    obsidian_enabled: Optional[bool] = Field(None, description="启用 Obsidian 导出")
-    obsidian_vault_path: Optional[str] = Field(None, description="Obsidian Vault 路径")
-    obsidian_subfolder: Optional[str] = Field(None, description="笔记保存的子文件夹")
+    ai_engine: str | None = Field(None, description="AI 引擎")
+    ai_model: str | None = Field(None, description="模型名称")
+    ai_base_url: str | None = Field(None, description="API 地址")
+    ai_api_key: str | None = Field(None, description="API Key（传入时更新密钥环）")
+    ai_temperature: float | None = Field(None, ge=0.0, le=2.0, description="温度参数")
+    ai_max_tokens: int | None = Field(None, ge=1, le=128000, description="最大 Token 数")
+    ai_timeout: int | None = Field(None, ge=10, le=300, description="超时时间（秒）")
+    output_dir: str | None = Field(None, description="输出目录")
+    download_quality: str | None = Field(None, description="下载画质")
+    whisper_model: str | None = Field(None, description="Whisper 模型")
+    save_srt: bool | None = Field(None, description="保存 SRT 字幕")
+    save_transcript: bool | None = Field(None, description="保存纯文本转录")
+    save_markdown: bool | None = Field(None, description="保存 Markdown")
+    obsidian_enabled: bool | None = Field(None, description="启用 Obsidian 导出")
+    obsidian_vault_path: str | None = Field(None, description="Obsidian Vault 路径")
+    obsidian_subfolder: str | None = Field(None, description="笔记保存的子文件夹")
 
 
 class KeyDetail(BaseModel):
@@ -194,12 +193,12 @@ class KeyGroup(BaseModel):
     """提取器 Key 组"""
     label: str = Field(..., description="组显示名称")
     all_configured: bool = Field(..., description="组内所有 Key 是否均已配置")
-    keys: List[KeyDetail] = Field(..., description="Key 列表")
+    keys: list[KeyDetail] = Field(..., description="Key 列表")
 
 
 class KeysListResponse(BaseModel):
     """提取器 Key 列表响应"""
-    groups: Dict[str, KeyGroup] = Field(..., description="按分组排列的 Key 状态")
+    groups: dict[str, KeyGroup] = Field(..., description="按分组排列的 Key 状态")
 
 
 class KeyUpdateRequest(BaseModel):
@@ -216,7 +215,7 @@ class KeyDeleteRequest(BaseModel):
 class ConfigResponse(BaseModel):
     """配置响应"""
     default_output_dir: str = Field(..., description="默认输出目录")
-    supported_platforms: List[str] = Field(..., description="支持的平台列表")
-    supported_ai_providers: List[str] = Field(..., description="支持的AI提供商")
-    supported_export_targets: List[str] = Field(..., description="支持的导出目标")
+    supported_platforms: list[str] = Field(..., description="支持的平台列表")
+    supported_ai_providers: list[str] = Field(..., description="支持的AI提供商")
+    supported_export_targets: list[str] = Field(..., description="支持的导出目标")
     ai_enabled: bool = Field(default=False, description="AI功能是否已启用")

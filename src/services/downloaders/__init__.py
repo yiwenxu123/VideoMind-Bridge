@@ -10,8 +10,8 @@ from .base import (
     DownloadOptions,
     DownloadResult,
 )
-from .ytdlp import YtdlpDownloader
 from .router import DownloaderRouter
+from .ytdlp import YtdlpDownloader
 
 __all__ = [
     "DownloaderBase",

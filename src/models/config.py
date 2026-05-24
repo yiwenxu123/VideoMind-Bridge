@@ -1,9 +1,9 @@
 """配置数据模型"""
 
-from dataclasses import dataclass, field, asdict
-from pathlib import Path
-from typing import Optional, List, Dict, Any
+from dataclasses import asdict, dataclass, field
 from enum import Enum
+from pathlib import Path
+from typing import Any
 
 
 class AIEngine(str, Enum):
@@ -23,7 +23,7 @@ class AIConfig:
     max_tokens: int = 4096
     timeout: int = 120
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         # 将 Enum 转换为字符串
         if isinstance(self.engine, AIEngine):
@@ -33,7 +33,7 @@ class AIConfig:
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AIConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "AIConfig":
         # 处理 engine 字段，从字符串转换为枚举
         engine = data.get("engine", AIEngine.DEEPSEEK)
         if isinstance(engine, str):
@@ -60,11 +60,11 @@ class DownloadConfig:
     download_video: bool = True
     organize_by: str = "date"  # date, title, flat
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "DownloadConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "DownloadConfig":
         return cls(**data)
 
 
@@ -72,13 +72,13 @@ class DownloadConfig:
 class TranscribeConfig:
     """转录配置"""
     whisper_model: str = "small"
-    language: Optional[str] = None  # None 表示自动检测
+    language: str | None = None  # None 表示自动检测
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TranscribeConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "TranscribeConfig":
         return cls(
             whisper_model=data.get("whisper_model", "small"),
             language=data.get("language")
@@ -93,11 +93,11 @@ class ObsidianConfig:
     subfolder: str = "Inbox/Videos"
     attachments_folder: str = "Attachments"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ObsidianConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "ObsidianConfig":
         return cls(**data)
 
 
@@ -111,11 +111,11 @@ class LocalExportConfig:
     save_transcript: bool = True
     save_markdown: bool = True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "LocalExportConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "LocalExportConfig":
         return cls(**data)
 
 
@@ -124,17 +124,17 @@ class WebhookConfig:
     """Webhook 导出配置"""
     enabled: bool = False
     url: str = ""
-    headers: Dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
     timeout: int = 30
     max_retries: int = 3
     retry_delay: float = 1.0
-    events: List[str] = field(default_factory=lambda: ["on_completed"])
+    events: list[str] = field(default_factory=lambda: ["on_completed"])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WebhookConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "WebhookConfig":
         return cls(
             enabled=data.get("enabled", False),
             url=data.get("url", ""),
@@ -152,9 +152,9 @@ class ExportConfig:
     obsidian: ObsidianConfig = field(default_factory=ObsidianConfig)
     local: LocalExportConfig = field(default_factory=LocalExportConfig)
     webhook: WebhookConfig = field(default_factory=WebhookConfig)
-    default_targets: List[str] = field(default_factory=lambda: ["local"])
+    default_targets: list[str] = field(default_factory=lambda: ["local"])
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "obsidian": self.obsidian.to_dict(),
             "local": self.local.to_dict(),
@@ -163,7 +163,7 @@ class ExportConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "ExportConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "ExportConfig":
         return cls(
             obsidian=ObsidianConfig.from_dict(data.get("obsidian", {})),
             local=LocalExportConfig.from_dict(data.get("local", {})),
@@ -179,13 +179,13 @@ class UIConfig:
     language: str = "zh_CN"
     minimize_to_tray: bool = True
     show_notifications: bool = True
-    window_geometry: Optional[Dict[str, int]] = None
+    window_geometry: dict[str, int] | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "UIConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "UIConfig":
         return cls(**data)
 
 
@@ -196,11 +196,11 @@ class PerformanceConfig:
     enable_model_cache: bool = True  # 启用模型缓存
     auto_clear_cache_on_exit: bool = False  # 退出时自动清理缓存
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "PerformanceConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "PerformanceConfig":
         return cls(
             max_concurrent_tasks=data.get("max_concurrent_tasks", 2),
             enable_model_cache=data.get("enable_model_cache", True),
@@ -219,7 +219,7 @@ class AppConfig:
     ui: UIConfig = field(default_factory=UIConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "ai": self.ai.to_dict(),
@@ -231,7 +231,7 @@ class AppConfig:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "AppConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
         return cls(
             version=data.get("version", "1"),
             ai=AIConfig.from_dict(data.get("ai", {})),

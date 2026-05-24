@@ -1,10 +1,9 @@
 """系统托盘管理组件"""
 
-from typing import Optional
 
-from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QApplication, QMessageBox
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QAction, QIcon
+from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from ...utils import get_logger
 from ...utils.platform_utils import PlatformHelper
@@ -19,10 +18,10 @@ class TrayManager(QObject):
     show_window_requested = Signal()
     quit_requested = Signal()
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._parent = parent
-        self._tray_icon: Optional[QSystemTrayIcon] = None
+        self._tray_icon: QSystemTrayIcon | None = None
 
     def setup(self) -> bool:
         """
@@ -75,7 +74,7 @@ class TrayManager(QObject):
             icon = QApplication.style().standardIcon(
                 QApplication.style().StandardPixmap.SP_ComputerIcon
             )
-            logger.warning(f"自定义图标不存在，使用系统默认图标")
+            logger.warning("自定义图标不存在，使用系统默认图标")
 
         # 在 macOS 上，设置图标为模板模式
         if PlatformHelper.is_macos():

@@ -13,14 +13,13 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # yt-dlp 可执行路径
 _YTDLP_CMD = "yt-dlp"
@@ -52,7 +51,7 @@ class YtDlpExtractor(ContentExtractor):
     )
 
     def __init__(self) -> None:
-        self._available: Optional[bool] = None
+        self._available: bool | None = None
 
     def is_available(self) -> bool:
         """检查 yt-dlp 是否可执行"""
@@ -111,7 +110,7 @@ class YtDlpExtractor(ContentExtractor):
             metadata=metadata,
         )
 
-    def _try_extract(self, url: str) -> Tuple[str, list, Optional[str], Dict[str, Any]]:
+    def _try_extract(self, url: str) -> tuple[str, list, str | None, dict[str, Any]]:
         """三级降级提取
 
         Returns:
@@ -133,7 +132,7 @@ class YtDlpExtractor(ContentExtractor):
 
     def _extract_with_subs(
         self, url: str, auto: bool = True,
-    ) -> Tuple[str, List[Dict[str, Any]], Optional[str], Dict[str, Any]]:
+    ) -> tuple[str, list[dict[str, Any]], str | None, dict[str, Any]]:
         """下载并提取字幕"""
         with tempfile.TemporaryDirectory() as tmp_dir:
             output_template = str(Path(tmp_dir) / "%(id)s.%(ext)s")
@@ -196,7 +195,7 @@ class YtDlpExtractor(ContentExtractor):
 
                 # 提取纯文本 (去除时间轴)
                 text_parts: list[str] = []
-                segments: list[Dict[str, Any]] = []
+                segments: list[dict[str, Any]] = []
 
                 for block in srt_text.strip().split("\n\n"):
                     lines_block = block.strip().split("\n")
@@ -226,7 +225,7 @@ class YtDlpExtractor(ContentExtractor):
             except (subprocess.TimeoutExpired, FileNotFoundError):
                 return "", [], None, {}
 
-    def _extract_metadata(self, url: str) -> Dict[str, Any]:
+    def _extract_metadata(self, url: str) -> dict[str, Any]:
         """只提取元信息 (不使用字幕)"""
         cmd = [
             _YTDLP_CMD,

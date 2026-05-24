@@ -10,10 +10,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from .models import ContentGrade, PrescreenResult
-from .prescreen_rules import GRADE_THRESHOLDS, run_all_rules
+from .prescreen_rules import run_all_rules
 from .router import ContentRouter
 
 logger = logging.getLogger(__name__)
@@ -27,7 +26,7 @@ def detect_platform(url: str) -> str:
 class Prescreener:
     """内容预筛引擎"""
 
-    def __init__(self, router: Optional[ContentRouter] = None) -> None:
+    def __init__(self, router: ContentRouter | None = None) -> None:
         self._router = router or ContentRouter()
 
     def prescreen(

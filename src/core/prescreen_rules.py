@@ -9,12 +9,11 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
 
 # ============================================================
 # 平台最佳时长 (秒)
 # ============================================================
-PLATFORM_IDEAL_DURATION: Dict[str, Tuple[int, int, int]] = {
+PLATFORM_IDEAL_DURATION: dict[str, tuple[int, int, int]] = {
     # (min_good, max_good, max_acceptable)
     "bilibili":      (300, 1200, 3600),     # 5-20分钟最佳
     "youtube":       (480, 2400, 7200),     # 8-40分钟最佳
@@ -64,14 +63,14 @@ _QUALITY_SIGNALS = [
 _TRENDING_DATE = re.compile(r"202[3-6]|20[2-3]\d年")
 
 
-def apply_seo_rules(title: str) -> Tuple[int, List[str]]:
+def apply_seo_rules(title: str) -> tuple[int, list[str]]:
     """SEO/标题分析规则
 
     Returns:
         (score_delta, reasons)
     """
     total = 0
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if not title or not title.strip():
         return -20, ["标题为空"]
@@ -123,7 +122,7 @@ def apply_seo_rules(title: str) -> Tuple[int, List[str]]:
 def apply_duration_rules(
     duration_seconds: float,
     platform: str = "unknown",
-) -> Tuple[int, List[str]]:
+) -> tuple[int, list[str]]:
     """时长分析规则
 
     Args:
@@ -134,7 +133,7 @@ def apply_duration_rules(
         (score_delta, reasons)
     """
     total = 0
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if duration_seconds <= 0:
         return 0, []
@@ -192,10 +191,10 @@ _LOW_QUALITY_TITLE_PATTERNS = [
 ]
 
 
-def apply_marketing_rules(title: str) -> Tuple[int, List[str]]:
+def apply_marketing_rules(title: str) -> tuple[int, list[str]]:
     """营销/广告检测规则"""
     total = 0
-    reasons: List[str] = []
+    reasons: list[str] = []
 
     if not title:
         return 0, []
@@ -220,7 +219,7 @@ def apply_marketing_rules(title: str) -> Tuple[int, List[str]]:
 # 综合评分
 # ============================================================
 
-GRADE_THRESHOLDS: List[Tuple[int, str, str]] = [
+GRADE_THRESHOLDS: list[tuple[int, str, str]] = [
     (85, "S", "必须提取 — 高价值内容"),
     (70, "A", "建议提取"),
     (55, "B", "值得提取"),
@@ -229,7 +228,7 @@ GRADE_THRESHOLDS: List[Tuple[int, str, str]] = [
 ]
 
 
-def compute_grade(score: float) -> Tuple[str, str]:
+def compute_grade(score: float) -> tuple[str, str]:
     """根据分数计算等级
 
     Returns:
@@ -246,7 +245,7 @@ def run_all_rules(
     duration_seconds: float,
     platform: str = "unknown",
     base_score: float = 50.0,
-) -> Tuple[float, str, List[str]]:
+) -> tuple[float, str, list[str]]:
     """运行所有预筛规则
 
     Args:
@@ -258,7 +257,7 @@ def run_all_rules(
     Returns:
         (final_score, grade, all_reasons)
     """
-    all_reasons: List[str] = []
+    all_reasons: list[str] = []
     score = base_score
 
     # SEO 规则

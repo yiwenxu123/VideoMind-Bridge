@@ -1,45 +1,51 @@
 """VideoMind Bridge 主窗口"""
 
-import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
+from PySide6.QtCore import QMutex, QMutexLocker, Qt, QTimer
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QLineEdit, QTextEdit,
-    QGroupBox, QRadioButton, QCheckBox, QComboBox,
-    QProgressBar, QListWidget, QListWidgetItem,
-    QSplitter, QFrame, QScrollArea, QStatusBar,
-    QMessageBox, QFileDialog, QApplication, QSizePolicy,
-    QDialog
+    QApplication,
+    QCheckBox,
+    QDialog,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QStatusBar,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, QThread, Signal, Slot, QSize, QMutex, QMutexLocker, QTimer
-from PySide6.QtGui import QIcon, QFont, QClipboard, QAction
 
-# 导入自定义组件
-from .widgets.url_input import URLInputWidget
-from .widgets.mode_selector import ModeSelector, ProcessingMode
-from .widgets.prompt_template_selector import PromptTemplateSelector
-from .widgets.target_selector import TargetSelector, ExportTarget
-from .widgets.task_queue import TaskQueueWidget, TaskStatus
-from .widgets.task_history_sidebar import TaskHistorySidebar
-
-# 导入组件
-from .components import TrayManager, MenuManager
-
-# 导入工作线程
-from .workers.processing_worker import ProcessingWorker, TaskConfig
+from ..models.task import ExportTarget as ModelExportTarget
+from ..models.task import TaskHistory
+from ..services.ai_service import AIService
+from ..services.config_manager import get_config_manager
 
 # 导入服务
 from ..services.download_service import DownloadService
-from ..services.transcribe_service import TranscribeService
-from ..services.ai_service import AIService
-from ..services.export_orchestrator import ExportOrchestrator
-from ..services.config_manager import get_config_manager
 from ..services.task_database import get_task_database
-from ..models.task import TaskHistory, ExportTarget as ModelExportTarget
+from ..services.transcribe_service import TranscribeService
 from ..utils import get_logger
+
+# 导入组件
+from .components import MenuManager, TrayManager
+from .widgets.mode_selector import ModeSelector, ProcessingMode
+from .widgets.prompt_template_selector import PromptTemplateSelector
+from .widgets.target_selector import ExportTarget
+from .widgets.task_history_sidebar import TaskHistorySidebar
+from .widgets.task_queue import TaskQueueWidget, TaskStatus
+
+# 导入自定义组件
+from .widgets.url_input import URLInputWidget
+
+# 导入工作线程
+from .workers.processing_worker import ProcessingWorker, TaskConfig
 
 logger = get_logger(__name__)
 
@@ -58,9 +64,9 @@ class MainWindow(QMainWindow):
         self.config = self.config_manager.config
 
         # 初始化服务
-        self.download_service: Optional[DownloadService] = None
-        self.transcribe_service: Optional[TranscribeService] = None
-        self.ai_service: Optional[AIService] = None
+        self.download_service: DownloadService | None = None
+        self.transcribe_service: TranscribeService | None = None
+        self.ai_service: AIService | None = None
 
         # 活跃的任务线程
         self._workers_mutex = QMutex()
@@ -282,8 +288,8 @@ class MainWindow(QMainWindow):
 
     def _setup_quick_export_selector(self):
         """设置快速导出选择器（简化版）"""
-        from PySide6.QtWidgets import QGroupBox, QHBoxLayout, QCheckBox
-        
+        from PySide6.QtWidgets import QHBoxLayout
+
         export_group = QGroupBox("📤 导出目标")
         export_group.setStyleSheet("""
             QGroupBox {
@@ -300,25 +306,25 @@ class MainWindow(QMainWindow):
                 padding: 0 5px;
             }
         """)
-        
+
         export_layout = QHBoxLayout(export_group)
         export_layout.setSpacing(20)
         export_layout.setContentsMargins(15, 10, 15, 10)
-        
+
         # 本地文件夹选项
         self.local_export_check = QCheckBox("本地文件夹")
         self.local_export_check.setChecked(True)
         export_layout.addWidget(self.local_export_check)
-        
+
         # Obsidian 选项
         self.obsidian_export_check = QCheckBox("Obsidian")
         self.obsidian_export_check.setChecked(True)
         export_layout.addWidget(self.obsidian_export_check)
-        
+
         export_layout.addStretch()
-        
+
         self.main_layout.addWidget(export_group)
-        
+
         # 保存引用以便后续使用
         self.export_selector_group = export_group
 
@@ -335,7 +341,7 @@ class MainWindow(QMainWindow):
         else:
             # Mode A: 完整处理，启用所有导出目标
             self.obsidian_export_check.setEnabled(True)
-        
+
     def _validate_config_before_processing(self, mode: ProcessingMode, targets: list) -> tuple[bool, str]:
         """在开始处理前验证配置
 
@@ -414,7 +420,7 @@ class MainWindow(QMainWindow):
     def _process_single_url(self, url: str, mode: ProcessingMode, targets: list):
         """处理单个 URL"""
         # 检查是否重复处理
-        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        from ..services.duplicate_detector import get_duplicate_detector
         detector = get_duplicate_detector()
         existing_record = detector.check_duplicate(url)
 
@@ -617,7 +623,7 @@ class MainWindow(QMainWindow):
         worker.finished.connect(lambda tid=task_id: self._on_worker_finished(tid))
 
         # 添加处理记录（状态为 pending）
-        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
         detector.add_record(
             url=url,
@@ -693,7 +699,7 @@ class MainWindow(QMainWindow):
 
     def _on_task_completed(self, task_id: str, url: str, mode: ProcessingMode, success: bool, result: dict):
         """任务完成"""
-        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
 
         if success:
@@ -757,7 +763,7 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"任务失败: {error_message}")
 
         # 更新处理记录为失败状态
-        from ..services.duplicate_detector import get_duplicate_detector, ProcessingStatus
+        from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
         detector.update_status(
             url=url,
@@ -795,12 +801,12 @@ class MainWindow(QMainWindow):
         with QMutexLocker(self._workers_mutex):
             self.active_workers[task_id] = worker
 
-    def _remove_worker(self, task_id: str) -> Optional[ProcessingWorker]:
+    def _remove_worker(self, task_id: str) -> ProcessingWorker | None:
         """线程安全地移除并返回工作线程"""
         with QMutexLocker(self._workers_mutex):
             return self.active_workers.pop(task_id, None)
 
-    def _get_worker(self, task_id: str) -> Optional[ProcessingWorker]:
+    def _get_worker(self, task_id: str) -> ProcessingWorker | None:
         """线程安全地获取工作线程"""
         with QMutexLocker(self._workers_mutex):
             return self.active_workers.get(task_id)
@@ -993,8 +999,8 @@ class MainWindow(QMainWindow):
 
     def _on_open_obsidian(self):
         """打开 Obsidian"""
-        import subprocess
         import platform
+        import subprocess
 
         system = platform.system()
         try:
@@ -1018,7 +1024,7 @@ class MainWindow(QMainWindow):
                 "应用已最小化到系统托盘，点击图标可恢复窗口"
             )
             logger.info("应用已最小化到托盘")
-            
+
             # 显示提示对话框告知用户托盘位置
             from ..utils.platform_utils import PlatformHelper
             tray_location = PlatformHelper.get_tray_location_hint()
@@ -1125,13 +1131,13 @@ class MainWindow(QMainWindow):
 
         # 创建对话框（保存为实例变量防止被垃圾回收）
         self._settings_dialog = SettingsDialog(self)
-        
+
         # 连接关闭信号
         self._settings_dialog.finished.connect(self._on_settings_finished)
-        
+
         # 使用 exec() 方法显示对话框（模态）
         self._settings_dialog.exec()
-        
+
         # 对话框关闭后清理引用
         self._settings_dialog = None
 

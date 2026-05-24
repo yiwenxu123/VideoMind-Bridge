@@ -1,10 +1,10 @@
 """VideoMind Bridge GUI 组件模块"""
 
-from .url_input import URLInputWidget
-from .mode_selector import ModeSelector, ProcessingMode
 from .ai_config import AIConfigWidget
-from .target_selector import TargetSelector, ExportTarget
+from .mode_selector import ModeSelector, ProcessingMode
+from .target_selector import ExportTarget, TargetSelector
 from .task_queue import TaskQueueWidget
+from .url_input import URLInputWidget
 
 __all__ = [
     "URLInputWidget",

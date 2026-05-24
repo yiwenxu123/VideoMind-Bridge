@@ -4,15 +4,14 @@ import os
 import re
 import time
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 import httpx
 from jinja2 import Template
 
 from ..models.task import Highlight
-from .prompt_template import get_prompt_template_manager, PromptTemplate
 from ..utils import get_logger
 from ..utils.exceptions import AIError
+from .prompt_template import get_prompt_template_manager
 
 logger = get_logger(__name__)
 
@@ -22,7 +21,7 @@ class SummaryResult:
     """摘要结果"""
     title: str
     summary: str  # 一句话总结
-    highlights: List[Highlight] = field(default_factory=list)  # 结构化时间轴
+    highlights: list[Highlight] = field(default_factory=list)  # 结构化时间轴
 
 
 class AIService:
@@ -51,12 +50,12 @@ class AIService:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
-        base_url: Optional[str] = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         mock: bool = False,
-        model: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
     ):
         """
         初始化 AI 服务
@@ -87,17 +86,17 @@ class AIService:
 
         if not self.mock and not self.api_key:
             raise ValueError(
-                f"API Key 未配置，请设置对应环境变量或使用 mock=True 参数进行测试"
+                "API Key 未配置，请设置对应环境变量或使用 mock=True 参数进行测试"
             )
 
         # 创建 HTTP 客户端（带连接池）
-        self._client: Optional[httpx.Client] = None
+        self._client: httpx.Client | None = None
 
     def is_available(self) -> bool:
         """AI 服务是否可用 (模拟模式始终可用, 真实模式需要有效 Key)"""
         return not self.mock
 
-    def _mask_api_key(self, api_key: Optional[str]) -> str:
+    def _mask_api_key(self, api_key: str | None) -> str:
         """
         对 API Key 进行脱敏处理，用于日志输出
 
@@ -130,7 +129,7 @@ class AIService:
         else:
             return self.DEFAULT_ENDPOINTS["deepseek"]
 
-    def _get_api_key_from_env(self) -> Optional[str]:
+    def _get_api_key_from_env(self) -> str | None:
         """从环境变量获取 API Key"""
         # 尝试多个可能的环境变量
         env_vars = [
@@ -172,14 +171,14 @@ class AIService:
     def __enter__(self) -> "AIService":
         return self
 
-    def __exit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[object]) -> None:
+    def __exit__(self, exc_type: type | None, exc_val: BaseException | None, exc_tb: object | None) -> None:
         self.close()
 
     def summarize(
         self,
         transcript: str,
-        prompt_template: Optional[str] = None,
-        template_id: Optional[str] = None,
+        prompt_template: str | None = None,
+        template_id: str | None = None,
         title: str = "",
         max_tokens: int = 4000
     ) -> SummaryResult:
@@ -259,7 +258,7 @@ class AIService:
         }
 
         # 带指数退避的重试机制
-        last_exception: Optional[BaseException] = None
+        last_exception: BaseException | None = None
         for attempt in range(self.MAX_RETRIES):
             try:
                 client = self._get_client()
@@ -387,7 +386,7 @@ class AIService:
 
         extracted_title = title
         summary = ""
-        highlights: List[Highlight] = []
+        highlights: list[Highlight] = []
 
         current_section = None
         current_time = ""
@@ -449,7 +448,7 @@ class AIService:
             highlights=highlights
         )
 
-    def _parse_highlight_line(self, line: str) -> Optional[Highlight]:
+    def _parse_highlight_line(self, line: str) -> Highlight | None:
         """解析单行要点，提取时间戳和内容"""
         # 尝试匹配 [00:05:23] 或 00:05:23 格式
         time_pattern = r"\[?(\d{1,2}:\d{2}:\d{2})\]?"
@@ -484,7 +483,7 @@ class AIService:
             return minutes * 60 + seconds
         return 0
 
-    def _generate_default_highlights(self) -> List[Highlight]:
+    def _generate_default_highlights(self) -> list[Highlight]:
         """生成默认时间轴（当 AI 没有返回时）"""
         return [
             Highlight(time="00:00:00", seconds=0, content="视频开始"),

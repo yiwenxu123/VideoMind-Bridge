@@ -2,7 +2,6 @@
 
 import shutil
 from pathlib import Path
-from typing import Tuple, Optional
 
 
 def sanitize_filename(title: str, max_length: int = 100) -> str:
@@ -52,7 +51,7 @@ def safe_write_text(
     file_path: Path,
     content: str,
     encoding: str = "utf-8"
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     安全地写入文本文件
 
@@ -70,7 +69,7 @@ def safe_write_text(
         return True, f"文件已写入: {file_path}"
     except PermissionError as e:
         return False, f"权限错误: {e}"
-    except IOError as e:
+    except OSError as e:
         return False, f"IO错误: {e}"
     except Exception as e:
         return False, f"写入失败: {e}"
@@ -79,7 +78,7 @@ def safe_write_text(
 def safe_copy_file(
     source: Path,
     destination: Path
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     安全地复制文件
 
@@ -105,7 +104,7 @@ def safe_copy_file(
         return True, f"文件已复制: {destination}"
     except PermissionError as e:
         return False, f"权限错误: {e}"
-    except IOError as e:
+    except OSError as e:
         return False, f"IO错误: {e}"
     except Exception as e:
         return False, f"复制失败: {e}"
@@ -114,7 +113,7 @@ def safe_copy_file(
 def safe_create_symlink(
     target: Path,
     link_path: Path
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """
     安全地创建符号链接
 

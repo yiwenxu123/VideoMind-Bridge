@@ -1,9 +1,8 @@
 """处理时间预估功能测试"""
 
 import sys
-from pathlib import Path
 
-from src.services.time_estimator import ProcessingTimeEstimator, TimeEstimate
+from src.services.time_estimator import ProcessingTimeEstimator
 
 
 def test_format_duration():

@@ -3,16 +3,14 @@
 使用下载器路由自动选择最佳下载器。
 """
 
-import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
 
 from ..models.task import VideoMetadata
-from ..utils import get_logger, sanitize_filename
-from ..utils.exceptions import DownloadError, NetworkError, UnsupportedPlatformError
+from ..utils import get_logger
+from ..utils.exceptions import DownloadError, UnsupportedPlatformError
 from ..utils.platform_detector import detect_platform as _detect_platform_impl
 from .downloaders import DownloaderRouter, DownloadOptions
 
@@ -24,7 +22,7 @@ ProgressCallback = Callable[[str, float], None]
 @dataclass
 class DownloadResult:
     """下载结果"""
-    video_path: Optional[Path]
+    video_path: Path | None
     audio_path: Path
     metadata: VideoMetadata
 
@@ -49,8 +47,8 @@ class DownloadService:
         url: str,
         download_video: bool = True,
         video_quality: str = "best",
-        progress_callback: Optional[ProgressCallback] = None,
-        cookies_from_browser: Optional[str] = None,
+        progress_callback: ProgressCallback | None = None,
+        cookies_from_browser: str | None = None,
     ) -> DownloadResult:
         """
         下载视频和/或音频（带重试机制）
@@ -81,9 +79,9 @@ class DownloadService:
             except DownloadError as e:
                 if e.error_code in ["VIDEO_NOT_FOUND", "AGE_RESTRICTED", "REGION_BLOCKED", "PRIVATE_VIDEO"]:
                     raise
-                
+
                 last_error = e
-                
+
                 if attempt < self.MAX_RETRIES - 1:
                     delay = self.RETRY_DELAY * (self.RETRY_BACKOFF ** attempt)
                     logger.warning(f"下载失败（尝试 {attempt + 1}/{self.MAX_RETRIES}）: {e}，{delay:.1f}秒后重试...")
@@ -104,30 +102,30 @@ class DownloadService:
         url: str,
         download_video: bool,
         video_quality: str,
-        progress_callback: Optional[ProgressCallback],
-        cookies_from_browser: Optional[str] = None,
+        progress_callback: ProgressCallback | None,
+        cookies_from_browser: str | None = None,
     ) -> DownloadResult:
         """实际执行下载"""
-        
+
         if progress_callback:
             progress_callback("正在选择下载器...", 2)
-        
+
         options = DownloadOptions(
             output_dir=self.output_dir,
             keep_video=download_video,
             video_quality=video_quality,
             cookies_from_browser=cookies_from_browser,
         )
-        
+
         result = self._router.download(url, options, progress_callback)
-        
+
         if not result.success:
             raise DownloadError(
                 result.error_message or "下载失败",
                 error_code=result.error_code or "DOWNLOAD_FAILED",
                 details={"url": url}
             )
-        
+
         audio_path = result.audio_path
         if audio_path is None:
             raise DownloadError(
@@ -135,7 +133,7 @@ class DownloadService:
                 error_code="FILE_NOT_FOUND",
                 details={"url": url}
             )
-        
+
         if result.metadata is None:
             result.metadata = VideoMetadata(
                 title="未知标题",
@@ -144,14 +142,14 @@ class DownloadService:
                 platform=self._detect_platform(url),
                 url=url,
             )
-        
+
         return DownloadResult(
             video_path=result.video_path,
             audio_path=audio_path,
             metadata=result.metadata,
         )
 
-    def get_supported_platforms(self) -> List[str]:
+    def get_supported_platforms(self) -> list[str]:
         """获取支持的平台列表"""
         return self._router.get_supported_platforms()
 
@@ -159,11 +157,11 @@ class DownloadService:
         """检查是否支持该 URL"""
         return self._router.is_supported(url)
 
-    def get_metadata(self, url: str) -> Optional[VideoMetadata]:
+    def get_metadata(self, url: str) -> VideoMetadata | None:
         """获取视频元数据（不下载）"""
         return self._router.get_metadata(url)
 
-    def list_downloaders(self) -> List[dict]:
+    def list_downloaders(self) -> list[dict]:
         """列出所有可用的下载器"""
         return self._router.list_downloaders()
 

@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
-from .models import ContentGrade, ExtractResult, PrescreenResult
+from .models import ExtractResult, PrescreenResult
 
 
 class HermesFormatter:
@@ -23,7 +23,7 @@ class HermesFormatter:
     def format_extract_result(
         result: ExtractResult,
         include_segments: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """格式化为 Hermes 兼容的输出
 
         Args:
@@ -51,7 +51,7 @@ class HermesFormatter:
         return result.to_dict()
 
     @staticmethod
-    def format_prescreen_result(result: PrescreenResult) -> Dict[str, Any]:
+    def format_prescreen_result(result: PrescreenResult) -> dict[str, Any]:
         """格式化预筛结果"""
         return {
             "url": result.url,
@@ -67,8 +67,8 @@ class HermesFormatter:
     @staticmethod
     def format_extract_result_full(
         result: ExtractResult,
-        prescreen: Optional[PrescreenResult] = None,
-    ) -> Dict[str, Any]:
+        prescreen: PrescreenResult | None = None,
+    ) -> dict[str, Any]:
         """完整的 Hermes 兼容输出 (提取+预筛)"""
         output = result.to_dict()
 

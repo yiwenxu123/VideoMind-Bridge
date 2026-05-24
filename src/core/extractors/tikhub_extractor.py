@@ -9,13 +9,12 @@
 from __future__ import annotations
 
 import re
-from typing import Optional
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 TIKHUB_API_BASE = "https://api.tikhub.io"
 
@@ -32,7 +31,7 @@ _SUPPORTED_PLATFORMS = {
 }
 
 
-def _detect_commercial_platform(url: str) -> Optional[str]:
+def _detect_commercial_platform(url: str) -> str | None:
     for platform, pattern in _SUPPORTED_PLATFORMS.items():
         if pattern.search(url):
             return platform
@@ -47,7 +46,7 @@ class TikhubExtractor(ContentExtractor):
     url_pattern = re.compile(r"|".join(p.pattern for p in _SUPPORTED_PLATFORMS.values()))
 
     def __init__(self) -> None:
-        self._api_key: Optional[str] = None
+        self._api_key: str | None = None
         self._client = httpx.Client(
             timeout=60.0,
             headers={"User-Agent": "VideoMind-Bridge/1.0"},

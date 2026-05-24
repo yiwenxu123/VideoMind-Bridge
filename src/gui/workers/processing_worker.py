@@ -1,30 +1,33 @@
 """后台处理工作线程 - 执行视频处理任务"""
 
 import time
-from pathlib import Path
-from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
-from PySide6.QtCore import QThread, Signal, QObject
+from PySide6.QtCore import QObject, QThread, Signal
+
+from ...config.constants import Defaults, ProgressWeights
+from ...exporters.html_player_exporter import HTMLPlayerExporter
 
 # 导入服务
-from ...models.task import VideoMetadata, ExportContext, ExportTarget, ProcessingMode, TranscriptSegment
-from ...services.download_service import DownloadService, DownloadResult
-from ...services.transcribe_service import TranscribeService
-from ...services.ai_service import AIService, SummaryResult
+from ...models.task import (
+    ExportContext,
+    ExportTarget,
+    ProcessingMode,
+    TranscriptSegment,
+)
+from ...services.ai_service import AIService
+from ...services.download_service import DownloadService
 from ...services.export_orchestrator import ExportOrchestrator
-from ...exporters.html_player_exporter import HTMLPlayerExporter
+from ...services.time_estimator import get_time_estimator
+from ...services.transcribe_service import TranscribeService
 from ...utils import get_logger
-from ...config.constants import Defaults, ProgressWeights
 from ...utils.platform_utils import URLValidator
 from ...utils.retry import (
-    RetryableOperation, RetryConfig, RetryStrategy,
-    DOWNLOAD_RETRY_CONFIG, TRANSCRIBE_RETRY_CONFIG, AI_RETRY_CONFIG,
-    is_retryable_error
+    is_retryable_error,
 )
-from ...utils.exceptions import RetryableError
-from ...services.time_estimator import get_time_estimator
 
 logger = get_logger(__name__)
 
@@ -35,17 +38,17 @@ class TaskConfig:
     task_id: str
     url: str
     mode: ProcessingMode
-    targets: List[ExportTarget]
+    targets: list[ExportTarget]
     output_dir: Path
     whisper_model: str = Defaults.WHISPER_MODEL
     ai_engine: str = Defaults.AI_ENGINE
     ai_model: str = Defaults.AI_MODEL
-    api_key: Optional[str] = None
+    api_key: str | None = None
     download_video: bool = Defaults.DOWNLOAD_VIDEO
     video_quality: str = Defaults.VIDEO_QUALITY
-    prompt_template_id: Optional[str] = None  # Prompt 模板 ID
+    prompt_template_id: str | None = None  # Prompt 模板 ID
     # Obsidian 配置
-    obsidian_vault_path: Optional[Path] = None
+    obsidian_vault_path: Path | None = None
     obsidian_subfolder: str = "Inbox/Videos"
 
     def __post_init__(self):
@@ -79,7 +82,7 @@ class ProcessingWorker(QThread):
     task_resumed = Signal(str)                # task_id
     retrying = Signal(str, int, int, str)     # task_id, attempt, max_attempts, error
 
-    def __init__(self, config: TaskConfig, parent: Optional[QObject] = None):
+    def __init__(self, config: TaskConfig, parent: QObject | None = None):
         super().__init__(parent)
         self.config = config
         self._is_cancelled = False
@@ -90,7 +93,7 @@ class ProcessingWorker(QThread):
         # 初始化服务
         self.download_service = DownloadService(config.output_dir)
         self.transcribe_service = TranscribeService(model_size=config.whisper_model)
-        self.ai_service: Optional[AIService] = None
+        self.ai_service: AIService | None = None
 
         if config.api_key:
             try:
@@ -473,7 +476,7 @@ class ProcessingWorker(QThread):
 
         return download_result.metadata.duration, download_result.metadata.platform
 
-    def _parse_targets(self, targets_config: List[Any]) -> List[ExportTarget]:
+    def _parse_targets(self, targets_config: list[Any]) -> list[ExportTarget]:
         """解析目标配置"""
         target_map = {
             "obsidian": ExportTarget.OBSIDIAN,
@@ -505,7 +508,7 @@ class ProcessingWorker(QThread):
         transcript: str,
         title: str,
         template_id: str
-    ) -> Optional[Any]:
+    ) -> Any | None:
         """
         带重试机制的 AI 摘要生成
 
@@ -517,7 +520,7 @@ class ProcessingWorker(QThread):
         Returns:
             Optional[Any]: AI 摘要结果，失败时抛出异常
         """
-        from ...utils.exceptions import AIError, NetworkError, TimeoutError, ServiceUnavailableError
+        from ...utils.exceptions import AIError, NetworkError, ServiceUnavailableError, TimeoutError
 
         max_retries = 3
         base_delay = 1.0
@@ -614,7 +617,7 @@ class ProcessingWorker(QThread):
         raise last_error if last_error else AIError("AI 摘要生成失败")
 
     @staticmethod
-    def _generate_srt(segments: List[TranscriptSegment]) -> str:
+    def _generate_srt(segments: list[TranscriptSegment]) -> str:
         """生成 SRT 字幕（使用共享工具）"""
         from ...utils import generate_srt
         return generate_srt(segments)

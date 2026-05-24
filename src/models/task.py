@@ -2,9 +2,9 @@
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum, auto
+from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 from uuid import UUID, uuid4
 
 
@@ -44,10 +44,10 @@ class VideoMetadata:
     duration: int  # 秒
     platform: str  # bilibili, youtube, etc.
     url: str
-    thumbnail_url: Optional[str] = None
-    description: Optional[str] = None
-    published_at: Optional[datetime] = None
-    raw_info: Dict[str, Any] = field(default_factory=dict)  # 原始平台数据
+    thumbnail_url: str | None = None
+    description: str | None = None
+    published_at: datetime | None = None
+    raw_info: dict[str, Any] = field(default_factory=dict)  # 原始平台数据
 
 
 @dataclass
@@ -56,7 +56,7 @@ class TranscriptSegment:
     start: float  # 开始时间（秒）
     end: float  # 结束时间（秒）
     text: str
-    confidence: Optional[float] = None  # 置信度
+    confidence: float | None = None  # 置信度
 
 
 @dataclass
@@ -76,19 +76,19 @@ class ExportContext:
     # 任务信息
     task_id: UUID
     video_metadata: VideoMetadata
-    
+
     # 文件路径（可能为None，取决于处理模式）
-    video_path: Optional[Path] = None
-    audio_path: Optional[Path] = None
-    transcript_path: Optional[Path] = None
-    
+    video_path: Path | None = None
+    audio_path: Path | None = None
+    transcript_path: Path | None = None
+
     # 内容数据
-    transcript_segments: List[TranscriptSegment] = field(default_factory=list)
-    transcript_text: Optional[str] = None  # 完整转录文本
-    ai_summary: Optional[str] = None  # AI生成的摘要
-    
+    transcript_segments: list[TranscriptSegment] = field(default_factory=list)
+    transcript_text: str | None = None  # 完整转录文本
+    ai_summary: str | None = None  # AI生成的摘要
+
     # 配置信息
-    config: Dict[str, Any] = field(default_factory=dict)
+    config: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -97,10 +97,10 @@ class ExportResult:
     success: bool
     target: ExportTarget
     timestamp: datetime = field(default_factory=datetime.now)
-    error_msg: Optional[str] = None
-    output_path: Optional[Path] = None  # 本地输出路径
-    remote_url: Optional[str] = None  # 远程链接（如Notion页面）
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error_msg: str | None = None
+    output_path: Path | None = None  # 本地输出路径
+    remote_url: str | None = None  # 远程链接（如Notion页面）
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -115,38 +115,38 @@ class VideoTask:
     url: str = ""
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
-    
+
     # 处理配置
     mode: ProcessingMode = ProcessingMode.FULL
-    targets: Set[ExportTarget] = field(default_factory=lambda: {ExportTarget.LOCAL})
-    ai_provider: Optional[str] = None  # AI提供商名称
-    ai_prompt: Optional[str] = None  # 使用的Prompt模板
-    cookies_from_browser: Optional[str] = None  # 浏览器Cookie来源
+    targets: set[ExportTarget] = field(default_factory=lambda: {ExportTarget.LOCAL})
+    ai_provider: str | None = None  # AI提供商名称
+    ai_prompt: str | None = None  # 使用的Prompt模板
+    cookies_from_browser: str | None = None  # 浏览器Cookie来源
     allow_downgrade: bool = False  # AI不可用时是否降级为转录存档
-    
+
     # 状态追踪
     status: TaskStatus = TaskStatus.PENDING
     progress: float = 0.0  # 0.0 - 100.0
     current_step: str = ""  # 当前步骤描述
-    
+
     # 元数据（解析URL后填充）
-    metadata: Optional[VideoMetadata] = None
-    
+    metadata: VideoMetadata | None = None
+
     # 结果数据
-    audio_path: Optional[Path] = None
-    transcript_segments: List[TranscriptSegment] = field(default_factory=list)
-    ai_summary: Optional[str] = None
-    export_results: List[ExportResult] = field(default_factory=list)
-    
+    audio_path: Path | None = None
+    transcript_segments: list[TranscriptSegment] = field(default_factory=list)
+    ai_summary: str | None = None
+    export_results: list[ExportResult] = field(default_factory=list)
+
     # 错误信息
-    error_msg: Optional[str] = None
+    error_msg: str | None = None
     retry_count: int = 0
-    completed_at: Optional[datetime] = None
-    
+    completed_at: datetime | None = None
+
     # 输出文件
-    output_files: List[Path] = field(default_factory=list)
-    
-    def to_dict(self) -> Dict[str, Any]:
+    output_files: list[Path] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
         return {
             "id": str(self.id),
@@ -175,7 +175,7 @@ class VideoTask:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "VideoTask":
+    def from_dict(cls, data: dict[str, Any]) -> "VideoTask":
         """从字典反序列化"""
         return cls(
             id=UUID(data["id"]) if isinstance(data.get("id"), str) else data.get("id", uuid4()),
@@ -203,7 +203,7 @@ class VideoTask:
         )
 
     @staticmethod
-    def _metadata_to_dict(metadata: Optional[VideoMetadata]) -> Optional[Dict[str, Any]]:
+    def _metadata_to_dict(metadata: VideoMetadata | None) -> dict[str, Any] | None:
         """将 VideoMetadata 转换为字典"""
         if metadata is None:
             return None
@@ -220,7 +220,7 @@ class VideoTask:
         }
 
     @staticmethod
-    def _metadata_from_dict(data: Optional[Dict[str, Any]]) -> Optional[VideoMetadata]:
+    def _metadata_from_dict(data: dict[str, Any] | None) -> VideoMetadata | None:
         """从字典创建 VideoMetadata"""
         if data is None:
             return None
@@ -237,7 +237,7 @@ class VideoTask:
         )
 
     @staticmethod
-    def _export_result_to_dict(result: ExportResult) -> Dict[str, Any]:
+    def _export_result_to_dict(result: ExportResult) -> dict[str, Any]:
         """将 ExportResult 转换为字典"""
         return {
             "success": result.success,
@@ -250,7 +250,7 @@ class VideoTask:
         }
 
     @staticmethod
-    def _export_result_from_dict(data: Dict[str, Any]) -> ExportResult:
+    def _export_result_from_dict(data: dict[str, Any]) -> ExportResult:
         """从字典创建 ExportResult"""
         return ExportResult(
             success=data.get("success", False),
@@ -279,27 +279,27 @@ class TaskHistory:
 
     # 处理配置
     mode: ProcessingMode  # 处理模式
-    targets: List[ExportTarget]  # 导出目标
+    targets: list[ExportTarget]  # 导出目标
 
     # 状态信息
     status: TaskStatus  # 最终状态
-    error_msg: Optional[str] = None  # 错误信息（如果失败）
+    error_msg: str | None = None  # 错误信息（如果失败）
 
     # 时间戳
     created_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     # 结果数据
-    summary: Optional[str] = None  # AI摘要内容
+    summary: str | None = None  # AI摘要内容
     highlights_count: int = 0  # 要点数量
-    transcript_path: Optional[Path] = None  # 转录文件路径
+    transcript_path: Path | None = None  # 转录文件路径
 
     # 导出结果
-    output_files: List[Path] = field(default_factory=list)  # 输出文件列表
+    output_files: list[Path] = field(default_factory=list)  # 输出文件列表
     export_success_count: int = 0  # 成功导出数
     export_total_count: int = 0  # 总导出数
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """序列化为字典"""
         return {
             "id": self.id,
@@ -322,7 +322,7 @@ class TaskHistory:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "TaskHistory":
+    def from_dict(cls, data: dict[str, Any]) -> "TaskHistory":
         """从字典反序列化"""
         return cls(
             id=data["id"],

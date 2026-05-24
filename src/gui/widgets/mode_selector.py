@@ -1,12 +1,16 @@
 """处理模式选择组件 - 三级处理模式卡片"""
 
-from pathlib import Path
-from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QRadioButton, QButtonGroup,
-    QFrame, QSizePolicy
-)
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtWidgets import (
+    QButtonGroup,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QRadioButton,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ...models.task import ProcessingMode
 

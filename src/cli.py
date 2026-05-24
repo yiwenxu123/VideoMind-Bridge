@@ -17,25 +17,24 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 from uuid import uuid4
 
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext, Highlight
-from src.services.download_service import DownloadService
-from src.services.transcribe_service import TranscribeService
+from src.models.task import ExportContext, ExportTarget, Highlight, ProcessingMode, VideoMetadata
 from src.services.ai_service import AIService
+from src.services.download_service import DownloadService
 from src.services.export_orchestrator import ExportOrchestrator
+from src.services.transcribe_service import TranscribeService
 from src.utils.media_utils import generate_srt
-
 
 console = Console()
 
 
-def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
         description="VideoMind Bridge - 视频知识处理工具",
@@ -202,6 +201,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def run_v2_extraction(args: argparse.Namespace) -> int:
     """运行 v2 提取引擎 (prescreen/extract/router)"""
     import logging
+
     from src.core import ContentRouter, HermesFormatter, Prescreener
     from src.core.models import ContentGrade, CostTier, ExtractResult
 
@@ -256,10 +256,10 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
             console.print(f"  [bold]预筛结果:[/bold] [{color}]{ps_result.grade.value} 级[/{color}]")
             console.print(f"  平台: {ps_result.platform}")
             if ps_result.platform == "unknown":
-                console.print(f"  [yellow]⚠ 未识别的平台 — 可能无法正常提取内容[/yellow]")
+                console.print("  [yellow]⚠ 未识别的平台 — 可能无法正常提取内容[/yellow]")
             for reason in ps_result.reasons:
                 console.print(f"  [dim]• {reason}[/dim]")
-            console.print(f"\n  [dim]提示: 执行 \"--smart\" 获取完整评分+提取[/dim]")
+            console.print("\n  [dim]提示: 执行 \"--smart\" 获取完整评分+提取[/dim]")
         return 0
 
     # --prescreen 或 --smart: 先提取获取元信息, 再用元信息评分
@@ -310,7 +310,7 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
                 else:
                     console.print(f"[yellow]⏭ 跳过提取: {prescreen_result.grade.value} 级低于 C 级阈值[/yellow]")
                     console.print(f"  [dim]{prescreen_meta['skip_reason']}[/dim]")
-                    console.print(f"  [dim]提示: 使用 --prescreen 强制提取（跳过预筛判断）[/dim]")
+                    console.print("  [dim]提示: 使用 --prescreen 强制提取（跳过预筛判断）[/dim]")
                 return 0
 
             # 根据等级推荐成本
@@ -386,7 +386,7 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
     return 0
 
 
-def parse_targets(targets_str: str) -> List[ExportTarget]:
+def parse_targets(targets_str: str) -> list[ExportTarget]:
     """解析导出目标字符串"""
     target_map = {
         "local": ExportTarget.LOCAL,
@@ -417,19 +417,19 @@ def _build_json_result(
     success: bool,
     url: str,
     mode: str,
-    metadata: Optional[VideoMetadata] = None,
-    video_path: Optional[Path] = None,
-    audio_path: Optional[Path] = None,
-    transcript_result: Optional[Any] = None,
-    summary_result: Optional[Any] = None,
-    highlights: Optional[List[Highlight]] = None,
-    export_results: Optional[list] = None,
+    metadata: VideoMetadata | None = None,
+    video_path: Path | None = None,
+    audio_path: Path | None = None,
+    transcript_result: Any | None = None,
+    summary_result: Any | None = None,
+    highlights: list[Highlight] | None = None,
+    export_results: list | None = None,
     elapsed: float = 0.0,
-    error: Optional[str] = None,
-    error_step: Optional[str] = None,
-) -> Dict[str, Any]:
+    error: str | None = None,
+    error_step: str | None = None,
+) -> dict[str, Any]:
     """构建 JSON 输出结果"""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "success": success,
         "url": url,
         "mode": mode,
@@ -486,7 +486,7 @@ def _build_json_result(
     if export_results:
         result["exports"] = []
         for r in export_results:
-            export_info: Dict[str, Any] = {
+            export_info: dict[str, Any] = {
                 "target": r.target.value,
                 "success": r.success,
             }
@@ -630,12 +630,12 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
     elif args.mock:
         ai_service = AIService(mock=True)
 
-    video_path: Optional[Path] = None
-    audio_path: Optional[Path] = None
-    metadata: Optional[VideoMetadata] = None
+    video_path: Path | None = None
+    audio_path: Path | None = None
+    metadata: VideoMetadata | None = None
     transcript_result = None
     summary_result = None
-    highlights: List[Highlight] = []
+    highlights: list[Highlight] = []
     export_results_list: list = []
 
     if not use_quiet:
@@ -688,7 +688,7 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
                     elapsed=elapsed,
                 ))
             else:
-                console.print(f"\n[green]✓ 下载完成![/green]")
+                console.print("\n[green]✓ 下载完成![/green]")
                 if video_path:
                     console.print(f"  [dim]视频: {video_path}[/dim]")
                 console.print(f"  [dim]音频: {audio_path}[/dim]")
@@ -730,7 +730,7 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
                 json_result["transcript"]["srt_path"] = str(srt_path)
                 _write_json(json_result)
             else:
-                console.print(f"\n[green]✓ 转录完成![/green]")
+                console.print("\n[green]✓ 转录完成![/green]")
                 console.print(f"  [dim]SRT: {srt_path}[/dim]")
             return 0
 
@@ -814,7 +814,7 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
     else:
         console.print(f"\n[bold green]✓ 完成![/bold green] 总耗时: {format_duration(elapsed)}")
         if highlights:
-            console.print(f"\n[cyan]关键时间轴预览:[/cyan]")
+            console.print("\n[cyan]关键时间轴预览:[/cyan]")
             for i, h in enumerate(highlights[:5], 1):
                 console.print(f"  [{h.time}] {h.content[:40]}...")
             if len(highlights) > 5:

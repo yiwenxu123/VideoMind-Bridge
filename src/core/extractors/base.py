@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
-from typing import Optional
 
 from ..models import CostTier, ExtractResult
 
@@ -52,7 +51,7 @@ class ContentExtractor(ABC):
         """
         return bool(self.url_pattern.search(url))
 
-    def should_try(self, url: str, max_cost: Optional[CostTier] = None) -> bool:
+    def should_try(self, url: str, max_cost: CostTier | None = None) -> bool:
         """是否应该尝试此提取器
 
         路由层调用此方法自动决策。
@@ -82,7 +81,7 @@ class ContentExtractor(ABC):
         """标准化 URL (移除追踪参数等)"""
         return url.split("?")[0] if "?" in url else url
 
-    def _resolve_api_key(self, key_name: str) -> Optional[str]:
+    def _resolve_api_key(self, key_name: str) -> str | None:
         """从配置系统获取 API Key: ConfigManager → 环境变量 → None
 
         子类在有 API Key 需求时调用此方法代替直接 os.getenv()。
@@ -91,5 +90,5 @@ class ContentExtractor(ABC):
         from ...services.config_manager import get_config_manager
         return get_config_manager().get_extractor_key(key_name)
 
-    def _resolve_short_url(self, url: str) -> Optional[str]:
+    def _resolve_short_url(self, url: str) -> str | None:
         return None

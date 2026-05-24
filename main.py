@@ -13,7 +13,6 @@
 
 import argparse
 import sys
-from pathlib import Path
 
 
 def run_gui() -> int:
@@ -25,6 +24,7 @@ def run_gui() -> int:
 def run_api(host: str = "127.0.0.1", port: int = 8787) -> None:
     """启动 API 服务"""
     import asyncio
+
     from src.api.server import APIServer
 
     server = APIServer(host=host, port=port)

@@ -1,9 +1,9 @@
 """凭证管理器 - 使用 keyring 安全存储敏感信息"""
 
-import keyring
-from keyring.errors import PasswordSetError, PasswordDeleteError
-from typing import Optional
 import logging
+
+import keyring
+from keyring.errors import PasswordDeleteError, PasswordSetError
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ class CredentialManager:
             return False
 
     @classmethod
-    def get_api_key(cls, provider: str) -> Optional[str]:
+    def get_api_key(cls, provider: str) -> str | None:
         """
         从系统密钥环获取 API Key
 
@@ -113,7 +113,7 @@ def save_api_key(provider: str, api_key: str) -> bool:
     return CredentialManager.save_api_key(provider, api_key)
 
 
-def get_api_key(provider: str) -> Optional[str]:
+def get_api_key(provider: str) -> str | None:
     """获取 API Key"""
     return CredentialManager.get_api_key(provider)
 

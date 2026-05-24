@@ -1,6 +1,5 @@
 """时间工具模块"""
 
-from typing import List
 
 
 def format_time_for_srt(seconds: float) -> str:

@@ -4,18 +4,17 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, List
 
-from .base import BaseExporter
 from ..models.task import ExportContext, ExportResult, ExportTarget, TranscriptSegment
 from ..utils import (
-    get_logger,
-    sanitize_filename,
-    safe_write_text,
-    generate_srt,
-    extract_highlights_from_context,
     Highlight,
+    extract_highlights_from_context,
+    generate_srt,
+    get_logger,
+    safe_write_text,
+    sanitize_filename,
 )
+from .base import BaseExporter
 
 logger = get_logger(__name__)
 
@@ -37,7 +36,7 @@ class LocalExporter(BaseExporter):
         self.output_path = Path(output_path)
         self.organize_by = organize_by
 
-    def validate_config(self) -> Tuple[bool, str]:
+    def validate_config(self) -> tuple[bool, str]:
         """验证配置"""
         try:
             self.output_path.mkdir(parents=True, exist_ok=True)
@@ -232,7 +231,7 @@ class LocalExporter(BaseExporter):
                     link = f"[{h.time}]({video_url}?t={h.seconds})"
                     lines.append(f"- {link} - {h.content}")
                 lines.append("")
-                lines.append(f"> 💡 **提示**: 点击时间戳在浏览器中打开在线视频并跳转到对应位置")
+                lines.append("> 💡 **提示**: 点击时间戳在浏览器中打开在线视频并跳转到对应位置")
             lines.append("")
 
         lines.extend([
@@ -249,18 +248,17 @@ class LocalExporter(BaseExporter):
 
         return "\n".join(lines)
 
-    def _extract_highlights_from_context(self, context: ExportContext) -> List[Highlight]:
+    def _extract_highlights_from_context(self, context: ExportContext) -> list[Highlight]:
         """从 ExportContext 提取时间轴数据（使用共享工具）"""
         return extract_highlights_from_context(context.config)
 
 
 # 测试代码
 if __name__ == "__main__":
-    import sys
     from pathlib import Path
     from uuid import uuid4
 
-    from ..models.task import VideoMetadata, ExportContext, TranscriptSegment
+    from ..models.task import ExportContext, TranscriptSegment, VideoMetadata
 
     # 创建测试上下文
     context = ExportContext(

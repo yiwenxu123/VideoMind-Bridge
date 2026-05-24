@@ -67,3 +67,12 @@ md输出样式.md
 
 # Test files
 mvp_test.py
+
+# Runtime data
+data/tasks.db
+
+# Playwright MCP
+.playwright-mcp/
+
+# Personal test files
+测试链接.md

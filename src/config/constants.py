@@ -1,7 +1,5 @@
 """应用配置常量 - 集中管理所有默认配置值"""
 
-from typing import Optional
-
 from pathlib import Path
 
 
@@ -128,10 +126,10 @@ class BidirectionalMap:
         self._config_to_display = mapping
         self._display_to_config = {v: k for k, v in mapping.items()}
 
-    def to_display(self, config_value: str, default: Optional[str] = None) -> str:
+    def to_display(self, config_value: str, default: str | None = None) -> str:
         return self._config_to_display.get(config_value, default or config_value)
 
-    def to_config(self, display_value: str, default: Optional[str] = None) -> str:
+    def to_config(self, display_value: str, default: str | None = None) -> str:
         return self._display_to_config.get(display_value, default or display_value)
 
     @property
@@ -180,12 +178,12 @@ class ConfigMaps:
 
 # Backward compatibility re-exports — GUI-specific constants moved to src/gui/constants.py
 from src.gui.constants import (  # noqa: F401
-    UIConfig,
-    HistoryConfig,
-    DialogConfig,
-    SliderConfig,
-    SpinBoxConfig,
     ButtonConfig,
     DatabaseConfig,
+    DialogConfig,
+    HistoryConfig,
     Icons,
+    SliderConfig,
+    SpinBoxConfig,
+    UIConfig,
 )

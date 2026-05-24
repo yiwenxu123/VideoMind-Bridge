@@ -3,12 +3,17 @@
 import re
 from pathlib import Path
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QLineEdit, QPushButton, QTextEdit, QFileDialog
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QTextEdit,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeySequence, QShortcut, QClipboard
 
 
 class URLInputWidget(QWidget):
@@ -234,7 +239,7 @@ class URLInputWidget(QWidget):
             return
 
         try:
-            with open(file_path, 'r', encoding='utf-8') as f:
+            with open(file_path, encoding='utf-8') as f:
                 content = f.read()
 
             urls = self._extract_urls(content)

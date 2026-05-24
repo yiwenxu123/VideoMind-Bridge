@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 from .extractors import create_all_extractors
 from .extractors.base import ContentExtractor
@@ -22,19 +21,19 @@ class RouterConfig:
     """路由配置"""
 
     # 最大可接受成本等级 (None = 不限制)
-    max_cost_tier: Optional[CostTier] = None
+    max_cost_tier: CostTier | None = None
 
     # 是否启用所有提取器
     all_extractors: bool = False
 
     # 自定义提取器优先级列表 (名称列表)
-    priority: Optional[List[str]] = None
+    priority: list[str] | None = None
 
     # 尝试的超时时间 (秒)
     timeout: int = 300
 
     # 结果缓存 (Dict[url, ExtractResult])
-    cache: Dict[str, ExtractResult] = field(default_factory=dict)
+    cache: dict[str, ExtractResult] = field(default_factory=dict)
 
 
 # 默认提取器优先级 (按成本/id 排序)
@@ -54,9 +53,9 @@ _DEFAULT_PRIORITY = [
 class ContentRouter:
     """内容路由: 按优先级遍历提取器, 自动降级"""
 
-    def __init__(self, config: Optional[RouterConfig] = None) -> None:
+    def __init__(self, config: RouterConfig | None = None) -> None:
         self.config = config or RouterConfig()
-        self._extractors: Dict[str, ContentExtractor] = {}
+        self._extractors: dict[str, ContentExtractor] = {}
         self._init_extractors()
 
     def _init_extractors(self) -> None:
@@ -64,18 +63,18 @@ class ContentRouter:
         for extractor in create_all_extractors():
             self._extractors[extractor.platform_name] = extractor
 
-    def get_extractor(self, name: str) -> Optional[ContentExtractor]:
+    def get_extractor(self, name: str) -> ContentExtractor | None:
         """获取指定名称的提取器"""
         return self._extractors.get(name)
 
-    def list_extractors(self) -> Dict[str, bool]:
+    def list_extractors(self) -> dict[str, bool]:
         """列出所有提取器及其可用状态"""
-        result: Dict[str, bool] = {}
+        result: dict[str, bool] = {}
         for name, ext in self._extractors.items():
             result[name] = ext.is_available()
         return result
 
-    def extract(self, url: str, max_cost: Optional[CostTier] = None) -> ExtractResult:
+    def extract(self, url: str, max_cost: CostTier | None = None) -> ExtractResult:
         """提取内容, 自动遍历优先级列表
 
         Args:
@@ -94,8 +93,8 @@ class ContentRouter:
         # 确定优先级列表
         priority = self.config.priority or _DEFAULT_PRIORITY
 
-        failures: List[str] = []
-        last_result: Optional[ExtractResult] = None
+        failures: list[str] = []
+        last_result: ExtractResult | None = None
 
         for name in priority:
             extractor = self._extractors.get(name)

@@ -5,12 +5,12 @@
 """
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Protocol, runtime_checkable
+from typing import Protocol
 
-from ..models.task import TranscriptSegment, VideoMetadata, Highlight
-
+from ..models.task import Highlight, TranscriptSegment, VideoMetadata
 
 # ============ 回调类型定义 ============
 
@@ -30,8 +30,8 @@ Args:
 class DownloadResult:
     """下载结果"""
     audio_path: Path
-    video_path: Optional[Path] = None
-    metadata: Optional[VideoMetadata] = None
+    video_path: Path | None = None
+    metadata: VideoMetadata | None = None
 
 
 class IDownloadService(Protocol):
@@ -40,20 +40,20 @@ class IDownloadService(Protocol):
     
     支持静态类型检查，任何实现以下方法的类都被视为有效实现。
     """
-    
+
     def download(
         self,
         url: str,
-        progress_callback: Optional[ProgressCallback] = None,
+        progress_callback: ProgressCallback | None = None,
         keep_video: bool = False
     ) -> DownloadResult:
         """下载视频/音频"""
         ...
-    
-    def get_metadata(self, url: str) -> Optional[VideoMetadata]:
+
+    def get_metadata(self, url: str) -> VideoMetadata | None:
         """获取视频元数据"""
         ...
-    
+
     def supports(self, url: str) -> bool:
         """检查是否支持该 URL"""
         ...
@@ -65,12 +65,12 @@ class DownloadServiceInterface(ABC):
     
     负责从各种平台下载视频/音频
     """
-    
+
     @abstractmethod
     def download(
         self,
         url: str,
-        progress_callback: Optional[ProgressCallback] = None,
+        progress_callback: ProgressCallback | None = None,
         keep_video: bool = False
     ) -> DownloadResult:
         """
@@ -89,9 +89,9 @@ class DownloadServiceInterface(ABC):
             UnsupportedPlatformError: 不支持的平台
         """
         raise NotImplementedError()
-    
+
     @abstractmethod
-    def get_metadata(self, url: str) -> Optional[VideoMetadata]:
+    def get_metadata(self, url: str) -> VideoMetadata | None:
         """
         获取视频元数据（不下载）
         
@@ -102,7 +102,7 @@ class DownloadServiceInterface(ABC):
             VideoMetadata: 视频元数据
         """
         raise NotImplementedError()
-    
+
     @abstractmethod
     def supports(self, url: str) -> bool:
         """
@@ -122,7 +122,7 @@ class DownloadServiceInterface(ABC):
 @dataclass
 class TranscriptResult:
     """转录结果"""
-    segments: List[TranscriptSegment]
+    segments: list[TranscriptSegment]
     language: str
     language_probability: float
     full_text: str
@@ -132,13 +132,13 @@ class ITranscribeService(Protocol):
     """
     语音转录服务接口 (Protocol 版本)
     """
-    
+
     def transcribe(
         self,
         audio_path: Path,
         model_size: str = "small",
-        language: Optional[str] = "zh",
-        progress_callback: Optional[ProgressCallback] = None
+        language: str | None = "zh",
+        progress_callback: ProgressCallback | None = None
     ) -> TranscriptResult:
         """转录音频为文本"""
         ...
@@ -150,14 +150,14 @@ class TranscribeServiceInterface(ABC):
     
     基于 faster-whisper 实现
     """
-    
+
     @abstractmethod
     def transcribe(
         self,
         audio_path: Path,
         model_size: str = "small",
-        language: Optional[str] = "zh",
-        progress_callback: Optional[ProgressCallback] = None
+        language: str | None = "zh",
+        progress_callback: ProgressCallback | None = None
     ) -> TranscriptResult:
         """
         转录音频为文本
@@ -175,9 +175,9 @@ class TranscribeServiceInterface(ABC):
             TranscribeError: 转录失败
         """
         raise NotImplementedError()
-    
+
     @abstractmethod
-    def get_available_models(self) -> List[str]:
+    def get_available_models(self) -> list[str]:
         """
         获取可用的模型列表
         
@@ -194,20 +194,20 @@ class SummaryResult:
     """摘要结果"""
     title: str
     summary: str
-    highlights: List[Highlight] = field(default_factory=list)
+    highlights: list[Highlight] = field(default_factory=list)
     model: str = ""
-    tokens_used: Optional[int] = None
-    cost: Optional[float] = None
+    tokens_used: int | None = None
+    cost: float | None = None
 
 
 @dataclass
 class AISummaryInput:
     """AI 摘要输入"""
     transcript: str
-    title: Optional[str] = None
-    author: Optional[str] = None
-    platform: Optional[str] = None
-    duration: Optional[int] = None
+    title: str | None = None
+    author: str | None = None
+    platform: str | None = None
+    duration: int | None = None
     language: str = "zh"
 
 
@@ -221,15 +221,15 @@ class IAIProvider(Protocol):
     - OpenAISkill (未来实现)
     - OllamaSkill (未来实现)
     """
-    
+
     def generate_summary(
         self,
         input_data: AISummaryInput,
-        progress_callback: Optional[ProgressCallback] = None
+        progress_callback: ProgressCallback | None = None
     ) -> SummaryResult:
         """生成摘要"""
         ...
-    
+
     def is_available(self) -> bool:
         """检查服务是否可用"""
         ...
@@ -241,15 +241,15 @@ class AIServiceInterface(ABC):
     
     支持多厂商 LLM (OpenAI/DeepSeek/Anthropic/本地Ollama)
     """
-    
+
     @abstractmethod
     def summarize(
         self,
         transcript: str,
         prompt_template: str,
         provider: str,
-        model: Optional[str] = None,
-        progress_callback: Optional[ProgressCallback] = None
+        model: str | None = None,
+        progress_callback: ProgressCallback | None = None
     ) -> SummaryResult:
         """
         生成视频摘要
@@ -269,9 +269,9 @@ class AIServiceInterface(ABC):
             RateLimitError: API 限流
         """
         raise NotImplementedError()
-    
+
     @abstractmethod
-    def get_available_providers(self) -> List[str]:
+    def get_available_providers(self) -> list[str]:
         """
         获取可用的 AI 提供商列表
         
@@ -279,7 +279,7 @@ class AIServiceInterface(ABC):
             List[str]: 提供商名称列表
         """
         raise NotImplementedError()
-    
+
     @abstractmethod
     def validate_provider_config(self, provider: str) -> bool:
         """
@@ -303,21 +303,21 @@ class ExportInput:
     author: str
     platform: str
     url: str
-    transcript: Optional[str] = None
-    summary: Optional[str] = None
-    highlights: List[Highlight] = field(default_factory=list)
-    audio_path: Optional[Path] = None
-    video_path: Optional[Path] = None
+    transcript: str | None = None
+    summary: str | None = None
+    highlights: list[Highlight] = field(default_factory=list)
+    audio_path: Path | None = None
+    video_path: Path | None = None
     duration: int = 0
-    created_at: Optional[str] = None
+    created_at: str | None = None
 
 
 @dataclass
 class ExportOutput:
     """导出输出"""
     success: bool
-    output_path: Optional[Path] = None
-    error_message: Optional[str] = None
+    output_path: Path | None = None
+    error_message: str | None = None
     format: str = ""
 
 
@@ -332,20 +332,20 @@ class IExporter(Protocol):
     - ObsidianExportSkill (Skills 实现)
     - NotionExporter (未来实现)
     """
-    
+
     @property
     def name(self) -> str:
         """导出器名称"""
         ...
-    
+
     def export(
         self,
         input_data: ExportInput,
-        progress_callback: Optional[ProgressCallback] = None
+        progress_callback: ProgressCallback | None = None
     ) -> ExportOutput:
         """执行导出"""
         ...
-    
+
     def is_available(self) -> bool:
         """检查导出器是否可用"""
         ...
@@ -357,15 +357,15 @@ class IExportOrchestrator(Protocol):
     
     管理多个导出目标，协调并发导出。
     """
-    
+
     def export_all(
         self,
         input_data: ExportInput,
-        progress_callback: Optional[ProgressCallback] = None
-    ) -> List[ExportOutput]:
+        progress_callback: ProgressCallback | None = None
+    ) -> list[ExportOutput]:
         """执行所有导出"""
         ...
-    
-    def get_exporters(self) -> List[IExporter]:
+
+    def get_exporters(self) -> list[IExporter]:
         """获取所有导出器"""
         ...

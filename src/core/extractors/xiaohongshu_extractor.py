@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # 小红书 URL 模式
 _XHS_RE = re.compile(r"(?:xiaohongshu\.com/(?:explore|discovery/item)/|xhslink\.com/)(\w+)")
@@ -98,7 +97,7 @@ class XiaohongshuExtractor(ContentExtractor):
                 error=f"小红书提取失败: {e}",
             )
 
-    def _resolve_short_url(self, url: str) -> Optional[str]:
+    def _resolve_short_url(self, url: str) -> str | None:
         """解析 xhslink.com 短链接"""
         try:
             resp = self._client.get(url, timeout=10.0)
@@ -107,14 +106,14 @@ class XiaohongshuExtractor(ContentExtractor):
         except Exception:
             return None
 
-    def _extract_note_id(self, url: str) -> Optional[str]:
+    def _extract_note_id(self, url: str) -> str | None:
         """从 URL 提取笔记 ID"""
         m = _XHS_RE.search(url)
         if m:
             return m.group(1)
         return None
 
-    def _fetch_note(self, note_id: str) -> Tuple[str, str, List[str]]:
+    def _fetch_note(self, note_id: str) -> tuple[str, str, list[str]]:
         """获取笔记内容"""
         note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
 
@@ -173,7 +172,7 @@ class XiaohongshuExtractor(ContentExtractor):
         return ""
 
     @staticmethod
-    def _extract_images(html: str) -> List[str]:
+    def _extract_images(html: str) -> list[str]:
         """提取图片列表"""
         images = []
         patterns = [
@@ -188,7 +187,7 @@ class XiaohongshuExtractor(ContentExtractor):
         return images
 
     @staticmethod
-    def _extract_from_ssr(html: str) -> Tuple[str, str]:
+    def _extract_from_ssr(html: str) -> tuple[str, str]:
         """从 SSR 数据提取"""
         patterns = [
             r'<script>window\.__INITIAL_STATE__\s*=\s*({.*?});</script>',

@@ -9,17 +9,17 @@
 - extractors/: 各平台提取器 (基类 + 平台实现)
 """
 
+from .formatter import HermesFormatter
 from .models import (
     ContentGrade,
     CostTier,
+    ExtractorMetadata,
+    ExtractResult,
     PlatformInfo,
     PrescreenResult,
-    ExtractResult,
-    ExtractorMetadata,
 )
-from .router import ContentRouter
-from .formatter import HermesFormatter
 from .prescreener import Prescreener
+from .router import ContentRouter
 
 __all__ = [
     "ContentGrade",

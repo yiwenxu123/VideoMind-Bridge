@@ -4,8 +4,6 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Optional
-
 
 LOG_LEVELS = {
     "DEBUG": logging.DEBUG,
@@ -23,8 +21,8 @@ _initialized = False
 
 def setup_logging(
     level: int = logging.INFO,
-    log_file: Optional[Path] = None,
-    format_string: Optional[str] = None
+    log_file: Path | None = None,
+    format_string: str | None = None
 ) -> None:
     """
     配置全局日志系统

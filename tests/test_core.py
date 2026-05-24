@@ -4,21 +4,18 @@
 所有测试为纯逻辑无网络。
 """
 
-import sys
-from pathlib import Path
 
+from src.core.formatter import HermesFormatter
 from src.core.models import ContentGrade, CostTier
 from src.core.prescreen_rules import (
-    apply_seo_rules,
     apply_duration_rules,
     apply_marketing_rules,
-    run_all_rules,
+    apply_seo_rules,
     compute_grade,
+    run_all_rules,
 )
 from src.core.prescreener import Prescreener, detect_platform
-from src.core.formatter import HermesFormatter
 from src.core.router import ContentRouter
-
 
 # ============================================================
 # Models

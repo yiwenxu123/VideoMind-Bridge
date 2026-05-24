@@ -8,13 +8,13 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # 抖音 URL 模式
 _DOUYIN_RE = re.compile(
@@ -98,7 +98,7 @@ class DouyinExtractor(ContentExtractor):
                 error=f"抖音提取失败: {e}",
             )
 
-    def _resolve_short_url(self, url: str) -> Optional[str]:
+    def _resolve_short_url(self, url: str) -> str | None:
         """解析 v.douyin.com 短链接"""
         try:
             resp = self._client.get(url, follow_redirects=True, timeout=10.0)
@@ -106,7 +106,7 @@ class DouyinExtractor(ContentExtractor):
         except Exception:
             return None
 
-    def _extract_video_id(self, url: str) -> Optional[str]:
+    def _extract_video_id(self, url: str) -> str | None:
         """从 URL 提取视频 ID"""
         m = _DOUYIN_RE.search(url)
         if m:
@@ -115,7 +115,7 @@ class DouyinExtractor(ContentExtractor):
 
     def _fetch_video_data(
         self, video_id: str,
-    ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
+    ) -> tuple[str, str, list[dict[str, Any]] | None]:
         """通过 iesdouyin 移动端 API 获取视频信息
 
         使用 Share API (无需 Cookie):
@@ -151,7 +151,7 @@ class DouyinExtractor(ContentExtractor):
 
     def _fetch_via_share_api(
         self, video_id: str,
-    ) -> Tuple[str, str, Optional[List[Dict[str, Any]]]]:
+    ) -> tuple[str, str, list[dict[str, Any]] | None]:
         """通过抖音分享 API 二次尝试"""
         try:
             api_url = f"https://www.iesdouyin.com/aweme/v1/web/aweme/detail/?aweme_id={video_id}"

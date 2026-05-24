@@ -1,12 +1,18 @@
 """输出目标选择组件"""
 
 from pathlib import Path
+
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QCheckBox, QLineEdit, QPushButton,
-    QFileDialog, QGroupBox
+    QCheckBox,
+    QFileDialog,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt
 
 from ...models.task import ExportTarget
 
@@ -174,7 +180,7 @@ class TargetSelector(QWidget):
         from pathlib import Path
         default_local_path = Path.home() / "Downloads" / "VideoMind"
         default_local_path.mkdir(parents=True, exist_ok=True)
-        
+
         self.local_card = TargetCard(
             icon="📁",
             title="本地文件夹",
@@ -261,9 +267,10 @@ class TargetSelector(QWidget):
 
     def _on_test_webhook(self):
         """测试 Webhook 连接"""
-        from PySide6.QtWidgets import QMessageBox
-        import httpx
         import json
+
+        import httpx
+        from PySide6.QtWidgets import QMessageBox
 
         url = self.webhook_url_input.text().strip()
         if not url:

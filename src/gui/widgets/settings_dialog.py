@@ -1,18 +1,36 @@
 """设置对话框 - 应用配置管理"""
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QLabel, QLineEdit, QComboBox, QPushButton, QSpinBox,
-    QCheckBox, QFileDialog, QMessageBox,
-    QDialogButtonBox, QFormLayout, QGroupBox, QWidget,
-    QSlider, QSizePolicy, QScrollArea
-)
 from PySide6.QtCore import Qt
-from pathlib import Path
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QSlider,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
 
+from ...config.constants import (
+    ConfigMaps,
+    Defaults,
+    DialogConfig,
+    Icons,
+    SliderConfig,
+    SpinBoxConfig,
+)
 from ...services.config_manager import get_config_manager
-from ...utils.credential_manager import CredentialManager
-from ...config.constants import Defaults, DialogConfig, Icons, ConfigMaps, SliderConfig, SpinBoxConfig
 
 
 class SettingsDialog(QDialog):
@@ -29,7 +47,7 @@ class SettingsDialog(QDialog):
         self.setWindowTitle(f"{Icons.SETTINGS} 设置")
         self.setMinimumSize(DialogConfig.SETTINGS_MIN_WIDTH, DialogConfig.SETTINGS_MIN_HEIGHT)
         self.resize(DialogConfig.SETTINGS_WIDTH, DialogConfig.SETTINGS_HEIGHT)
-        
+
         self.config_manager = get_config_manager()
         self.config_manager.reload()
         self._setup_ui()
@@ -44,7 +62,7 @@ class SettingsDialog(QDialog):
         # 创建标签页
         self.tab_widget = QTabWidget()
         self.tab_widget.setDocumentMode(False)
-        
+
         # 设置标签页样式
         self.tab_widget.setStyleSheet("""
             QTabWidget::pane {
@@ -75,11 +93,11 @@ class SettingsDialog(QDialog):
                 color: #333;
             }
         """)
-        
+
         # 通用设置标签页
         self.general_tab = self._create_general_tab()
         self.tab_widget.addTab(self.general_tab, "⚙️ 通用")
-        
+
         # AI 设置标签页
         self.ai_tab = self._create_ai_tab()
         self.tab_widget.addTab(self.ai_tab, "🤖 AI 引擎")
@@ -99,12 +117,12 @@ class SettingsDialog(QDialog):
         # 提取器 Key 标签页
         self.extractor_tab = self._create_extractor_tab()
         self.tab_widget.addTab(self.extractor_tab, "🔌 提取器 Keys")
-        
+
         layout.addWidget(self.tab_widget)
 
         # 按钮区域
         button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | 
+            QDialogButtonBox.StandardButton.Save |
             QDialogButtonBox.StandardButton.Cancel
         )
         button_box.accepted.connect(self._on_save)
@@ -124,19 +142,19 @@ class SettingsDialog(QDialog):
         theme_layout = QFormLayout(theme_group)
         theme_layout.setSpacing(12)
         theme_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         self.theme_combo = QComboBox()
         self.theme_combo.addItems(["跟随系统", "浅色", "深色"])
         self.theme_combo.setCurrentText("跟随系统")
         self.theme_combo.setMinimumWidth(200)
         theme_layout.addRow("主题:", self.theme_combo)
-        
+
         self.language_combo = QComboBox()
         self.language_combo.addItems(["简体中文", "English"])
         self.language_combo.setCurrentText("简体中文")
         self.language_combo.setMinimumWidth(200)
         theme_layout.addRow("语言:", self.language_combo)
-        
+
         layout.addWidget(theme_group)
 
         # 系统托盘设置
@@ -144,18 +162,18 @@ class SettingsDialog(QDialog):
         tray_group.setStyleSheet("QGroupBox { font-weight: bold; font-size: 13px; }")
         tray_layout = QVBoxLayout(tray_group)
         tray_layout.setSpacing(10)
-        
+
         self.minimize_to_tray = QCheckBox("最小化到系统托盘而不是关闭")
         self.minimize_to_tray.setChecked(True)
         tray_layout.addWidget(self.minimize_to_tray)
-        
+
         self.show_notifications = QCheckBox("任务完成时显示系统通知")
         self.show_notifications.setChecked(True)
         tray_layout.addWidget(self.show_notifications)
-        
+
         layout.addWidget(tray_group)
         layout.addStretch()
-        
+
         return tab
 
     def _create_ai_tab(self) -> QWidget:
@@ -171,25 +189,25 @@ class SettingsDialog(QDialog):
         engine_layout = QFormLayout(engine_group)
         engine_layout.setSpacing(12)
         engine_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         self.ai_engine_combo = QComboBox()
         self.ai_engine_combo.addItems(["DeepSeek", "OpenAI", "Anthropic"])
         self.ai_engine_combo.setCurrentText("DeepSeek")
         self.ai_engine_combo.setMinimumWidth(200)
         engine_layout.addRow("引擎:", self.ai_engine_combo)
-        
+
         self.ai_model_input = QLineEdit()
         self.ai_model_input.setText("deepseek-chat")
         self.ai_model_input.setMinimumWidth(300)
         self.ai_model_input.setPlaceholderText("例如: deepseek-chat, gpt-4, claude-3-opus")
         engine_layout.addRow("模型:", self.ai_model_input)
-        
+
         self.base_url_input = QLineEdit()
         self.base_url_input.setText("https://api.deepseek.com")
         self.base_url_input.setMinimumWidth(300)
         self.base_url_input.setPlaceholderText("API 基础 URL")
         engine_layout.addRow("Base URL:", self.base_url_input)
-        
+
         layout.addWidget(engine_group)
 
         # API Key 设置
@@ -198,17 +216,17 @@ class SettingsDialog(QDialog):
         api_key_layout = QFormLayout(api_key_group)
         api_key_layout.setSpacing(12)
         api_key_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         # API Key 输入行（输入框 + 显示按钮）
         api_key_row = QHBoxLayout()
         api_key_row.setSpacing(8)
-        
+
         self.api_key_input = QLineEdit()
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_input.setPlaceholderText("输入您的 API Key...")
         self.api_key_input.setMinimumWidth(350)
         api_key_row.addWidget(self.api_key_input)
-        
+
         # 显示/隐藏按钮
         show_btn = QPushButton("显示")
         show_btn.setCheckable(True)
@@ -231,14 +249,14 @@ class SettingsDialog(QDialog):
             show_btn.setText("隐藏" if checked else "显示")
         ))
         api_key_row.addWidget(show_btn)
-        
+
         api_key_layout.addRow("API Key:", api_key_row)
-        
+
         # API Key 说明
         api_key_hint = QLabel("💡 API Key 将安全存储在系统密钥环中，不会以明文保存")
         api_key_hint.setStyleSheet("color: #666; font-size: 11px;")
         api_key_layout.addRow("", api_key_hint)
-        
+
         layout.addWidget(api_key_group)
 
         # 生成参数设置
@@ -247,11 +265,11 @@ class SettingsDialog(QDialog):
         params_layout = QFormLayout(params_group)
         params_layout.setSpacing(12)
         params_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         # 温度滑块行
         temp_row = QHBoxLayout()
         temp_row.setSpacing(10)
-        
+
         self.temperature_slider = QSlider(Qt.Orientation.Horizontal)
         self.temperature_slider.setRange(SliderConfig.TEMPERATURE_MIN, SliderConfig.TEMPERATURE_MAX)
         self.temperature_slider.setValue(SliderConfig.TEMPERATURE_DEFAULT)
@@ -286,7 +304,7 @@ class SettingsDialog(QDialog):
         self.timeout_spin.setSuffix(" 秒")
         self.timeout_spin.setMinimumWidth(200)
         params_layout.addRow("超时:", self.timeout_spin)
-        
+
         layout.addWidget(params_group)
         layout.addStretch()
 
@@ -294,7 +312,6 @@ class SettingsDialog(QDialog):
 
     def _create_prompt_tab(self) -> QWidget:
         """创建 Prompt 模板标签页"""
-        from .prompt_template_dialog import PromptTemplateDialog
 
         tab = QWidget()
         layout = QVBoxLayout(tab)
@@ -372,35 +389,35 @@ class SettingsDialog(QDialog):
         obsidian_layout = QFormLayout(obsidian_group)
         obsidian_layout.setSpacing(12)
         obsidian_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         self.obsidian_enabled = QCheckBox("启用 Obsidian 导出")
         self.obsidian_enabled.setChecked(True)
         obsidian_layout.addRow(self.obsidian_enabled)
-        
+
         # Vault 路径行
         vault_row = QHBoxLayout()
         vault_row.setSpacing(8)
-        
+
         self.obsidian_vault_input = QLineEdit()
         self.obsidian_vault_input.setPlaceholderText("选择 Obsidian Vault 路径...")
         self.obsidian_vault_input.setMinimumWidth(350)
         # 当路径为空时自动取消启用
         self.obsidian_vault_input.textChanged.connect(self._on_obsidian_path_changed)
         vault_row.addWidget(self.obsidian_vault_input, 1)
-        
+
         browse_vault_btn = QPushButton("浏览...")
         browse_vault_btn.setFixedWidth(80)
         browse_vault_btn.clicked.connect(self._browse_obsidian_vault)
         vault_row.addWidget(browse_vault_btn)
-        
+
         obsidian_layout.addRow("Vault 路径:", vault_row)
-        
+
         self.obsidian_subfolder_input = QLineEdit()
         self.obsidian_subfolder_input.setText(Defaults.OBSIDIAN_SUBFOLDER)
         self.obsidian_subfolder_input.setMinimumWidth(350)
         self.obsidian_subfolder_input.setPlaceholderText("笔记保存的子文件夹路径")
         obsidian_layout.addRow("子文件夹:", self.obsidian_subfolder_input)
-        
+
         layout.addWidget(obsidian_group)
 
         # 本地文件夹设置
@@ -409,7 +426,7 @@ class SettingsDialog(QDialog):
         local_layout = QFormLayout(local_group)
         local_layout.setSpacing(12)
         local_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         # 本地文件夹说明
         local_hint = QLabel("💡 本地文件夹为必需，如路径为空将使用默认路径")
         local_hint.setStyleSheet("color: #2196F3; font-size: 11px;")
@@ -420,30 +437,30 @@ class SettingsDialog(QDialog):
         local_row.setSpacing(8)
 
         self.local_path_input = QLineEdit()
-        self.local_path_input.setPlaceholderText(f"默认: ~/Downloads/VideoMind")
+        self.local_path_input.setPlaceholderText("默认: ~/Downloads/VideoMind")
         self.local_path_input.setMinimumWidth(350)
         local_row.addWidget(self.local_path_input, 1)
-        
+
         browse_local_btn = QPushButton("浏览...")
         browse_local_btn.setFixedWidth(80)
         browse_local_btn.clicked.connect(self._browse_local_path)
         local_row.addWidget(browse_local_btn)
-        
+
         local_layout.addRow("输出路径:", local_row)
-        
+
         self.organize_by_combo = QComboBox()
         self.organize_by_combo.addItems(["按日期", "按来源", "不组织"])
         self.organize_by_combo.setCurrentText("按日期")
         self.organize_by_combo.setMinimumWidth(200)
         local_layout.addRow("组织方式:", self.organize_by_combo)
-        
+
         organize_hint = QLabel("💡 按日期组织: 2024-01-15/video_title/")
         organize_hint.setStyleSheet("color: #666; font-size: 11px;")
         local_layout.addRow("", organize_hint)
-        
+
         layout.addWidget(local_group)
         layout.addStretch()
-        
+
         return tab
 
     def _create_download_tab(self) -> QWidget:
@@ -459,40 +476,40 @@ class SettingsDialog(QDialog):
         download_layout = QFormLayout(download_group)
         download_layout.setSpacing(12)
         download_layout.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         # 下载目录行
         download_row = QHBoxLayout()
         download_row.setSpacing(8)
-        
+
         self.download_output_input = QLineEdit()
         self.download_output_input.setPlaceholderText("选择下载目录...")
         self.download_output_input.setMinimumWidth(350)
         download_row.addWidget(self.download_output_input, 1)
-        
+
         browse_download_btn = QPushButton("浏览...")
         browse_download_btn.setFixedWidth(80)
         browse_download_btn.clicked.connect(self._browse_download_path)
         download_row.addWidget(browse_download_btn)
-        
+
         download_layout.addRow("下载目录:", download_row)
-        
+
         self.video_quality_combo = QComboBox()
         self.video_quality_combo.addItems(["最佳质量", "1080p", "720p", "480p", "最低质量"])
         self.video_quality_combo.setCurrentText("最佳质量")
         self.video_quality_combo.setMinimumWidth(200)
         download_layout.addRow("视频质量:", self.video_quality_combo)
-        
+
         quality_hint = QLabel("💡 实际下载质量取决于视频源提供的选项")
         quality_hint.setStyleSheet("color: #666; font-size: 11px;")
         download_layout.addRow("", quality_hint)
-        
+
         self.download_video_check = QCheckBox("默认下载视频（而非仅音频）")
         self.download_video_check.setChecked(True)
         download_layout.addRow(self.download_video_check)
-        
+
         layout.addWidget(download_group)
         layout.addStretch()
-        
+
         return tab
 
     def _create_extractor_tab(self) -> QWidget:
@@ -690,25 +707,25 @@ class SettingsDialog(QDialog):
         # 通用设置
         self.theme_combo.setCurrentText(self.THEME_MAP.to_display(config.ui.theme, "跟随系统"))
         self.language_combo.setCurrentText(self.LANG_MAP.to_display(config.ui.language, "简体中文"))
-        
+
         self.minimize_to_tray.setChecked(config.ui.minimize_to_tray)
         self.show_notifications.setChecked(config.ui.show_notifications)
-        
+
         # AI 设置
         self.ai_engine_combo.setCurrentText(config.ai.engine)
         self.ai_model_input.setText(config.ai.model)
         self.base_url_input.setText(config.ai.base_url)
-        
+
         # 从密钥环加载 API Key
         api_key = self.config_manager.get_api_key()
         if api_key:
             self.api_key_input.setText(api_key)
-        
+
         self.temperature_slider.setValue(int(config.ai.temperature * 100))
         self.temp_value_label.setText(f"{config.ai.temperature:.1f}")
         self.max_tokens_spin.setValue(config.ai.max_tokens)
         self.timeout_spin.setValue(config.ai.timeout)
-        
+
         # 导出设置 - 先设置路径，再设置启用状态，避免信号触发覆盖
         self.obsidian_vault_input.setText(config.export.obsidian.vault_path)
         self.obsidian_subfolder_input.setText(config.export.obsidian.subfolder)
@@ -723,7 +740,7 @@ class SettingsDialog(QDialog):
         self.download_output_input.setText(config.download.output_dir)
 
         self.video_quality_combo.setCurrentText(self.QUALITY_MAP.to_display(config.download.video_quality, "最佳质量"))
-        
+
         self.download_video_check.setChecked(config.download.download_video)
 
         # 提取器 Key 状态
@@ -803,9 +820,9 @@ class SettingsDialog(QDialog):
                 video_quality=self.QUALITY_MAP.to_config(self.video_quality_combo.currentText(), "best"),
                 download_video=self.download_video_check.isChecked()
             )
-            
+
             QMessageBox.information(self, "成功", "设置已保存")
             self.accept()
-            
+
         except Exception as e:
             QMessageBox.critical(self, "错误", f"保存设置失败: {e}")

@@ -1,12 +1,12 @@
 """重复处理检测服务"""
 
 import hashlib
-import yaml
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
-from typing import Optional, Dict, List
 from enum import Enum
+from pathlib import Path
+
+import yaml
 
 
 class ProcessingStatus(str, Enum):
@@ -26,10 +26,10 @@ class ProcessingRecord:
     mode: str
     status: ProcessingStatus
     processed_at: datetime
-    output_dir: Optional[str] = None
-    obsidian_note_path: Optional[str] = None
-    task_id: Optional[str] = None
-    error_message: Optional[str] = None
+    output_dir: str | None = None
+    obsidian_note_path: str | None = None
+    task_id: str | None = None
+    error_message: str | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -64,7 +64,7 @@ class ProcessingRecord:
 class DuplicateDetector:
     """重复处理检测器"""
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(self, storage_path: Path | None = None):
         """
         初始化检测器
 
@@ -75,14 +75,14 @@ class DuplicateDetector:
             storage_path = Path.home() / ".config" / "VideoMind" / "processed_urls.yaml"
 
         self.storage_path = storage_path
-        self._records: Dict[str, ProcessingRecord] = {}
+        self._records: dict[str, ProcessingRecord] = {}
         self._load_records()
 
     def _load_records(self) -> None:
         """从文件加载记录"""
         if self.storage_path.exists():
             try:
-                with open(self.storage_path, "r", encoding="utf-8") as f:
+                with open(self.storage_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                 if data and isinstance(data, dict):
                     for url_hash, record_data in data.items():
@@ -112,7 +112,7 @@ class DuplicateDetector:
         normalized_url = url.split("?")[0].rstrip("/")
         return hashlib.sha256(normalized_url.encode()).hexdigest()[:16]
 
-    def check_duplicate(self, url: str) -> Optional[ProcessingRecord]:
+    def check_duplicate(self, url: str) -> ProcessingRecord | None:
         """
         检查 URL 是否已处理过
 
@@ -135,10 +135,10 @@ class DuplicateDetector:
         title: str,
         mode: str,
         status: ProcessingStatus = ProcessingStatus.PENDING,
-        output_dir: Optional[str] = None,
-        obsidian_note_path: Optional[str] = None,
-        task_id: Optional[str] = None,
-        error_message: Optional[str] = None,
+        output_dir: str | None = None,
+        obsidian_note_path: str | None = None,
+        task_id: str | None = None,
+        error_message: str | None = None,
     ) -> ProcessingRecord:
         """
         添加处理记录
@@ -177,9 +177,9 @@ class DuplicateDetector:
         self,
         url: str,
         status: ProcessingStatus,
-        output_dir: Optional[str] = None,
-        obsidian_note_path: Optional[str] = None,
-        error_message: Optional[str] = None,
+        output_dir: str | None = None,
+        obsidian_note_path: str | None = None,
+        error_message: str | None = None,
     ) -> bool:
         """
         更新处理状态
@@ -224,11 +224,11 @@ class DuplicateDetector:
             return self._save_records()
         return False
 
-    def get_all_records(self) -> List[ProcessingRecord]:
+    def get_all_records(self) -> list[ProcessingRecord]:
         """获取所有处理记录"""
         return list(self._records.values())
 
-    def get_recent_records(self, limit: int = 10) -> List[ProcessingRecord]:
+    def get_recent_records(self, limit: int = 10) -> list[ProcessingRecord]:
         """
         获取最近的处理记录
 
@@ -252,7 +252,7 @@ class DuplicateDetector:
 
 
 # 全局检测器实例
-_duplicate_detector: Optional[DuplicateDetector] = None
+_duplicate_detector: DuplicateDetector | None = None
 
 
 def get_duplicate_detector() -> DuplicateDetector:

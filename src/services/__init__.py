@@ -1,10 +1,10 @@
 """服务层模块"""
 
 from .interfaces import (
-    DownloadServiceInterface,
-    TranscribeServiceInterface,
     AIServiceInterface,
+    DownloadServiceInterface,
     ProgressCallback,
+    TranscribeServiceInterface,
 )
 
 __all__ = [

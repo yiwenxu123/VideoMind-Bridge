@@ -12,16 +12,14 @@
 from __future__ import annotations
 
 import base64
-import json
 import re
 from pathlib import Path
-from typing import Any, Optional
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # 阿里云语音识别 API
 ALIYUN_ASR_ENDPOINT = "https://nls-meta.cn-shanghai.aliyuncs.com"
@@ -50,7 +48,7 @@ class AliyunASRExtractor(ContentExtractor):
     def supports(self, url: str) -> bool:
         return bool(self.url_pattern.search(url))
 
-    def should_try(self, url: str, max_cost: Optional[CostTier] = None) -> bool:
+    def should_try(self, url: str, max_cost: CostTier | None = None) -> bool:
         if not super().should_try(url, max_cost):
             return False
         # ASR 提取器只在其他方式均失败时作为兜底

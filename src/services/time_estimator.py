@@ -1,11 +1,10 @@
 """处理时间预估服务"""
 
-from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
 from dataclasses import dataclass
+from datetime import datetime
 
-from .task_database import get_task_database
 from ..utils import get_logger
+from .task_database import get_task_database
 
 logger = get_logger(__name__)
 
@@ -35,7 +34,7 @@ class ProcessingTimeEstimator:
 
     def __init__(self):
         self.db = get_task_database()
-        self._task_start_times: Dict[str, datetime] = {}  # 任务开始时间记录
+        self._task_start_times: dict[str, datetime] = {}  # 任务开始时间记录
 
     def record_task_start(self, task_id: str):
         """记录任务开始时间"""
@@ -82,7 +81,7 @@ class ProcessingTimeEstimator:
         self,
         mode: str,
         video_duration: int,
-        platform: Optional[str] = None
+        platform: str | None = None
     ) -> TimeEstimate:
         """
         预估处理时间
@@ -135,7 +134,7 @@ class ProcessingTimeEstimator:
         mode: str,
         video_duration: int,
         current_progress: float,
-        platform: Optional[str] = None
+        platform: str | None = None
     ) -> TimeEstimate:
         """
         预估剩余时间
@@ -198,7 +197,7 @@ class ProcessingTimeEstimator:
             message=f"剩余时间: {time_str}"
         )
 
-    def _get_estimated_ratio(self, mode: str, platform: Optional[str] = None) -> Optional[float]:
+    def _get_estimated_ratio(self, mode: str, platform: str | None = None) -> float | None:
         """获取预估的处理时间比例"""
         # 首先尝试获取平台特定的比例
         if platform:
@@ -229,7 +228,7 @@ class ProcessingTimeEstimator:
 
 
 # 全局预估器实例
-_estimator_instance: Optional[ProcessingTimeEstimator] = None
+_estimator_instance: ProcessingTimeEstimator | None = None
 
 
 def get_time_estimator() -> ProcessingTimeEstimator:
@@ -244,7 +243,7 @@ def get_time_estimator() -> ProcessingTimeEstimator:
 def estimate_processing_time(
     mode: str,
     video_duration: int,
-    platform: Optional[str] = None
+    platform: str | None = None
 ) -> TimeEstimate:
     """便捷函数：预估处理时间"""
     return get_time_estimator().estimate_processing_time(mode, video_duration, platform)

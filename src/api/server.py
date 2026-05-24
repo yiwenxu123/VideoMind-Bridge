@@ -5,30 +5,28 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from ..models.task import ProcessingMode, ExportTarget, TaskStatus, VideoTask
+from ..models.task import ProcessingMode, TaskStatus, VideoTask
 from ..services.config_manager import ConfigManager
 from ..utils import get_logger
 from .models import (
-    TaskCreateRequest,
-    TaskResponse,
-    TaskListResponse,
-    ProgressUpdate,
-    APIError,
-    TaskSearchRequest,
-    SystemStatusResponse,
     ConfigResponse,
+    KeyGroup,
+    KeysListResponse,
+    KeyUpdateRequest,
+    ProgressUpdate,
     SettingsResponse,
     SettingsUpdateRequest,
-    KeysListResponse,
-    KeyGroup,
-    KeyUpdateRequest,
+    SystemStatusResponse,
+    TaskCreateRequest,
+    TaskListResponse,
+    TaskResponse,
 )
 from .task_manager import TaskManager
 
@@ -39,8 +37,8 @@ class ConnectionManager:
     """WebSocket连接管理器"""
 
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
-        self.task_subscriptions: Dict[UUID, Set[WebSocket]] = {}
+        self.active_connections: list[WebSocket] = []
+        self.task_subscriptions: dict[UUID, set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket):
         """接受WebSocket连接"""
@@ -103,7 +101,7 @@ class APIServer:
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8787
 
-    def __init__(self, host: Optional[str] = None, port: Optional[int] = None):
+    def __init__(self, host: str | None = None, port: int | None = None):
         """
         初始化API服务器
 
@@ -160,20 +158,20 @@ class APIServer:
         @app.middleware("http")
         async def cors_middleware(request, call_next):
             origin = request.headers.get("origin", "")
-            
+
             is_allowed = (
                 not origin or
                 any(origin.startswith(allowed) for allowed in allowed_origins)
             )
-            
+
             response = await call_next(request)
-            
+
             if is_allowed and origin:
                 response.headers["Access-Control-Allow-Origin"] = origin
                 response.headers["Access-Control-Allow-Credentials"] = "true"
                 response.headers["Access-Control-Allow-Methods"] = "GET, POST, DELETE, OPTIONS"
                 response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
-            
+
             return response
 
         @app.options("/{path:path}")
@@ -197,7 +195,7 @@ class APIServer:
             """Web UI 首页"""
             return FileResponse("web/index.html")
 
-        @app.get("/health", response_model=Dict)
+        @app.get("/health", response_model=dict)
         async def health():
             """健康检查"""
             return {
@@ -237,14 +235,14 @@ class APIServer:
             url = request.get("url")
             if not url:
                 raise HTTPException(status_code=400, detail="url 不能为空")
-            
+
             try:
-                from src.core import ContentRouter, HermesFormatter
+                from src.core import ContentRouter
                 from src.core.models import CostTier
-                
+
                 router = ContentRouter()
                 result = router.extract(url, max_cost=CostTier.FREE)
-                
+
                 if result.success:
                     return {
                         "success": True,
@@ -480,7 +478,7 @@ class APIServer:
 
         @app.get("/api/v1/tasks", response_model=TaskListResponse)
         async def list_tasks(
-            status: Optional[TaskStatus] = None,
+            status: TaskStatus | None = None,
             limit: int = 20,
             offset: int = 0,
         ):
@@ -537,7 +535,7 @@ class APIServer:
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket连接，用于实时接收任务进度更新"""
             origin = websocket.headers.get("origin", "")
-            
+
             allowed_origins = [
                 "chrome-extension://",
                 "moz-extension://",
@@ -545,17 +543,17 @@ class APIServer:
                 "http://localhost",
                 "http://[::1]",
             ]
-            
+
             is_allowed = (
                 not origin or
                 any(origin.startswith(allowed) for allowed in allowed_origins)
             )
-            
+
             if not is_allowed:
                 logger.warning(f"WebSocket 连接被拒绝，Origin: {origin}")
                 await websocket.close(code=1008)
                 return
-            
+
             await self.connection_manager.connect(websocket)
             try:
                 while True:

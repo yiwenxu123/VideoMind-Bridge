@@ -1,7 +1,6 @@
 """Exporter 插件基类定义"""
 
 from abc import ABC, abstractmethod
-from typing import Tuple
 
 from ..models.task import ExportContext, ExportResult
 
@@ -12,14 +11,14 @@ class BaseExporter(ABC):
     
     所有导出目标（Obsidian/Local/Notion/Webhook）必须继承此类
     """
-    
+
     # 显示名称
     name: str = "Base Exporter"
     # Emoji 图标
     icon: str = "📄"
-    
+
     @abstractmethod
-    def validate_config(self) -> Tuple[bool, str]:
+    def validate_config(self) -> tuple[bool, str]:
         """
         检查配置是否有效
         
@@ -29,7 +28,7 @@ class BaseExporter(ABC):
             - 配置无效时返回 (False, "错误描述")
         """
         raise NotImplementedError()
-    
+
     @abstractmethod
     def export(self, context: ExportContext) -> ExportResult:
         """
@@ -45,7 +44,7 @@ class BaseExporter(ABC):
             ExportError: 导出过程中发生错误
         """
         raise NotImplementedError()
-    
+
     def get_config_schema(self) -> dict:
         """
         获取配置项的JSON Schema（可选实现）

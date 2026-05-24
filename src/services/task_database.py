@@ -1,12 +1,12 @@
 """任务历史数据库 - SQLite 持久化存储"""
 
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Dict, Any
-from contextlib import contextmanager
+from typing import Any
 
-from ..models.task import TaskHistory, ProcessingMode, ExportTarget, TaskStatus
+from ..models.task import ExportTarget, ProcessingMode, TaskHistory, TaskStatus
 from ..utils import get_logger
 
 logger = get_logger(__name__)
@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 class TaskDatabase:
     """任务历史数据库管理器"""
 
-    def __init__(self, db_path: Optional[Path] = None):
+    def __init__(self, db_path: Path | None = None):
         """
         初始化数据库
 
@@ -150,7 +150,7 @@ class TaskDatabase:
             logger.error(f"保存任务历史失败: {e}")
             return False
 
-    def get_task(self, task_id: str) -> Optional[TaskHistory]:
+    def get_task(self, task_id: str) -> TaskHistory | None:
         """
         获取单个任务历史记录
 
@@ -179,11 +179,11 @@ class TaskDatabase:
 
     def get_tasks(
         self,
-        status: Optional[TaskStatus] = None,
-        platform: Optional[str] = None,
+        status: TaskStatus | None = None,
+        platform: str | None = None,
         limit: int = 100,
         offset: int = 0
-    ) -> List[TaskHistory]:
+    ) -> list[TaskHistory]:
         """
         获取任务历史列表
 
@@ -223,7 +223,7 @@ class TaskDatabase:
             logger.error(f"获取任务历史列表失败: {e}")
             return []
 
-    def search_tasks(self, keyword: str, limit: int = 50) -> List[TaskHistory]:
+    def search_tasks(self, keyword: str, limit: int = 50) -> list[TaskHistory]:
         """
         搜索任务历史
 
@@ -306,7 +306,7 @@ class TaskDatabase:
             logger.error(f"清理旧任务历史失败: {e}")
             return 0
 
-    def get_statistics(self) -> Dict[str, Any]:
+    def get_statistics(self) -> dict[str, Any]:
         """
         获取任务统计信息
 
@@ -388,9 +388,9 @@ class TaskDatabase:
     def get_average_processing_ratio(
         self,
         mode: str,
-        platform: Optional[str] = None,
+        platform: str | None = None,
         limit: int = 50
-    ) -> Optional[float]:
+    ) -> float | None:
         """
         获取平均处理时间比例
 
@@ -446,7 +446,7 @@ class TaskDatabase:
             logger.error(f"获取统计记录数量失败: {e}")
             return 0
 
-    def _row_to_task_history(self, row: sqlite3.Row) -> Optional[TaskHistory]:
+    def _row_to_task_history(self, row: sqlite3.Row) -> TaskHistory | None:
         """将数据库行转换为 TaskHistory 对象"""
         try:
             # 处理状态值（兼容旧数据）
@@ -483,7 +483,7 @@ class TaskDatabase:
 
 
 # 全局数据库实例
-_db_instance: Optional[TaskDatabase] = None
+_db_instance: TaskDatabase | None = None
 
 
 def get_task_database() -> TaskDatabase:

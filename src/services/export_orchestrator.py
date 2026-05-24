@@ -2,7 +2,6 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List, Optional
 
 from ..exporters.base import BaseExporter
 from ..exporters.local_exporter import LocalExporter
@@ -17,7 +16,7 @@ logger = get_logger(__name__)
 class ExportOrchestrator:
     """导出编排器 - 管理多个导出目标"""
 
-    def __init__(self, targets: List[ExportTarget], config: Optional[dict] = None):
+    def __init__(self, targets: list[ExportTarget], config: dict | None = None):
         """
         初始化导出编排器
 
@@ -29,9 +28,9 @@ class ExportOrchestrator:
         self.config = config or {}
         self.exporters = self._load_exporters()
 
-    def _load_exporters(self) -> List[BaseExporter]:
+    def _load_exporters(self) -> list[BaseExporter]:
         """加载 exporter 实例"""
-        exporters: List[BaseExporter] = []
+        exporters: list[BaseExporter] = []
 
         for target in self.targets:
             if target == ExportTarget.LOCAL:
@@ -69,7 +68,7 @@ class ExportOrchestrator:
 
         return exporters
 
-    def export_all(self, context: ExportContext) -> List[ExportResult]:
+    def export_all(self, context: ExportContext) -> list[ExportResult]:
         """
         并发执行所有 exporter
 
@@ -131,11 +130,10 @@ class ExportOrchestrator:
 
 # 测试代码
 if __name__ == "__main__":
-    import sys
     from pathlib import Path
     from uuid import uuid4
 
-    from ..models.task import VideoMetadata, ExportContext
+    from ..models.task import ExportContext, VideoMetadata
 
     # 创建测试上下文
     context = ExportContext(

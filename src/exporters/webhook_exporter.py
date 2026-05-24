@@ -2,14 +2,13 @@
 
 import json
 from datetime import datetime
-from typing import Tuple, Dict, Any, Optional
-from pathlib import Path
+from typing import Any
 
 import httpx
 
-from .base import BaseExporter
 from ..models.task import ExportContext, ExportResult, ExportTarget, TranscriptSegment
 from ..utils import get_logger
+from .base import BaseExporter
 
 logger = get_logger(__name__)
 
@@ -23,11 +22,11 @@ class WebhookExporter(BaseExporter):
     def __init__(
         self,
         url: str,
-        headers: Optional[Dict[str, str]] = None,
+        headers: dict[str, str] | None = None,
         timeout: int = 30,
         max_retries: int = 3,
         retry_delay: float = 1.0,
-        events: Optional[list] = None
+        events: list | None = None
     ):
         """
         初始化 Webhook 导出器
@@ -47,7 +46,7 @@ class WebhookExporter(BaseExporter):
         self.retry_delay = retry_delay
         self.events = events or ["on_completed"]
 
-    def validate_config(self) -> Tuple[bool, str]:
+    def validate_config(self) -> tuple[bool, str]:
         """验证配置"""
         if not self.url:
             return False, "Webhook URL 未配置"
@@ -100,7 +99,7 @@ class WebhookExporter(BaseExporter):
                 }
             )
 
-    def _build_payload(self, context: ExportContext) -> Dict[str, Any]:
+    def _build_payload(self, context: ExportContext) -> dict[str, Any]:
         """构建 Webhook 请求数据"""
         meta = context.video_metadata
 
@@ -173,8 +172,8 @@ class WebhookExporter(BaseExporter):
 
     def _send_with_retry(
         self,
-        payload: Dict[str, Any]
-    ) -> Tuple[bool, str, Optional[Dict]]:
+        payload: dict[str, Any]
+    ) -> tuple[bool, str, dict | None]:
         """
         发送 Webhook 请求（带重试机制）
 
@@ -240,10 +239,9 @@ class WebhookExporter(BaseExporter):
 
 # 测试代码
 if __name__ == "__main__":
-    import sys
     from uuid import uuid4
 
-    from ..models.task import VideoMetadata, ExportContext, TranscriptSegment
+    from ..models.task import ExportContext, TranscriptSegment, VideoMetadata
 
     # 创建测试上下文
     context = ExportContext(

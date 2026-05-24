@@ -4,9 +4,9 @@ import os
 import threading
 import time
 from collections import OrderedDict
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Optional
 
 from faster_whisper import WhisperModel
 
@@ -22,7 +22,7 @@ ProgressCallback = Callable[[str, float], None]
 @dataclass
 class TranscriptResult:
     """转录结果"""
-    segments: List[TranscriptSegment]
+    segments: list[TranscriptSegment]
     language: str
     language_probability: float
     full_text: str
@@ -36,14 +36,14 @@ class ModelCache:
     使用 LRU (Least Recently Used) 策略管理模型缓存，
     防止内存无限增长。
     """
-    
+
     MAX_CACHE_SIZE = 2  # 最多缓存 2 个模型
-    
+
     def __init__(self, max_size: int = 2):
         self._cache: OrderedDict[str, WhisperModel] = OrderedDict()
         self._lock = threading.Lock()
         self._max_size = max_size
-    
+
     def get(self, model_size: str) -> WhisperModel:
         """
         获取模型（如果不存在则加载）
@@ -55,35 +55,35 @@ class ModelCache:
                 self._cache.move_to_end(model_size)
                 logger.debug(f"模型 {model_size} 命中缓存")
                 return self._cache[model_size]
-            
+
             if len(self._cache) >= self._max_size:
                 oldest_key = next(iter(self._cache))
                 del self._cache[oldest_key]
                 logger.info(f"缓存已满，移除最旧的模型: {oldest_key}")
-            
+
             model = self._load_model(model_size)
             self._cache[model_size] = model
             return model
-    
+
     def _load_model(self, model_size: str) -> WhisperModel:
         """加载模型"""
         logger.info(f"加载 Whisper {model_size} 模型...")
-        
+
         os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-        
+
         device = "auto"
         compute_type = "int8"
-        
+
         model = WhisperModel(
             model_size,
             device=device,
             compute_type=compute_type,
             download_root=str(Path.home() / ".cache" / "whisper")
         )
-        
+
         logger.info(f"Whisper {model_size} 模型已加载")
         return model
-    
+
     def clear(self) -> int:
         """清空缓存，返回清理的模型数量"""
         with self._lock:
@@ -91,12 +91,12 @@ class ModelCache:
             self._cache.clear()
             logger.info(f"已清理 {count} 个缓存的 Whisper 模型")
             return count
-    
-    def get_cached_sizes(self) -> List[str]:
+
+    def get_cached_sizes(self) -> list[str]:
         """获取已缓存的模型大小列表"""
         with self._lock:
             return list(self._cache.keys())
-    
+
     @property
     def size(self) -> int:
         """当前缓存大小"""
@@ -104,7 +104,7 @@ class ModelCache:
             return len(self._cache)
 
 
-_model_cache: Optional[ModelCache] = None
+_model_cache: ModelCache | None = None
 _model_cache_lock = threading.Lock()
 
 
@@ -128,7 +128,7 @@ def clear_model_cache() -> int:
     return _get_model_cache().clear()
 
 
-def get_cached_model_sizes() -> List[str]:
+def get_cached_model_sizes() -> list[str]:
     """获取已缓存的模型大小列表"""
     return _get_model_cache().get_cached_sizes()
 
@@ -148,9 +148,9 @@ class TranscribeService:
             raise ValueError(f"不支持的模型: {model_size}，可选: {self.SUPPORTED_MODELS}")
 
         self.model_size = model_size
-        self._model: Optional[WhisperModel] = None
+        self._model: WhisperModel | None = None
 
-    def _load_model(self, progress_callback: Optional[ProgressCallback] = None) -> None:
+    def _load_model(self, progress_callback: ProgressCallback | None = None) -> None:
         """懒加载模型（使用全局缓存）"""
         if self._model is not None:
             return
@@ -167,8 +167,8 @@ class TranscribeService:
     def transcribe(
         self,
         audio_path: Path,
-        language: Optional[str] = "zh",
-        progress_callback: Optional[ProgressCallback] = None
+        language: str | None = "zh",
+        progress_callback: ProgressCallback | None = None
     ) -> TranscriptResult:
         """
         转录音频（带重试机制）
@@ -225,8 +225,8 @@ class TranscribeService:
     def _do_transcribe(
         self,
         audio_path: Path,
-        language: Optional[str] = "zh",
-        progress_callback: Optional[ProgressCallback] = None
+        language: str | None = "zh",
+        progress_callback: ProgressCallback | None = None
     ) -> TranscriptResult:
         """
         实际执行转录（内部方法）
@@ -273,7 +273,7 @@ class TranscribeService:
         except IndexError as e:
             # 处理 faster-whisper 的索引错误（通常是音频文件问题）
             raise TranscribeError(
-                f"音频文件处理失败，可能是格式不支持或文件损坏。请尝试安装 ffmpeg: brew install ffmpeg",
+                "音频文件处理失败，可能是格式不支持或文件损坏。请尝试安装 ffmpeg: brew install ffmpeg",
                 error_code="AUDIO_EXTRACTION_FAILED",
                 details={"audio_path": str(audio_path)}
             ) from e
@@ -288,9 +288,9 @@ class TranscribeService:
             progress_callback(f"检测到语言: {info.language} ({info.language_probability:.0%})", 20)
 
         # 收集结果
-        segments: List[TranscriptSegment] = []
-        full_text_parts: List[str] = []
-        formatted_parts: List[str] = []
+        segments: list[TranscriptSegment] = []
+        full_text_parts: list[str] = []
+        formatted_parts: list[str] = []
 
         segment_list = list(segments_iter)
         total_segments = len(segment_list)
@@ -332,14 +332,13 @@ class TranscribeService:
         secs = int(seconds % 60)
         return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
-    def get_available_models(self) -> List[str]:
+    def get_available_models(self) -> list[str]:
         """获取可用模型列表"""
         return self.SUPPORTED_MODELS.copy()
 
 
 # 测试代码
 if __name__ == "__main__":
-    import sys
     def print_progress(status: str, percent: float):
         print(f"[{percent:5.1f}%] {status}")
 

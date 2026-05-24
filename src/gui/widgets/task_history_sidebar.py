@@ -1,20 +1,26 @@
 """任务历史侧边栏组件"""
 
 from datetime import datetime
-from typing import Optional, Callable
 
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QListWidget, QListWidgetItem, QLineEdit, QFrame,
-    QMenu, QMessageBox, QAbstractItemView
+    QAbstractItemView,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+    QWidget,
 )
-from PySide6.QtCore import Qt, Signal, QSize
-from PySide6.QtGui import QAction
 
+from ...config.constants import ButtonConfig, HistoryConfig, Icons
 from ...models.task import TaskHistory, TaskStatus
 from ...services.task_database import get_task_database
 from ...utils import get_logger
-from ...config.constants import HistoryConfig, Icons, ButtonConfig, DatabaseConfig
 
 logger = get_logger(__name__)
 
@@ -521,9 +527,10 @@ class TaskHistorySidebar(QWidget):
 
     def _on_export(self) -> None:
         """导出历史记录到文件"""
-        from PySide6.QtWidgets import QFileDialog
-        from datetime import datetime
         import json
+        from datetime import datetime
+
+        from PySide6.QtWidgets import QFileDialog
 
         # 选择导出文件路径
         file_path, _ = QFileDialog.getSaveFileName(

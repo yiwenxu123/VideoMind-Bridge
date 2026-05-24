@@ -9,17 +9,16 @@
 
 import json
 import sys
-import time
-import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from src.models.task import ProcessingMode, ExportTarget, Highlight
-from src.services.download_service import DownloadService
-from src.services.transcribe_service import TranscribeService
+from src.models.task import ExportTarget, ProcessingMode
 from src.services.ai_service import AIService
+from src.services.download_service import DownloadService
 from src.services.export_orchestrator import ExportOrchestrator
+from src.services.transcribe_service import TranscribeService
 from src.utils import get_logger
 
 logger = get_logger(__name__)
@@ -327,7 +326,7 @@ class MCPServer:
             title=result.metadata.title,
         )
 
-        from src.models.task import ExportContext, VideoMetadata
+        from src.models.task import ExportContext
         context = ExportContext(
             task_id=uuid.uuid4(),
             video_metadata=result.metadata,
@@ -473,7 +472,7 @@ class MCPServer:
         url = args["url"]
         mode = args.get("mode", "quick")
 
-        from src.core import Prescreener, ContentRouter
+        from src.core import ContentRouter, Prescreener
 
         router = ContentRouter()
         prescreener = Prescreener(router)
@@ -510,7 +509,7 @@ class MCPServer:
         max_cost_str = args.get("max_cost")
         min_grade_str = args.get("min_grade", "C")
 
-        from src.core import Prescreener, ContentRouter, HermesFormatter
+        from src.core import ContentRouter, HermesFormatter, Prescreener
         from src.core.models import ContentGrade, CostTier
 
         grade_map = {"S": ContentGrade.S, "A": ContentGrade.A, "B": ContentGrade.B, "C": ContentGrade.C, "D": ContentGrade.D}

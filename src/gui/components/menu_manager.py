@@ -1,10 +1,9 @@
 """菜单栏管理组件"""
 
-from typing import Optional
 
-from PySide6.QtWidgets import QMenuBar, QMenu, QMessageBox, QDialog
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenuBar, QMessageBox
 
 from ...utils import get_logger
 
@@ -19,7 +18,7 @@ class MenuManager(QObject):
     about_requested = Signal()
     quit_requested = Signal()
 
-    def __init__(self, parent: Optional[QObject] = None):
+    def __init__(self, parent: QObject | None = None):
         super().__init__(parent)
         self._parent = parent
 

@@ -7,17 +7,16 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 import time
 import urllib.parse
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import httpx
 
 from ..models import CostTier, ExtractResult
-from .base import ContentExtractor
 from . import register_extractor
+from .base import ContentExtractor
 
 # Bilibili WBI 签名常量和密钥池
 MIXIN_KEY_ENC_TABLE = [
@@ -44,7 +43,7 @@ class BilibiliExtractor(ContentExtractor):
     url_pattern = re.compile(r"(bilibili\.com|b23\.tv)")
 
     def __init__(self) -> None:
-        self._wbi_key: Optional[str] = None
+        self._wbi_key: str | None = None
         self._client = httpx.Client(
             timeout=30.0,
             headers={
@@ -147,7 +146,7 @@ class BilibiliExtractor(ContentExtractor):
         return "".join(orig[i] for i in MIXIN_KEY_ENC_TABLE if i < len(orig))[:32]
 
     @staticmethod
-    def _wbi_sign(params: Dict[str, str], wbi_key: str) -> Dict[str, str]:
+    def _wbi_sign(params: dict[str, str], wbi_key: str) -> dict[str, str]:
         """对参数字典进行 WBI 签名"""
         params["wts"] = str(int(time.time()))
         sorted_params = sorted(params.items())
@@ -156,7 +155,7 @@ class BilibiliExtractor(ContentExtractor):
         params["w_rid"] = hashlib.md5(sign_str.encode()).hexdigest()
         return params
 
-    def _resolve_video_id(self, url: str) -> Optional[str]:
+    def _resolve_video_id(self, url: str) -> str | None:
         """解析视频 ID (支持 BV/EP/SS/短链接)"""
         # 短链接
         if "b23.tv" in url:
@@ -174,7 +173,7 @@ class BilibiliExtractor(ContentExtractor):
                 return m.group(1)
         return None
 
-    def _resolve_b23_url(self, url: str) -> Optional[str]:
+    def _resolve_b23_url(self, url: str) -> str | None:
         """解析 b23.tv 短链接"""
         try:
             resp = self._client.get(url, follow_redirects=True)
@@ -182,7 +181,7 @@ class BilibiliExtractor(ContentExtractor):
         except Exception:
             return None
 
-    def _get_video_info(self, bvid: str) -> Dict[str, Any]:
+    def _get_video_info(self, bvid: str) -> dict[str, Any]:
         """获取视频元信息"""
         params = {"bvid": bvid}
         signed = self._wbi_sign(params, self._get_wbi_key())
@@ -203,7 +202,7 @@ class BilibiliExtractor(ContentExtractor):
             "aid": vdata.get("aid"),
         }
 
-    def _get_subtitle(self, bvid: str) -> Tuple[str, list, Optional[str]]:
+    def _get_subtitle(self, bvid: str) -> tuple[str, list, str | None]:
         """获取字幕内容"""
         params = {"bvid": bvid}
         signed = self._wbi_sign(params, self._get_wbi_key())
@@ -239,9 +238,7 @@ class BilibiliExtractor(ContentExtractor):
             return "", [], None
 
         # 完整的字幕 JSON URL
-        if subtitle_url.startswith("//"):
-            subtitle_url = "https:" + subtitle_url
-        elif subtitle_url.startswith("/"):
+        if subtitle_url.startswith("//") or subtitle_url.startswith("/"):
             subtitle_url = "https:" + subtitle_url
 
         sub_resp = self._client.get(subtitle_url)
@@ -249,7 +246,7 @@ class BilibiliExtractor(ContentExtractor):
 
         # 提取字幕文本和片段
         text_parts: list[str] = []
-        segments: list[Dict[str, Any]] = []
+        segments: list[dict[str, Any]] = []
         for item in sub_data.get("body", []):
             text = item.get("content", "")
             if text:
