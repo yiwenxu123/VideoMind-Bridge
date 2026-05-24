@@ -201,6 +201,16 @@ class ConfigManager:
         self._config = AppConfig.get_default_config()
         self.save()
 
+    def reload(self) -> None:
+        """从磁盘重新加载配置（跨进程同步用）
+
+        当 API 和 GUI 进程同时运行时，一方修改配置后，
+        另一方调用此方法即可获取最新配置。
+        """
+        loaded = self._load_config()
+        if loaded:
+            self._config = loaded
+
     @property
     def config(self) -> AppConfig:
         """获取当前配置"""

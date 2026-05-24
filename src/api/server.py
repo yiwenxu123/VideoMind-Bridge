@@ -310,6 +310,7 @@ class APIServer:
         async def get_settings():
             """获取当前设置"""
             config_mgr = ConfigManager()
+            config_mgr.reload()
             cfg = config_mgr.config
             api_key = config_mgr.get_api_key()
             return SettingsResponse(

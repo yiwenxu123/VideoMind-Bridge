@@ -31,6 +31,7 @@ class SettingsDialog(QDialog):
         self.resize(DialogConfig.SETTINGS_WIDTH, DialogConfig.SETTINGS_HEIGHT)
         
         self.config_manager = get_config_manager()
+        self.config_manager.reload()
         self._setup_ui()
         self._load_settings()
 
