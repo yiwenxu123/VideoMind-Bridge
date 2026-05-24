@@ -177,6 +177,28 @@
           <label><input type="checkbox" id="save-transcript" checked> 保存纯文本转录</label>
           <label><input type="checkbox" id="save-markdown" checked> 保存 Markdown</label>
         </div>
+
+        <h3 style="font-size:14px;margin:16px 0 8px;color:#555">📝 Obsidian</h3>
+        <div class="form-row">
+          <div class="form-group">
+            <label>
+              <input type="checkbox" id="obsidian-enabled" checked onchange="toggleObsidianFields()">
+              启用 Obsidian 导出
+            </label>
+          </div>
+        </div>
+        <div class="form-row" id="obsidian-fields">
+          <div class="form-group" style="flex:2">
+            <label>Vault 路径</label>
+            <input type="text" id="obsidian-vault-path" placeholder="选择 Obsidian Vault 路径...">
+            <div class="hint">Obsidian Vault 文件夹的完整路径</div>
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>子文件夹</label>
+            <input type="text" id="obsidian-subfolder" placeholder="Inbox/Videos">
+            <div class="hint">笔记保存的子文件夹路径</div>
+          </div>
+        </div>
       </section>
 
       <!-- 提取器 API Key 设置 -->
@@ -234,6 +256,10 @@
         document.getElementById('save-srt').checked = s.save_srt;
         document.getElementById('save-transcript').checked = s.save_transcript;
         document.getElementById('save-markdown').checked = s.save_markdown;
+        document.getElementById('obsidian-enabled').checked = s.obsidian_enabled;
+        document.getElementById('obsidian-vault-path').value = s.obsidian_vault_path || '';
+        document.getElementById('obsidian-subfolder').value = s.obsidian_subfolder || '';
+        toggleObsidianFields();
       } catch (e) {
         document.getElementById('save-status').textContent = '❌ 加载设置失败';
       }
@@ -267,9 +293,14 @@
           save_srt: document.getElementById('save-srt').checked,
           save_transcript: document.getElementById('save-transcript').checked,
           save_markdown: document.getElementById('save-markdown').checked,
+          obsidian_enabled: document.getElementById('obsidian-enabled').checked,
+          obsidian_vault_path: document.getElementById('obsidian-vault-path').value || undefined,
+          obsidian_subfolder: document.getElementById('obsidian-subfolder').value || undefined,
         };
         // 不传空的 API Key
         if (!body.ai_api_key) delete body.ai_api_key;
+        // 不传空的 Obsidian 路径
+        if (!body.obsidian_vault_path) delete body.obsidian_vault_path;
 
         const result = await fetchJSON(`${API}/settings`, {
           method: 'PUT',
@@ -318,6 +349,14 @@
     }
 
     // 切换 API Key 可见性（通用版本，兼容 AI API Key 无参调用）
+    function toggleObsidianFields() {
+      const enabled = document.getElementById('obsidian-enabled').checked;
+      const fields = document.getElementById('obsidian-fields');
+      fields.style.opacity = enabled ? '1' : '0.4';
+      const inputs = fields.querySelectorAll('input');
+      inputs.forEach(inp => inp.disabled = !enabled);
+    }
+
     function toggleKeyVisibility(inputId, btnId) {
       inputId = inputId || 'ai-api-key';
       btnId = btnId || 'toggle-key-btn';

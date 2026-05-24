@@ -156,6 +156,9 @@ class SettingsResponse(BaseModel):
     save_srt: bool = Field(default=True, description="保存 SRT 字幕")
     save_transcript: bool = Field(default=True, description="保存纯文本转录")
     save_markdown: bool = Field(default=True, description="保存 Markdown")
+    obsidian_enabled: bool = Field(default=False, description="启用 Obsidian 导出")
+    obsidian_vault_path: str = Field(default="", description="Obsidian Vault 路径")
+    obsidian_subfolder: str = Field(default="Inbox/Videos", description="笔记保存的子文件夹")
     available_engines: List[str] = Field(default=["DeepSeek-V3", "Ollama"], description="可用引擎列表")
 
 
@@ -174,6 +177,9 @@ class SettingsUpdateRequest(BaseModel):
     save_srt: Optional[bool] = Field(None, description="保存 SRT 字幕")
     save_transcript: Optional[bool] = Field(None, description="保存纯文本转录")
     save_markdown: Optional[bool] = Field(None, description="保存 Markdown")
+    obsidian_enabled: Optional[bool] = Field(None, description="启用 Obsidian 导出")
+    obsidian_vault_path: Optional[str] = Field(None, description="Obsidian Vault 路径")
+    obsidian_subfolder: Optional[str] = Field(None, description="笔记保存的子文件夹")
 
 
 class KeyDetail(BaseModel):

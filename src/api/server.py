@@ -326,6 +326,9 @@ class APIServer:
                 save_srt=cfg.export.local.save_srt,
                 save_transcript=cfg.export.local.save_transcript,
                 save_markdown=cfg.export.local.save_markdown,
+                obsidian_enabled=cfg.export.obsidian.enabled,
+                obsidian_vault_path=cfg.export.obsidian.vault_path,
+                obsidian_subfolder=cfg.export.obsidian.subfolder,
                 available_engines=["DeepSeek-V3", "Ollama"],
             )
 
@@ -387,6 +390,20 @@ class APIServer:
             if request.save_markdown is not None:
                 config_mgr._config.export.local.save_markdown = request.save_markdown
                 changed.append("save_markdown")
+
+            # Obsidian 导出设置
+            obsidian_updates = {}
+            if request.obsidian_enabled is not None:
+                obsidian_updates["enabled"] = request.obsidian_enabled
+                changed.append("obsidian_enabled")
+            if request.obsidian_vault_path is not None:
+                obsidian_updates["vault_path"] = request.obsidian_vault_path
+                changed.append("obsidian_vault_path")
+            if request.obsidian_subfolder is not None:
+                obsidian_updates["subfolder"] = request.obsidian_subfolder
+                changed.append("obsidian_subfolder")
+            if obsidian_updates:
+                config_mgr.update_export(obsidian=obsidian_updates)
 
             config_mgr.save()
 
