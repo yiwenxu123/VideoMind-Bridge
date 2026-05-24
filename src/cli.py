@@ -24,30 +24,18 @@ from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
 
-# 处理导入路径（支持 python -m src.cli 和直接运行）
-try:
-    # 作为模块运行: python -m src.cli
-    from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext, Highlight
-    from src.services.download_service import DownloadService
-    from src.services.transcribe_service import TranscribeService
-    from src.services.ai_service import AIService
-    from src.services.export_orchestrator import ExportOrchestrator
-    from src.utils.media_utils import generate_srt
-except ImportError:
-    # 直接运行: python src/cli.py
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext, Highlight
-    from src.services.download_service import DownloadService
-    from src.services.transcribe_service import TranscribeService
-    from src.services.ai_service import AIService
-    from src.services.export_orchestrator import ExportOrchestrator
-    from src.utils.media_utils import generate_srt
+from src.models.task import ExportTarget, ProcessingMode, VideoMetadata, ExportContext, Highlight
+from src.services.download_service import DownloadService
+from src.services.transcribe_service import TranscribeService
+from src.services.ai_service import AIService
+from src.services.export_orchestrator import ExportOrchestrator
+from src.utils.media_utils import generate_srt
 
 
 console = Console()
 
 
-def parse_args(argv: Optional[List[str]] = None):
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
         description="VideoMind Bridge - 视频知识处理工具",
@@ -194,14 +182,33 @@ def parse_args(argv: Optional[List[str]] = None):
         default=False,
         help="列出可用提取器及其状态"
     )
+    parser.add_argument(
+        "--config-list",
+        action="store_true",
+        default=False,
+        help="列出所有提取器 API Key 的配置状态"
+    )
+    parser.add_argument(
+        "--config-set",
+        nargs=2,
+        metavar=("KEY", "VALUE"),
+        default=None,
+        help="设置提取器 API Key (KEY: coze / tikhub / apify / aliyun_access_key_id / aliyun_access_key_secret / aliyun_appkey)"
+    )
 
     return parser.parse_args(argv)
 
 
-def run_v2_extraction(args) -> int:
+def run_v2_extraction(args: argparse.Namespace) -> int:
     """运行 v2 提取引擎 (prescreen/extract/router)"""
+    import logging
     from src.core import ContentRouter, HermesFormatter, Prescreener
-    from src.core.models import ContentGrade, CostTier
+    from src.core.models import ContentGrade, CostTier, ExtractResult
+
+    # quiet 模式: 抑制 HTTP 和路由器日志
+    if args.quiet or args.json_output:
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("src.core.router").setLevel(logging.WARNING)
 
     router = ContentRouter()
     prescreener = Prescreener(router)
@@ -233,22 +240,24 @@ def run_v2_extraction(args) -> int:
 
     # --prescreen-only: 仅预筛 (快速模式, 无网络)
     if args.prescreen_only:
-        result = prescreener.prescreen_quick(url)
+        ps_result = prescreener.prescreen_quick(url)
         if use_json:
             print(json.dumps({
-                "url": result.url,
-                "platform": result.platform,
-                "grade": result.grade.value,
-                "score": result.score,
-                "reasons": result.reasons,
+                "url": ps_result.url,
+                "platform": ps_result.platform,
+                "grade": ps_result.grade.value,
+                "score": ps_result.score,
+                "reasons": ps_result.reasons,
                 "note": "快速预筛 — 执行 --prescreen 获取完整评分",
             }, ensure_ascii=False, indent=2))
         else:
             grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
-            color = grade_color.get(result.grade.value, "white")
-            console.print(f"  [bold]预筛结果:[/bold] [{color}]{result.grade.value} 级[/{color}]")
-            console.print(f"  平台: {result.platform}")
-            for reason in result.reasons:
+            color = grade_color.get(ps_result.grade.value, "white")
+            console.print(f"  [bold]预筛结果:[/bold] [{color}]{ps_result.grade.value} 级[/{color}]")
+            console.print(f"  平台: {ps_result.platform}")
+            if ps_result.platform == "unknown":
+                console.print(f"  [yellow]⚠ 未识别的平台 — 可能无法正常提取内容[/yellow]")
+            for reason in ps_result.reasons:
                 console.print(f"  [dim]• {reason}[/dim]")
             console.print(f"\n  [dim]提示: 执行 \"--smart\" 获取完整评分+提取[/dim]")
         return 0
@@ -282,6 +291,7 @@ def run_v2_extraction(args) -> int:
                 "reasons": prescreen_result.reasons,
                 "extraction_recommended": is_worth,
                 "extraction_skipped": False,
+                "extract_result": quick_result,  # 缓存提取结果, 避免重复提取
             }
 
             if not use_json:
@@ -300,6 +310,7 @@ def run_v2_extraction(args) -> int:
                 else:
                     console.print(f"[yellow]⏭ 跳过提取: {prescreen_result.grade.value} 级低于 C 级阈值[/yellow]")
                     console.print(f"  [dim]{prescreen_meta['skip_reason']}[/dim]")
+                    console.print(f"  [dim]提示: 使用 --prescreen 强制提取（跳过预筛判断）[/dim]")
                 return 0
 
             # 根据等级推荐成本
@@ -338,8 +349,9 @@ def run_v2_extraction(args) -> int:
                     console.print(f"  [dim]• {reason}[/dim]")
 
     # 提取内容 (复用 --prescreen 的结果, 避免重复提取)
+    result: ExtractResult
     if prescreen_meta and "extract_result" in prescreen_meta:
-        result = prescreen_meta.pop("extract_result")
+        result = prescreen_meta.pop("extract_result")  # type: ignore
     else:
         if not use_json:
             console.print(f"\n[cyan]提取中 ({'成本上限: ' + max_cost.value if max_cost else '无限'} )...[/cyan]")
@@ -355,7 +367,8 @@ def run_v2_extraction(args) -> int:
         if result.success:
             grade_info = ""
             if prescreen_meta:
-                grade_info = f" [{'SABC'.index(prescreen_meta.get('grade','C'))}]"
+                grade = str(prescreen_meta.get('grade', 'C'))
+                grade_info = f" ({grade}级)"
             console.print(f"[green]✓ 提取成功[/green]{grade_info} ({result.source})")
             console.print(f"  标题: {result.title}")
             console.print(f"  平台: {result.platform}")
@@ -407,8 +420,8 @@ def _build_json_result(
     metadata: Optional[VideoMetadata] = None,
     video_path: Optional[Path] = None,
     audio_path: Optional[Path] = None,
-    transcript_result=None,
-    summary_result=None,
+    transcript_result: Optional[Any] = None,
+    summary_result: Optional[Any] = None,
     highlights: Optional[List[Highlight]] = None,
     export_results: Optional[list] = None,
     elapsed: float = 0.0,
@@ -488,10 +501,64 @@ def _build_json_result(
     return result
 
 
-def main():
+def _run_config_list(args: argparse.Namespace) -> int:
+    """列出所有提取器 API Key 的配置状态"""
+    from src.services.config_manager import ConfigManager
+    config_mgr = ConfigManager()
+    status = config_mgr.list_extractor_key_status()
+    use_json = args.json_output
+    if use_json:
+        print(json.dumps(status, ensure_ascii=False, indent=2))
+        return 0
+    console.print("\n[bold cyan]提取器 API Key 配置状态[/bold cyan]")
+    for group_name, group in status.items():
+        configured = group["all_configured"]
+        icon = "[green]✓[/green]" if configured else "[red]✗[/red]"
+        console.print(f"  {icon} [bold]{group['label']}[/bold] ({group_name})")
+        for key in group["keys"]:
+            status_icon = "[green]✓[/green]" if key["configured"] else "[yellow]−[/yellow]"
+            console.print(f"    {status_icon} {key['label']} ({key['env']})")
+    console.print()
+    return 0
+
+
+def _run_config_set(key: str, value: str, json_output: bool = False) -> int:
+    """设置提取器 API Key"""
+    from src.services.config_manager import ConfigManager
+    config_mgr = ConfigManager()
+    valid_names = set(config_mgr.EXTRACTOR_PROVIDERS.keys())
+    if key not in valid_names:
+        msg = f"未知配置键: {key}。有效键名: {', '.join(sorted(valid_names))}"
+        if json_output:
+            print(json.dumps({"success": False, "error": msg}, ensure_ascii=False))
+        else:
+            console.print(f"[red]错误:[/red] {msg}")
+        return 1
+    ok = config_mgr.set_extractor_key(key, value)
+    if not ok:
+        msg = f"设置失败: {key}"
+        if json_output:
+            print(json.dumps({"success": False, "error": msg}, ensure_ascii=False))
+        else:
+            console.print(f"[red]错误:[/red] {msg}")
+        return 1
+    if json_output:
+        print(json.dumps({"success": True, "key": key}, ensure_ascii=False))
+    else:
+        console.print(f"[green]✓[/green] {key} 已设置")
+    return 0
+
+
+def main() -> int:
     """主入口"""
     args = parse_args()
     start_time = time.time()
+
+    # 配置管理 (不依赖 URL)
+    if args.config_list:
+        return _run_config_list(args)
+    if args.config_set:
+        return _run_config_set(*args.config_set, json_output=args.json_output)
 
     # v2 模式: prescreen / smart / prescreen-only / cost-tier / list-extractors
     if args.prescreen or args.smart or args.prescreen_only or args.cost_tier or args.list_extractors:
@@ -514,13 +581,13 @@ def main():
     return _process_single(args, start_time)
 
 
-def _process_single(args, start_time: float) -> int:
+def _process_single(args: argparse.Namespace, start_time: float) -> int:
     """处理单个视频链接"""
     use_json = args.json_output
     use_quiet = args.quiet or use_json
 
     out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None
-    def _write_json(data: dict):
+    def _write_json(data: dict) -> None:
         text = json.dumps(data, ensure_ascii=False, indent=2)
         if out_file:
             out_file.write(text + "\n")
@@ -572,7 +639,7 @@ def _process_single(args, start_time: float) -> int:
     export_results_list: list = []
 
     if not use_quiet:
-        progress_ctx = Progress(
+        progress_ctx: Any = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
@@ -712,13 +779,13 @@ def _process_single(args, start_time: float) -> int:
     export_results_list = orchestrator.export_all(export_context)
 
     if not use_quiet:
-        for result in export_results_list:
-            if result.success:
-                console.print(f"[green]✓ {result.target.value}:[/green] {result.output_path}")
-                if result.metadata.get("files"):
-                    console.print(f"  [dim]文件: {', '.join(result.metadata['files'])}[/dim]")
+        for export_result in export_results_list:
+            if export_result.success:
+                console.print(f"[green]✓ {export_result.target.value}:[/green] {export_result.output_path}")
+                if export_result.metadata.get("files"):
+                    console.print(f"  [dim]文件: {', '.join(export_result.metadata['files'])}[/dim]")
             else:
-                console.print(f"[red]✗ {result.target.value}:[/red] {result.error_msg}")
+                console.print(f"[red]✗ {export_result.target.value}:[/red] {export_result.error_msg}")
 
     if video_path and highlights:
         try:
@@ -761,10 +828,10 @@ def _process_single(args, start_time: float) -> int:
 class _DummyProgress:
     """静默模式下的空进度条替代"""
 
-    def __enter__(self):
+    def __enter__(self) -> "_DummyProgress":
         return self
 
-    def __exit__(self, *args):
+    def __exit__(self, *args: Any) -> None:
         pass
 
 

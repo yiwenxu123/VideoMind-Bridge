@@ -2,7 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ..exporters.base import BaseExporter
 from ..exporters.local_exporter import LocalExporter
@@ -17,7 +17,7 @@ logger = get_logger(__name__)
 class ExportOrchestrator:
     """导出编排器 - 管理多个导出目标"""
 
-    def __init__(self, targets: List[ExportTarget], config: dict = None):
+    def __init__(self, targets: List[ExportTarget], config: Optional[dict] = None):
         """
         初始化导出编排器
 
@@ -31,27 +31,27 @@ class ExportOrchestrator:
 
     def _load_exporters(self) -> List[BaseExporter]:
         """加载 exporter 实例"""
-        exporters = []
+        exporters: List[BaseExporter] = []
 
         for target in self.targets:
             if target == ExportTarget.LOCAL:
-                exporter = LocalExporter(
+                local = LocalExporter(
                     output_path=self.config.get("local_output_path", Path.home() / "Downloads" / "VideoMind"),
                     organize_by=self.config.get("organize_by", "date")
                 )
-                exporters.append(exporter)
+                exporters.append(local)
 
             elif target == ExportTarget.OBSIDIAN:
-                exporter = ObsidianExporter(
+                obsidian = ObsidianExporter(
                     vault_path=self.config.get("obsidian_vault_path"),
                     subfolder=self.config.get("obsidian_subfolder", "Inbox/Videos")
                 )
-                exporters.append(exporter)
+                exporters.append(obsidian)
 
             elif target == ExportTarget.WEBHOOK:
                 webhook_config = self.config.get("webhook", {})
                 if webhook_config.get("enabled") and webhook_config.get("url"):
-                    exporter = WebhookExporter(
+                    webhook = WebhookExporter(
                         url=webhook_config["url"],
                         headers=webhook_config.get("headers", {}),
                         timeout=webhook_config.get("timeout", 30),
@@ -59,7 +59,7 @@ class ExportOrchestrator:
                         retry_delay=webhook_config.get("retry_delay", 1.0),
                         events=webhook_config.get("events", ["on_completed"])
                     )
-                    exporters.append(exporter)
+                    exporters.append(webhook)
                 else:
                     logger.warning("Webhook 导出目标已选择但未启用或未配置 URL")
 
@@ -134,8 +134,6 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     from uuid import uuid4
-
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
     from ..models.task import VideoMetadata, ExportContext
 

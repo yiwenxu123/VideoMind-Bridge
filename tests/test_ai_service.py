@@ -5,8 +5,6 @@ import pytest
 from pathlib import Path
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.services.ai_service import AIService
 
 
@@ -85,12 +83,23 @@ class TestAIServiceConnection:
     reason="需要设置 DEEPSEEK_API_KEY 环境变量"
 )
 class TestAIServiceRealAPI:
-    """AI 服务真实 API 测试（需要 API Key）"""
+    """AI 服务真实 API 测试（需要有效的 API Key）"""
+
+    def _check_key_valid(self, service):
+        """检查 API Key 是否有效，无效则跳过"""
+        try:
+            success, message = service.test_connection()
+            if not success:
+                pytest.skip(f"API Key 无效: {message}")
+        except Exception as e:
+            if "401" in str(e) or "Unauthorized" in str(e).lower():
+                pytest.skip(f"API Key 无效 (401): {e}")
     
     def test_real_api_summarize(self):
         """测试真实 API 摘要生成"""
         api_key = os.getenv("DEEPSEEK_API_KEY")
         service = AIService(api_key=api_key)
+        self._check_key_valid(service)
         
         result = service.summarize(
             transcript=TEST_TRANSCRIPT,
@@ -106,6 +115,7 @@ class TestAIServiceRealAPI:
         """测试真实 API 连接"""
         api_key = os.getenv("DEEPSEEK_API_KEY")
         service = AIService(api_key=api_key)
+        self._check_key_valid(service)
         
         success, message = service.test_connection()
         assert success is True

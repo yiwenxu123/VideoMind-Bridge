@@ -5,12 +5,15 @@
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional, Set
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from ..models.task import ProcessingMode, ExportTarget, TaskStatus, VideoTask
+from ..services.config_manager import ConfigManager
 from ..utils import get_logger
 from .models import (
     TaskCreateRequest,
@@ -21,6 +24,11 @@ from .models import (
     TaskSearchRequest,
     SystemStatusResponse,
     ConfigResponse,
+    SettingsResponse,
+    SettingsUpdateRequest,
+    KeysListResponse,
+    KeyGroup,
+    KeyUpdateRequest,
 )
 from .task_manager import TaskManager
 
@@ -65,21 +73,27 @@ class ConnectionManager:
 
     async def broadcast_progress(self, progress: ProgressUpdate):
         """广播进度更新"""
-        connections = self.task_subscriptions.get(progress.task_id, set())
+        subscriptions = self.task_subscriptions.get(progress.task_id, set())
+        all_targets = set(self.active_connections) | subscriptions
 
-        # 也发送给所有全局连接
-        connections = connections.union(self.active_connections)
+        logger.debug(f"WebSocket广播: {progress.task_id}, 连接数={len(all_targets)}")
 
-        disconnected = []
-        for connection in connections:
+        data = progress.model_dump(mode="json")
+
+        dead = set()
+        for conn in all_targets:
             try:
-                await connection.send_json(progress.model_dump())
-            except Exception:
-                disconnected.append(connection)
+                await conn.send_json(data)
+            except Exception as e:
+                logger.warning(f"  → 发送失败: {conn.client} - {e}")
+                dead.add(conn)
 
-        # 清理断开的连接
-        for conn in disconnected:
-            self.disconnect(conn)
+        if dead:
+            for conn in dead:
+                if conn in self.active_connections:
+                    self.active_connections.remove(conn)
+                for subs in self.task_subscriptions.values():
+                    subs.discard(conn)
 
 
 class APIServer:
@@ -106,11 +120,14 @@ class APIServer:
         # WebSocket连接管理器
         self.connection_manager = ConnectionManager()
 
+        # 事件循环引用（用于线程间调度）
+        self._event_loop: Any = None
+
         # FastAPI应用
         self.app = self._create_app()
 
         # 服务器实例
-        self._server = None
+        self._server: Any = None
 
     def _create_app(self) -> FastAPI:
         """创建FastAPI应用"""
@@ -118,11 +135,10 @@ class APIServer:
         @asynccontextmanager
         async def lifespan(app: FastAPI):
             """应用生命周期管理"""
-            # 启动时
+            self._event_loop = asyncio.get_running_loop()
             await self.task_manager.start()
             logger.info(f"API服务器已启动: http://{self.host}:{self.port}")
             yield
-            # 关闭时
             await self.task_manager.stop()
             logger.info("API服务器已关闭")
 
@@ -168,20 +184,18 @@ class APIServer:
         # 注册路由
         self._register_routes(app)
 
+        # 挂载静态文件 (Web UI)
+        app.mount("/static", StaticFiles(directory="web"), name="static")
+
         return app
 
     def _register_routes(self, app: FastAPI):
         """注册API路由"""
 
-        @app.get("/", response_model=Dict)
+        @app.get("/")
         async def root():
-            """根路径，返回API信息"""
-            return {
-                "name": "VideoMind Bridge API",
-                "version": self.VERSION,
-                "docs": "/docs",
-                "health": "/health",
-            }
+            """Web UI 首页"""
+            return FileResponse("web/index.html")
 
         @app.get("/health", response_model=Dict)
         async def health():
@@ -207,7 +221,7 @@ class APIServer:
         @app.get("/api/v1/config", response_model=ConfigResponse)
         async def get_config():
             """获取系统配置"""
-            ai_enabled = not self.task_manager._ai_service.mock
+            ai_enabled = self.task_manager.is_ai_available()
             return ConfigResponse(
                 default_output_dir=str(self.task_manager.output_dir),
                 supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu"],
@@ -216,11 +230,212 @@ class APIServer:
                 ai_enabled=ai_enabled,
             )
 
+        # v2 提取 API
+        @app.post("/api/v1/extract")
+        async def extract_content(request: dict):
+            """快速提取视频内容 (v2 引擎)"""
+            url = request.get("url")
+            if not url:
+                raise HTTPException(status_code=400, detail="url 不能为空")
+            
+            try:
+                from src.core import ContentRouter, HermesFormatter
+                from src.core.models import CostTier
+                
+                router = ContentRouter()
+                result = router.extract(url, max_cost=CostTier.FREE)
+                
+                if result.success:
+                    return {
+                        "success": True,
+                        "platform": result.platform,
+                        "title": result.title,
+                        "content": result.content,
+                        "language": result.language,
+                        "duration_seconds": result.duration_seconds,
+                        "cost_tier": result.cost_tier.value,
+                        "source": result.source,
+                        "url": url,
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "error": result.error,
+                        "url": url,
+                    }
+            except Exception as e:
+                logger.error(f"v2 提取失败: {e}")
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "url": url,
+                }
+
+        # 提取器 API Key 管理
+        @app.get("/api/v1/keys", response_model=KeysListResponse)
+        async def list_keys():
+            """列出所有提取器 API Key 的配置状态"""
+            config_mgr = ConfigManager()
+            groups = config_mgr.list_extractor_key_status()
+            return {"groups": {k: KeyGroup(**v) for k, v in groups.items()}}
+
+        @app.put("/api/v1/keys")
+        async def set_key(request: KeyUpdateRequest):
+            """设置提取器 API Key"""
+            config_mgr = ConfigManager()
+            ok = config_mgr.set_extractor_key(request.name, request.value)
+            if not ok:
+                raise HTTPException(status_code=400, detail="Key 名无效或值为空")
+            logger.info(f"提取器 Key 已设置: {request.name}")
+            return {"success": True, "name": request.name}
+
+        @app.delete("/api/v1/keys/{name}")
+        async def delete_key(name: str):
+            """删除提取器 API Key"""
+            valid_names = set(ConfigManager().EXTRACTOR_PROVIDERS.keys())
+            if name not in valid_names:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"未知 Key: {name}，有效值: {', '.join(sorted(valid_names))}",
+                )
+            config_mgr = ConfigManager()
+            ok = config_mgr.delete_extractor_key(name)
+            if not ok:
+                raise HTTPException(status_code=500, detail="删除失败")
+            logger.info(f"提取器 Key 已删除: {name}")
+            return {"success": True, "name": name}
+
+        # 设置 API
+        @app.get("/api/v1/settings", response_model=SettingsResponse)
+        async def get_settings():
+            """获取当前设置"""
+            config_mgr = ConfigManager()
+            cfg = config_mgr.config
+            api_key = config_mgr.get_api_key()
+            return SettingsResponse(
+                ai_engine=cfg.ai.engine.value if hasattr(cfg.ai.engine, 'value') else str(cfg.ai.engine),
+                ai_model=cfg.ai.model,
+                ai_base_url=cfg.ai.base_url,
+                ai_api_key_configured=bool(api_key),
+                ai_temperature=cfg.ai.temperature,
+                ai_max_tokens=cfg.ai.max_tokens,
+                ai_timeout=cfg.ai.timeout,
+                output_dir=cfg.download.output_dir,
+                download_quality=cfg.download.video_quality,
+                whisper_model=cfg.transcribe.whisper_model,
+                save_srt=cfg.export.local.save_srt,
+                save_transcript=cfg.export.local.save_transcript,
+                save_markdown=cfg.export.local.save_markdown,
+                available_engines=["DeepSeek-V3", "Ollama"],
+            )
+
+        @app.put("/api/v1/settings")
+        async def update_settings(request: SettingsUpdateRequest):
+            """更新设置"""
+            config_mgr = ConfigManager()
+            changed = []
+
+            # AI 设置
+            if request.ai_engine is not None:
+                from ..models.config import AIEngine
+                engine_val = request.ai_engine
+                try:
+                    engine_val = AIEngine(request.ai_engine)
+                except ValueError:
+                    pass
+                config_mgr.update_ai(engine=engine_val)
+                changed.append("ai_engine")
+            if request.ai_model is not None:
+                config_mgr.update_ai(model=request.ai_model)
+                changed.append("ai_model")
+            if request.ai_base_url is not None:
+                config_mgr.update_ai(base_url=request.ai_base_url)
+                changed.append("ai_base_url")
+            if request.ai_api_key is not None:
+                config_mgr.set_api_key(request.ai_api_key)
+                changed.append("ai_api_key")
+            if request.ai_temperature is not None:
+                config_mgr.update_ai(temperature=request.ai_temperature)
+                changed.append("ai_temperature")
+            if request.ai_max_tokens is not None:
+                config_mgr.update_ai(max_tokens=request.ai_max_tokens)
+                changed.append("ai_max_tokens")
+            if request.ai_timeout is not None:
+                config_mgr.update_ai(timeout=request.ai_timeout)
+                changed.append("ai_timeout")
+
+            # 下载设置
+            if request.output_dir is not None:
+                config_mgr.update_download(output_dir=request.output_dir)
+                changed.append("output_dir")
+            if request.download_quality is not None:
+                config_mgr.update_download(video_quality=request.download_quality)
+                changed.append("download_quality")
+
+            # 转录设置
+            if request.whisper_model is not None:
+                config_mgr._config.transcribe.whisper_model = request.whisper_model
+                changed.append("whisper_model")
+
+            # 导出设置
+            if request.save_srt is not None:
+                config_mgr._config.export.local.save_srt = request.save_srt
+                changed.append("save_srt")
+            if request.save_transcript is not None:
+                config_mgr._config.export.local.save_transcript = request.save_transcript
+                changed.append("save_transcript")
+            if request.save_markdown is not None:
+                config_mgr._config.export.local.save_markdown = request.save_markdown
+                changed.append("save_markdown")
+
+            config_mgr.save()
+
+            logger.info(f"设置已更新: {', '.join(changed)}")
+            return {"success": True, "updated": changed}
+
+        @app.post("/api/v1/settings/test-ai")
+        async def test_ai_connection():
+            """测试 AI 连接"""
+            config_mgr = ConfigManager()
+            api_key = config_mgr.get_api_key()
+            cfg = config_mgr.config
+
+            if not api_key:
+                return {"success": False, "message": "请先配置 API Key"}
+
+            try:
+                from ..services.ai_service import AIService
+                ai = AIService(
+                    api_key=api_key,
+                    base_url=cfg.ai.base_url,
+                    model=cfg.ai.model,
+                    temperature=cfg.ai.temperature,
+                    max_tokens=cfg.ai.max_tokens,
+                )
+                loop = asyncio.get_running_loop()
+                ok, msg = await loop.run_in_executor(None, ai.test_connection)
+                return {"success": ok, "message": msg if not ok else "AI 连接正常"}
+            except Exception as e:
+                logger.error(f"AI 连接测试失败: {e}")
+                return {"success": False, "message": str(e)}
+
         # 任务管理API
         @app.post("/api/v1/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
         async def create_task(request: TaskCreateRequest):
             """创建新任务"""
             try:
+                # 检查 AI 配置
+                if request.mode == ProcessingMode.FULL and not self.task_manager.is_ai_available():
+                    if not request.allow_downgrade:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=(
+                                "AI 服务未配置，无法进行完整处理。"
+                                "请在设置中配置 API Key，"
+                                "或设置 allow_downgrade=true 降级为转录存档模式"
+                            ),
+                        )
+
                 task = await self.task_manager.create_task(
                     url=str(request.url),
                     mode=request.mode,
@@ -228,12 +443,13 @@ class APIServer:
                     ai_provider=request.ai_provider,
                     ai_prompt=request.ai_prompt,
                     cookies_from_browser=request.cookies_from_browser,
+                    allow_downgrade=request.allow_downgrade,
                 )
 
                 # 注册进度回调
                 self.task_manager.register_callback(
                     task.id,
-                    lambda t: asyncio.create_task(self._on_task_update(t)),
+                    self._sync_on_task_update,
                 )
 
                 return self._task_to_response(task)
@@ -361,6 +577,14 @@ class APIServer:
             message=task.error_msg if task.status == TaskStatus.FAILED else None,
         )
         await self.connection_manager.broadcast_progress(progress)
+
+    def _sync_on_task_update(self, task: VideoTask) -> None:
+        """同步包装器，将 async 回调调度到事件循环"""
+        loop = getattr(self, '_event_loop', None)
+        if loop and loop.is_running():
+            asyncio.run_coroutine_threadsafe(self._on_task_update(task), loop)
+        else:
+            logger.warning(f"WebSocket回调: 事件循环不可用 (loop={loop is not None}, running={loop.is_running() if loop else False})")
 
     def _task_to_response(self, task: VideoTask) -> TaskResponse:
         """将VideoTask转换为TaskResponse"""

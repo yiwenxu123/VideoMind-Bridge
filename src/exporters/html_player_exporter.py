@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, List
+from typing import Optional, Tuple, List
 
 from .base import BaseExporter
 from ..models.task import ExportContext, ExportResult, ExportTarget
@@ -46,7 +46,11 @@ class HTMLPlayerExporter(BaseExporter):
         输出文件:
         - player.html: 独立的播放器页面
         """
-        output_dir = context.video_path.parent if context.video_path else context.audio_path.parent
+        output_dir: Optional[Path] = None
+        if context.video_path:
+            output_dir = context.video_path.parent
+        elif context.audio_path:
+            output_dir = context.audio_path.parent
         if not output_dir:
             return ExportResult(
                 success=False,
@@ -535,8 +539,6 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     from uuid import uuid4
-
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
     from ..models.task import VideoMetadata, ExportContext, TranscriptSegment
 

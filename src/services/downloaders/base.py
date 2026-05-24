@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Set
 
 from ...models.task import VideoMetadata
+from ...utils.platform_detector import detect_platform
 
 
 class DownloaderCapability(Enum):
@@ -152,35 +153,5 @@ class DownloaderBase(ABC):
         return capability in self.info.capabilities
     
     def _detect_platform(self, url: str) -> str:
-        """
-        检测 URL 对应的平台
-        
-        Args:
-            url: 视频 URL
-            
-        Returns:
-            平台名称
-        """
-        url_lower = url.lower()
-        
-        platform_patterns = {
-            "youtube": ["youtube.com", "youtu.be"],
-            "bilibili": ["bilibili.com", "b23.tv"],
-            "douyin": ["douyin.com", "iesdouyin.com", "v.douyin.com"],
-            "tiktok": ["tiktok.com", "vm.tiktok.com"],
-            "xiaohongshu": ["xiaohongshu.com", "xhs.link"],
-            "kuaishou": ["kuaishou.com", "gifshow.com"],
-            "weibo": ["weibo.com", "weibo.cn"],
-            "zhihu": ["zhihu.com"],
-            "twitter": ["twitter.com", "x.com"],
-            "instagram": ["instagram.com"],
-            "facebook": ["facebook.com", "fb.watch"],
-            "vimeo": ["vimeo.com"],
-            "reddit": ["reddit.com"],
-        }
-        
-        for platform, patterns in platform_patterns.items():
-            if any(pattern in url_lower for pattern in patterns):
-                return platform
-        
-        return "unknown"
+        """检测 URL 对应的平台"""
+        return detect_platform(url)

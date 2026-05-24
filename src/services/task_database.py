@@ -212,7 +212,7 @@ class TaskDatabase:
                     params.append(platform)
 
                 query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                params.extend([limit, offset])
+                params.extend([str(limit), str(offset)])
 
                 cursor.execute(query, params)
 

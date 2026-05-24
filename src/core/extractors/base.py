@@ -82,9 +82,14 @@ class ContentExtractor(ABC):
         """标准化 URL (移除追踪参数等)"""
         return url.split("?")[0] if "?" in url else url
 
-    def _resolve_short_url(self, url: str) -> Optional[str]:
-        """解析短链接 (b23.tv, xhslink.com, v.douyin.com)
+    def _resolve_api_key(self, key_name: str) -> Optional[str]:
+        """从配置系统获取 API Key: ConfigManager → 环境变量 → None
 
-        子类可覆写以实现特定平台的短链接解析。
+        子类在有 API Key 需求时调用此方法代替直接 os.getenv()。
+        使用 ConfigManager 统一管理, 支持密钥环加密存储。
         """
+        from ...services.config_manager import get_config_manager
+        return get_config_manager().get_extractor_key(key_name)
+
+    def _resolve_short_url(self, url: str) -> Optional[str]:
         return None

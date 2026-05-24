@@ -121,6 +121,8 @@ class VideoTask:
     targets: Set[ExportTarget] = field(default_factory=lambda: {ExportTarget.LOCAL})
     ai_provider: Optional[str] = None  # AI提供商名称
     ai_prompt: Optional[str] = None  # 使用的Prompt模板
+    cookies_from_browser: Optional[str] = None  # 浏览器Cookie来源
+    allow_downgrade: bool = False  # AI不可用时是否降级为转录存档
     
     # 状态追踪
     status: TaskStatus = TaskStatus.PENDING

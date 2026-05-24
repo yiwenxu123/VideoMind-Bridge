@@ -5,8 +5,6 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.services.download_service import DownloadService, DownloadResult
 from src.models.task import VideoMetadata
 from src.utils.exceptions import DownloadError

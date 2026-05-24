@@ -10,7 +10,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from typing import Optional
 
 from .models import ContentGrade, PrescreenResult
@@ -19,25 +18,10 @@ from .router import ContentRouter
 
 logger = logging.getLogger(__name__)
 
-# URL → 平台映射
-_PLATFORM_PATTERNS: list[tuple[str, re.Pattern]] = [
-    ("bilibili", re.compile(r"(bilibili\.com|b23\.tv)")),
-    ("youtube", re.compile(r"(youtube\.com|youtu\.be)")),
-    ("douyin", re.compile(r"(douyin\.com|iesdouyin\.com|v\.douyin\.com)")),
-    ("xiaohongshu", re.compile(r"(xiaohongshu\.com|xhslink\.com)")),
-]
-
-
 def detect_platform(url: str) -> str:
-    """从 URL 检测平台 (纯规则, 无网络)
-
-    Returns:
-        platform name or "unknown"
-    """
-    for name, pattern in _PLATFORM_PATTERNS:
-        if pattern.search(url):
-            return name
-    return "unknown"
+    """从 URL 检测平台 (纯规则, 无网络)"""
+    from ..utils.platform_detector import detect_platform as _detect_platform
+    return _detect_platform(url)
 
 
 class Prescreener:

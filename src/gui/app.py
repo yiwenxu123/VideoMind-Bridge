@@ -46,11 +46,6 @@ class VideoMindApp(QApplication):
 
 def main():
     """GUI 入口函数"""
-    # 添加 src 到路径
-    src_path = Path(__file__).parent.parent
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
-
     app = VideoMindApp()
     return app.run()
 

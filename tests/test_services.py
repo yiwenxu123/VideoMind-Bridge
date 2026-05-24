@@ -3,8 +3,6 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.services.config_manager import ConfigManager, get_config_manager
 from src.services.prompt_template import (
     get_prompt_template_manager, PromptTemplate, TemplateStyle
@@ -21,8 +19,6 @@ def test_config_manager_singleton():
     
     assert manager1 is manager2, "应该是同一个实例"
     print("  ✓ ConfigManager 是单例")
-    
-    return True
 
 
 def test_config_manager_default():
@@ -37,7 +33,6 @@ def test_config_manager_default():
     assert config.download.video_quality == "1080p"
     
     print("  ✓ ConfigManager 默认配置正确")
-    return True
 
 
 def test_config_manager_ai_key():
@@ -50,8 +45,6 @@ def test_config_manager_ai_key():
     # 如果没有配置，应该返回 None 而不是抛出异常
     assert api_key is None or isinstance(api_key, str)
     print(f"  API Key 状态: {'已配置' if api_key else '未配置'}")
-    
-    return True
 
 
 def test_prompt_template_manager():
@@ -68,8 +61,6 @@ def test_prompt_template_manager():
     default_template = manager.get_default_template()
     assert default_template is not None
     print(f"  默认模板: {default_template.name}")
-    
-    return True
 
 
 def test_prompt_template_styles():
@@ -91,8 +82,6 @@ def test_prompt_template_styles():
     
     print(f"  找到 {len(styles)} 种模板风格")
     print("  ✓ PromptTemplateStyle 测试通过")
-    
-    return True
 
 
 def test_credential_manager():
@@ -122,7 +111,6 @@ def test_credential_manager():
         pass
     
     print("  ✓ CredentialManager 测试通过")
-    return True
 
 
 def test_download_service_init():
@@ -140,7 +128,6 @@ def test_download_service_init():
         assert service.MAX_RETRIES == 3
     
     print("  ✓ DownloadService 初始化正确")
-    return True
 
 
 def test_transcribe_service_init():
@@ -162,7 +149,6 @@ def test_transcribe_service_init():
         print("  无效模型已正确拒绝")
     
     print("  ✓ TranscribeService 初始化正确")
-    return True
 
 
 def test_ai_service_mock():
@@ -188,8 +174,6 @@ def test_ai_service_mock():
     
     print(f"  Mock 摘要: {result.summary[:50]}...")
     print("  ✓ AI Service Mock 模式工作正常")
-    
-    return True
 
 
 def test_export_orchestrator_init():
@@ -209,7 +193,6 @@ def test_export_orchestrator_init():
     assert len(orchestrator.exporters) == 1
     
     print("  ✓ ExportOrchestrator 初始化正确")
-    return True
 
 
 if __name__ == "__main__":
@@ -217,21 +200,17 @@ if __name__ == "__main__":
     print("服务模块测试套件")
     print("=" * 50)
     
-    all_passed = True
-    all_passed &= test_config_manager_singleton()
-    all_passed &= test_config_manager_default()
-    all_passed &= test_config_manager_ai_key()
-    all_passed &= test_prompt_template_manager()
-    all_passed &= test_prompt_template_styles()
-    all_passed &= test_credential_manager()
-    all_passed &= test_download_service_init()
-    all_passed &= test_transcribe_service_init()
-    all_passed &= test_ai_service_mock()
-    all_passed &= test_export_orchestrator_init()
+    test_config_manager_singleton()
+    test_config_manager_default()
+    test_config_manager_ai_key()
+    test_prompt_template_manager()
+    test_prompt_template_styles()
+    test_credential_manager()
+    test_download_service_init()
+    test_transcribe_service_init()
+    test_ai_service_mock()
+    test_export_orchestrator_init()
     
     print("\n" + "=" * 50)
-    if all_passed:
-        print("✓ 所有测试通过")
-    else:
-        print("✗ 部分测试失败")
+    print("✓ 所有测试通过")
     print("=" * 50)

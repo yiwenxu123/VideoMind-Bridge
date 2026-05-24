@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.services.task_database import TaskDatabase, get_task_database
 from src.models.task import TaskHistory, TaskStatus, ProcessingMode, ExportTarget
 
@@ -19,8 +17,6 @@ def test_task_database_singleton():
     
     assert db1 is db2, "应该是同一个实例"
     print("  ✓ TaskDatabase 是单例")
-    
-    return True
 
 
 def test_save_and_get_task():
@@ -58,8 +54,6 @@ def test_save_and_get_task():
     
     # 清理
     db.delete_task("test_task_001")
-    
-    return True
 
 
 def test_get_tasks_pagination():
@@ -94,8 +88,6 @@ def test_get_tasks_pagination():
     # 清理
     for i in range(5):
         db.delete_task(f"test_pagination_{i}")
-    
-    return True
 
 
 def test_search_tasks():
@@ -129,8 +121,6 @@ def test_search_tasks():
     
     # 清理
     db.delete_task("test_search_001")
-    
-    return True
 
 
 def test_get_statistics():
@@ -145,8 +135,6 @@ def test_get_statistics():
     assert "by_status" in stats
     assert "by_platform" in stats
     print(f"  ✓ 统计信息: 总计 {stats.get('total', 0)} 条")
-    
-    return True
 
 
 def test_processing_stats():
@@ -175,7 +163,6 @@ def test_processing_stats():
     assert count > 0
     print(f"  ✓ 统计记录数: {count}")
     
-    return True
 
 
 if __name__ == "__main__":

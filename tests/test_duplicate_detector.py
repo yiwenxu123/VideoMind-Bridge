@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.services.duplicate_detector import (
     DuplicateDetector, get_duplicate_detector, ProcessingStatus
 )
@@ -20,8 +18,6 @@ def test_duplicate_detector_singleton():
     
     assert detector1 is detector2, "应该是同一个实例"
     print("  ✓ DuplicateDetector 是单例")
-    
-    return True
 
 
 def test_add_and_check_record():
@@ -45,8 +41,6 @@ def test_add_and_check_record():
     assert record is not None, "应能检测到重复"
     assert record.title == "测试视频"
     print("  ✓ 重复检测成功")
-    
-    return True
 
 
 def test_update_status():
@@ -76,8 +70,6 @@ def test_update_status():
     record = detector.check_duplicate(url)
     assert record.status == ProcessingStatus.COMPLETED
     print("  ✓ 状态更新成功")
-    
-    return True
 
 
 def test_get_recent_tasks():
@@ -100,7 +92,6 @@ def test_get_recent_tasks():
     assert len(recent) <= 2, "应返回不超过限制数量的任务"
     print(f"  ✓ 获取到 {len(recent)} 条最近任务")
     
-    return True
 
 
 if __name__ == "__main__":

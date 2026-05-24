@@ -260,8 +260,6 @@ if __name__ == "__main__":
     from pathlib import Path
     from uuid import uuid4
 
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
     from ..models.task import VideoMetadata, ExportContext, TranscriptSegment
 
     # 创建测试上下文

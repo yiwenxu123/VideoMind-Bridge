@@ -1,11 +1,11 @@
 """配置管理器 - 单例模式"""
 
 import logging
+import os
 import threading
 import yaml
 from pathlib import Path
 from typing import Optional, Dict, Any
-from functools import lru_cache
 
 from ..models.config import AppConfig, AIConfig, DownloadConfig, ExportConfig, UIConfig
 from ..utils.credential_manager import CredentialManager
@@ -101,6 +101,78 @@ class ConfigManager:
         if provider is None:
             provider = self._config.ai.engine.lower()
         return CredentialManager.save_api_key(provider, api_key)
+
+    # ── 提取器 API Key 管理 ──────────────────────────────────────
+
+    EXTRACTOR_PROVIDERS: Dict[str, Dict[str, str]] = {
+        "coze": {"env": "COZE_API_KEY", "label": "Coze API Token"},
+        "tikhub": {"env": "TIKHUB_API_KEY", "label": "Tikhub.io API Key"},
+        "apify": {"env": "APIFY_API_KEY", "label": "Apify API Token"},
+        "aliyun_access_key_id": {"env": "ALIYUN_ACCESS_KEY_ID", "label": "阿里云 AccessKey ID"},
+        "aliyun_access_key_secret": {"env": "ALIYUN_ACCESS_KEY_SECRET", "label": "阿里云 AccessKey Secret"},
+        "aliyun_appkey": {"env": "ALIYUN_APPKEY", "label": "阿里云 AppKey"},
+    }
+
+    EXTRACTOR_GROUPS: Dict[str, Dict[str, Any]] = {
+        "coze": {"label": "Coze 提取加速", "keys": ["coze"]},
+        "tikhub": {"label": "Tikhub.io 商业 API", "keys": ["tikhub"]},
+        "apify": {"label": "Apify 商业爬虫", "keys": ["apify"]},
+        "aliyun_asr": {
+            "label": "阿里云语音识别 (ASR)",
+            "keys": ["aliyun_access_key_id", "aliyun_access_key_secret", "aliyun_appkey"],
+        },
+    }
+
+    def _keyring_name(self, name: str) -> str:
+        """提取器 Key 在密钥环中的命名空间"""
+        return f"extractor_{name}"
+
+    def get_extractor_key(self, name: str) -> Optional[str]:
+        """获取提取器 Key: 密钥环 → 环境变量 → None"""
+        key = CredentialManager.get_api_key(self._keyring_name(name))
+        if key:
+            return key
+        info = self.EXTRACTOR_PROVIDERS.get(name)
+        if info:
+            env_val = os.getenv(info["env"])
+            if env_val and env_val.strip():
+                return env_val.strip()
+        return None
+
+    def set_extractor_key(self, name: str, value: str) -> bool:
+        """设置提取器 Key (保存到密钥环)"""
+        if not value or not value.strip():
+            return False
+        return CredentialManager.save_api_key(self._keyring_name(name), value.strip())
+
+    def delete_extractor_key(self, name: str) -> bool:
+        """删除提取器 Key"""
+        return CredentialManager.delete_api_key(self._keyring_name(name))
+
+    def list_extractor_key_status(self) -> Dict[str, Any]:
+        """列出所有提取器 Key 的配置状态"""
+        result: Dict[str, Any] = {}
+        for group_name, group in self.EXTRACTOR_GROUPS.items():
+            key_details = []
+            all_configured = True
+            for key_name in group["keys"]:
+                value = self.get_extractor_key(key_name)
+                info = self.EXTRACTOR_PROVIDERS.get(key_name, {})
+                configured = value is not None
+                if not configured:
+                    all_configured = False
+                key_details.append({
+                    "name": key_name,
+                    "label": info.get("label", key_name),
+                    "env": info.get("env", ""),
+                    "configured": configured,
+                })
+            result[group_name] = {
+                "label": group["label"],
+                "all_configured": all_configured,
+                "keys": key_details,
+            }
+        return result
 
     def save(self) -> bool:
         """保存配置到 YAML 文件"""
@@ -222,7 +294,6 @@ class ConfigManager:
         return self._config_file
 
 
-@lru_cache()
 def get_config_manager() -> ConfigManager:
     """获取配置管理器实例（单例）"""
     return ConfigManager()

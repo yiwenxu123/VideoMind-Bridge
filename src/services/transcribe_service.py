@@ -10,20 +10,13 @@ from typing import Callable, List, Optional
 
 from faster_whisper import WhisperModel
 
+from ..models.task import TranscriptSegment
 from ..utils import get_logger
 from ..utils.exceptions import TranscribeError
 
 logger = get_logger(__name__)
 
 ProgressCallback = Callable[[str, float], None]
-
-
-@dataclass
-class TranscriptSegment:
-    """转录片段"""
-    start: float
-    end: float
-    text: str
 
 
 @dataclass
@@ -157,7 +150,7 @@ class TranscribeService:
         self.model_size = model_size
         self._model: Optional[WhisperModel] = None
 
-    def _load_model(self, progress_callback: Optional[ProgressCallback] = None):
+    def _load_model(self, progress_callback: Optional[ProgressCallback] = None) -> None:
         """懒加载模型（使用全局缓存）"""
         if self._model is not None:
             return
@@ -268,6 +261,7 @@ class TranscribeService:
             progress_callback("开始转录...", 15)
 
         # 执行转录
+        assert self._model is not None  # 确保模型已加载
         try:
             segments_iter, info = self._model.transcribe(
                 str(audio_path),
@@ -346,8 +340,6 @@ class TranscribeService:
 # 测试代码
 if __name__ == "__main__":
     import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-
     def print_progress(status: str, percent: float):
         print(f"[{percent:5.1f}%] {status}")
 

@@ -3,8 +3,6 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.models.task import (
     VideoMetadata, ProcessingMode, ExportTarget,
     TaskStatus, ExportContext, ExportResult, TranscriptSegment
@@ -30,7 +28,6 @@ def test_video_metadata():
     assert metadata.platform == "bilibili"
     
     print("  ✓ VideoMetadata 测试通过")
-    return True
 
 
 def test_processing_mode():
@@ -46,7 +43,6 @@ def test_processing_mode():
     assert mode == ProcessingMode.FULL
     
     print("  ✓ ProcessingMode 测试通过")
-    return True
 
 
 def test_export_target():
@@ -58,7 +54,6 @@ def test_export_target():
     assert ExportTarget.NOTION.value == "notion"
     
     print("  ✓ ExportTarget 测试通过")
-    return True
 
 
 def test_task_status():
@@ -82,7 +77,6 @@ def test_task_status():
         assert isinstance(status.value, str)
     
     print("  ✓ TaskStatus 测试通过")
-    return True
 
 
 def test_transcript_segment():
@@ -100,7 +94,6 @@ def test_transcript_segment():
     assert segment.text == "测试字幕"
     
     print("  ✓ TranscriptSegment 测试通过")
-    return True
 
 
 def test_export_result():
@@ -129,7 +122,6 @@ def test_export_result():
     assert failed_result.error_msg == "测试错误"
     
     print("  ✓ ExportResult 测试通过")
-    return True
 
 
 def test_export_context():
@@ -166,7 +158,6 @@ def test_export_context():
     assert len(context.transcript_segments) == 2
     
     print("  ✓ ExportContext 测试通过")
-    return True
 
 
 def test_app_config():
@@ -191,7 +182,6 @@ def test_app_config():
     assert restored_config.ai.engine == config.ai.engine
     
     print("  ✓ AppConfig 测试通过")
-    return True
 
 
 def test_ai_config():
@@ -207,7 +197,6 @@ def test_ai_config():
     assert config.max_tokens == 4096
     
     print("  ✓ AIConfig 测试通过")
-    return True
 
 
 def test_download_config():
@@ -221,7 +210,6 @@ def test_download_config():
     assert config.organize_by == "date"
     
     print("  ✓ DownloadConfig 测试通过")
-    return True
 
 
 if __name__ == "__main__":

@@ -89,6 +89,10 @@ class TaskManager:
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
 
+    def is_ai_available(self) -> bool:
+        """AI 服务是否已配置可用"""
+        return self._ai_service.is_available()
+
     async def start(self) -> None:
         """启动任务管理器"""
         if self._running:
@@ -124,6 +128,7 @@ class TaskManager:
         ai_provider: Optional[str] = None,
         ai_prompt: Optional[str] = None,
         cookies_from_browser: Optional[str] = None,
+        allow_downgrade: bool = False,
     ) -> VideoTask:
         """
         创建新任务
@@ -135,6 +140,7 @@ class TaskManager:
             ai_provider: AI提供商
             ai_prompt: AI提示词
             cookies_from_browser: 浏览器名称（chrome/safari/firefox）
+            allow_downgrade: AI不可用时降级为转录存档
 
         Returns:
             创建的任务对象
@@ -146,6 +152,7 @@ class TaskManager:
             targets=targets or {ExportTarget.LOCAL},
             ai_provider=ai_provider,
             ai_prompt=ai_prompt,
+            allow_downgrade=allow_downgrade,
             status=TaskStatus.PENDING,
             progress=0.0,
             current_step="等待中",
@@ -363,15 +370,27 @@ class TaskManager:
 
             # 3. AI处理
             if task.status != TaskStatus.CANCELLED and task.mode == ProcessingMode.FULL:
-                task.status = TaskStatus.AI_PROCESSING
-                task.current_step = "正在生成AI摘要..."
-                task.progress = 70.0
-                self._notify_task_update(task)
+                if not self.is_ai_available():
+                    if task.allow_downgrade:
+                        logger.warning(f"AI 未配置，任务 {task.id} 降级为转录存档模式")
+                        task.current_step = "AI 未配置，已降级（跳过 AI 摘要）"
+                        task.progress = 85.0
+                        self._notify_task_update(task)
+                    else:
+                        raise Exception(
+                            "AI 服务未配置，请在设置中配置 API Key。"
+                            "如需跳过 AI 步骤，请勾选「AI不可用降级」"
+                        )
+                else:
+                    task.status = TaskStatus.AI_PROCESSING
+                    task.current_step = "正在生成AI摘要..."
+                    task.progress = 70.0
+                    self._notify_task_update(task)
 
-                summary = await self._generate_summary(task)
-                task.ai_summary = summary
-                task.progress = 85.0
-                self._notify_task_update(task)
+                    summary = await self._generate_summary(task)
+                    task.ai_summary = summary
+                    task.progress = 85.0
+                    self._notify_task_update(task)
 
             # 4. 导出
             if task.status != TaskStatus.CANCELLED:

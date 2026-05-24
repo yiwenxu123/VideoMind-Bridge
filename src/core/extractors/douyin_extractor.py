@@ -18,7 +18,7 @@ from . import register_extractor
 
 # 抖音 URL 模式
 _DOUYIN_RE = re.compile(
-    r"(?:douyin\.com/(?:video|share)/|iesdouyin\.com/share/video/|v\.douyin\.com/)(\w+)"
+    r"(?:douyin\.com/(?:video|share)/|douyin\.com/jingxuan\?modal_id=|iesdouyin\.com/share/video/|v\.douyin\.com/)(\w+)"
 )
 _DOUYIN_SHORT_RE = re.compile(r"v\.douyin\.com/(\w+)")
 
@@ -33,6 +33,7 @@ class DouyinExtractor(ContentExtractor):
     def __init__(self) -> None:
         self._client = httpx.Client(
             timeout=30.0,
+            follow_redirects=True,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -59,7 +60,7 @@ class DouyinExtractor(ContentExtractor):
                 return ExtractResult(
                     success=False, platform="douyin", title="", content="",
                     source="douyin", url=url, cost_tier=CostTier.FREE,
-                    error=f"无法解析抖音视频 ID: {url}",
+                    error="暂不支持此抖音链接格式，请使用 /video/ 类链接或短链",
                 )
 
             # 1. 获取视频信息和字幕

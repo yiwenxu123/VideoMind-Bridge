@@ -4,8 +4,6 @@ import sys
 from pathlib import Path
 from uuid import uuid4
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.exporters.base import BaseExporter
 from src.exporters.local_exporter import LocalExporter
 from src.models.task import ExportContext, ExportResult, ExportTarget, VideoMetadata
@@ -22,7 +20,6 @@ def test_base_exporter_interface():
     assert hasattr(BaseExporter, 'export')
     
     print("  ✓ BaseExporter 接口定义正确")
-    return True
 
 
 def test_local_exporter_init():
@@ -41,8 +38,6 @@ def test_local_exporter_init():
         assert exporter.output_path == Path(tmpdir)
         
         print("  ✓ LocalExporter 初始化正确")
-    
-    return True
 
 
 def test_local_exporter_validate():
@@ -62,8 +57,6 @@ def test_local_exporter_validate():
         valid, error = exporter.validate_config()
         assert valid is False, "应验证失败"
         print("  ✓ 无效路径正确拒绝")
-    
-    return True
 
 
 def test_export_context_creation():
@@ -89,7 +82,6 @@ def test_export_context_creation():
     assert context.ai_summary == "测试摘要"
     
     print("  ✓ ExportContext 创建成功")
-    return True
 
 
 def test_export_result_creation():
@@ -107,7 +99,6 @@ def test_export_result_creation():
     assert result.target == ExportTarget.LOCAL
     
     print("  ✓ ExportResult 创建成功")
-    return True
 
 
 if __name__ == "__main__":

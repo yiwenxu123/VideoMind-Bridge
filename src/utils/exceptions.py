@@ -1,10 +1,12 @@
 """自定义异常类 - 统一错误处理"""
 
+from typing import Optional
+
 
 class VideoMindError(Exception):
     """VideoMind Bridge 基础异常类"""
     
-    def __init__(self, message: str, error_code: str = None, details: dict = None):
+    def __init__(self, message: str, error_code: Optional[str] = None, details: Optional[dict] = None):
         super().__init__(message)
         self.message = message
         self.error_code = error_code or "UNKNOWN_ERROR"
@@ -30,14 +32,14 @@ class DownloadError(VideoMindError):
         "UNSUPPORTED_PLATFORM": "不支持的视频平台",
     }
     
-    def __init__(self, message: str, error_code: str = "DOWNLOAD_FAILED", details: dict = None):
+    def __init__(self, message: str, error_code: str = "DOWNLOAD_FAILED", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
 class UnsupportedPlatformError(VideoMindError):
     """不支持的平台错误"""
     
-    def __init__(self, message: str, error_code: str = "UNSUPPORTED_PLATFORM", details: dict = None):
+    def __init__(self, message: str, error_code: str = "UNSUPPORTED_PLATFORM", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
@@ -53,7 +55,7 @@ class TranscribeError(VideoMindError):
         "AUDIO_TOO_LONG": "音频太长，超出处理限制",
     }
     
-    def __init__(self, message: str, error_code: str = "TRANSCRIBE_FAILED", details: dict = None):
+    def __init__(self, message: str, error_code: str = "TRANSCRIBE_FAILED", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
@@ -71,7 +73,7 @@ class AIError(VideoMindError):
         "GENERATION_FAILED": "内容生成失败",
     }
     
-    def __init__(self, message: str, error_code: str = "GENERATION_FAILED", details: dict = None):
+    def __init__(self, message: str, error_code: str = "GENERATION_FAILED", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
@@ -86,7 +88,7 @@ class ExportError(VideoMindError):
         "EXPORT_FAILED": "导出过程中发生错误",
     }
     
-    def __init__(self, message: str, error_code: str = "EXPORT_FAILED", details: dict = None):
+    def __init__(self, message: str, error_code: str = "EXPORT_FAILED", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
@@ -100,7 +102,7 @@ class ConfigError(VideoMindError):
         "INVALID_CONFIG_VALUE": "无效的配置值",
     }
     
-    def __init__(self, message: str, error_code: str = "CONFIG_ERROR", details: dict = None):
+    def __init__(self, message: str, error_code: str = "CONFIG_ERROR", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
@@ -114,7 +116,7 @@ class ValidationError(VideoMindError):
         "INVALID_FORMAT": "格式无效",
     }
     
-    def __init__(self, message: str, error_code: str = "VALIDATION_ERROR", details: dict = None):
+    def __init__(self, message: str, error_code: str = "VALIDATION_ERROR", details: Optional[dict] = None):
         super().__init__(message, error_code, details)
 
 
@@ -122,7 +124,7 @@ class RetryableError(VideoMindError):
     """可重试的错误基类"""
     
     def __init__(self, message: str, error_code: str = "RETRYABLE_ERROR", 
-                 details: dict = None, retry_count: int = 0, max_retries: int = 3):
+                 details: Optional[dict] = None, retry_count: int = 0, max_retries: int = 3):
         super().__init__(message, error_code, details)
         self.retry_count = retry_count
         self.max_retries = max_retries
@@ -141,7 +143,7 @@ class NetworkError(RetryableError):
     """网络相关错误（可重试）"""
     
     def __init__(self, message: str = "网络错误", error_code: str = "NETWORK_ERROR",
-                 details: dict = None, retry_count: int = 0, max_retries: int = 3):
+                 details: Optional[dict] = None, retry_count: int = 0, max_retries: int = 3):
         super().__init__(message, error_code, details, retry_count, max_retries)
 
 
@@ -149,7 +151,7 @@ class ServiceUnavailableError(RetryableError):
     """服务不可用错误（可重试）"""
     
     def __init__(self, message: str = "服务暂时不可用", error_code: str = "SERVICE_UNAVAILABLE",
-                 details: dict = None, retry_count: int = 0, max_retries: int = 3):
+                 details: Optional[dict] = None, retry_count: int = 0, max_retries: int = 3):
         super().__init__(message, error_code, details, retry_count, max_retries)
 
 
@@ -157,5 +159,5 @@ class TimeoutError(RetryableError):
     """超时错误（可重试）"""
     
     def __init__(self, message: str = "请求超时", error_code: str = "TIMEOUT",
-                 details: dict = None, retry_count: int = 0, max_retries: int = 3):
+                 details: Optional[dict] = None, retry_count: int = 0, max_retries: int = 3):
         super().__init__(message, error_code, details, retry_count, max_retries)

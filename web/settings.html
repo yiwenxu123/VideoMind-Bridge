@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>设置 - VideoMind Bridge</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .nav-bar { display:flex; align-items:center; gap:12px; }
+    .nav-bar a { color:var(--primary); text-decoration:none; font-size:14px; }
+    .nav-bar a:hover { text-decoration:underline; }
+    .settings-section { margin-bottom:24px; }
+    .settings-section h2 { font-size:16px; margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid var(--border); }
+    .form-row { display:flex; gap:12px; margin-bottom:12px; align-items:flex-start; }
+    .form-group { flex:1; min-width:0; }
+    .form-group label { display:block; font-size:12px; font-weight:600; color:#555; margin-bottom:4px; }
+    .form-group input, .form-group select { width:100%; padding:8px 10px; border:1px solid var(--border); border-radius:6px; font-size:13px; box-sizing:border-box; }
+    .form-group input:focus, .form-group select:focus { outline:none; border-color:var(--primary); box-shadow:0 0 0 2px rgba(99,102,241,0.15); }
+    .form-group .hint { font-size:11px; color:#999; margin-top:2px; }
+    .form-group input[type="range"] { padding:0; border:none; }
+    .form-group .range-value { font-size:13px; font-weight:600; color:var(--primary); min-width:32px; text-align:center; }
+    .range-row { display:flex; align-items:center; gap:8px; }
+    .range-row input[type="range"] { flex:1; }
+    .checkbox-group { display:flex; gap:16px; flex-wrap:wrap; }
+    .checkbox-group label { display:flex; align-items:center; gap:6px; font-size:13px; cursor:pointer; }
+    .checkbox-group input[type="checkbox"] { width:16px; height:16px; cursor:pointer; }
+    .actions-row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:8px; }
+    .btn-test { background:#f0f0f0; color:#333; border:1px solid var(--border); padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .btn-test:hover { background:#e5e5e5; }
+    .btn-test:disabled { opacity:0.5; cursor:not-allowed; }
+    .btn-test.loading { position:relative; color:transparent; }
+    .btn-test.loading::after { content:''; position:absolute; width:14px; height:14px; border:2px solid #999; border-top-color:transparent; border-radius:50%; animation:spin 0.6s linear infinite; top:50%; left:50%; margin:-7px 0 0 -7px; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    #test-result { font-size:13px; padding:4px 0; }
+    .test-ok { color:var(--success,#22c55e); }
+    .test-fail { color:var(--danger,#ef4444); }
+    .btn-save { background:var(--primary); color:#fff; border:none; padding:10px 24px; border-radius:6px; cursor:pointer; font-size:14px; font-weight:600; }
+    .btn-save:hover { opacity:0.9; }
+    .btn-save:disabled { opacity:0.5; cursor:not-allowed; }
+    #save-status { font-size:13px; margin-left:8px; }
+    .save-ok { color:var(--success,#22c55e); }
+    .save-fail { color:var(--danger,#ef4444); }
+    .api-key-row { display:flex; gap:8px; }
+    .api-key-row input { flex:1; }
+    .api-key-row .btn-toggle-key { background:none; border:1px solid var(--border); border-radius:6px; cursor:pointer; padding:4px 10px; font-size:12px; white-space:nowrap; }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="nav-bar">
+        <h1 style="margin:0;font-size:20px">⚙️ 设置</h1>
+        <a href="/">← 返回首页</a>
+      </div>
+      <p class="subtitle">配置 AI 服务、下载和导出选项</p>
+    </header>
+
+    <main>
+      <!-- AI 设置 -->
+      <section class="card settings-section">
+        <h2>🤖 AI 服务</h2>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>AI 引擎</label>
+            <select id="ai-engine">
+              <option value="DeepSeek-V3">DeepSeek</option>
+              <option value="Ollama">Ollama (本地)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>模型名称</label>
+            <input type="text" id="ai-model" placeholder="deepseek-chat">
+            <div class="hint">如 deepseek-chat、llama3、gpt-4o</div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>API 地址</label>
+            <input type="text" id="ai-base-url" placeholder="https://api.deepseek.com">
+          </div>
+          <div class="form-group">
+            <label>API Key</label>
+            <div class="api-key-row">
+              <input type="password" id="ai-api-key" placeholder="输入新的 API Key 以更新">
+              <button class="btn-toggle-key" id="toggle-key-btn" onclick="toggleKeyVisibility()">显示</button>
+            </div>
+            <div class="hint" id="api-key-status">当前状态：未配置</div>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>温度 (Temperature)</label>
+            <div class="range-row">
+              <input type="range" id="ai-temperature" min="0" max="2" step="0.1" value="0.7">
+              <span class="range-value" id="temperature-value">0.7</span>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>最大 Token 数</label>
+            <input type="number" id="ai-max-tokens" min="1" max="128000" value="4096">
+          </div>
+          <div class="form-group">
+            <label>超时（秒）</label>
+            <input type="number" id="ai-timeout" min="10" max="300" value="120">
+          </div>
+        </div>
+
+        <div class="actions-row">
+          <button class="btn-test" id="test-ai-btn" onclick="testAI()">🔄 测试连接</button>
+          <span id="test-result"></span>
+        </div>
+      </section>
+
+      <!-- 下载设置 -->
+      <section class="card settings-section">
+        <h2>💾 下载</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label>输出目录</label>
+            <input type="text" id="output-dir" placeholder="~/Downloads/VideoMind">
+          </div>
+          <div class="form-group">
+            <label>下载画质</label>
+            <select id="download-quality">
+              <option value="2160p">4K (2160p)</option>
+              <option value="1080p" selected>1080p</option>
+              <option value="720p">720p</option>
+              <option value="480p">480p</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- 转录设置 -->
+      <section class="card settings-section">
+        <h2>📝 转录</h2>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Whisper 模型</label>
+            <select id="whisper-model">
+              <option value="tiny">tiny (最快)</option>
+              <option value="base">base</option>
+              <option value="small" selected>small (推荐)</option>
+              <option value="medium">medium</option>
+              <option value="large">large (最准确)</option>
+            </select>
+          </div>
+        </div>
+      </section>
+
+      <!-- 导出设置 -->
+      <section class="card settings-section">
+        <h2>📤 导出</h2>
+        <div class="checkbox-group">
+          <label><input type="checkbox" id="save-srt" checked> 保存 SRT 字幕</label>
+          <label><input type="checkbox" id="save-transcript" checked> 保存纯文本转录</label>
+          <label><input type="checkbox" id="save-markdown" checked> 保存 Markdown</label>
+        </div>
+      </section>
+
+      <!-- 保存 -->
+      <section class="card settings-section">
+        <div class="actions-row">
+          <button class="btn-save" id="save-btn" onclick="saveSettings()">💾 保存设置</button>
+          <span id="save-status"></span>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <span id="system-status"></span>
+    </footer>
+  </div>
+
+  <script>
+    const API = '/api/v1';
+
+    async function fetchJSON(url, options = {}) {
+      const resp = await fetch(url, options);
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({}));
+        throw new Error(err.detail || resp.statusText);
+      }
+      return resp.json();
+    }
+
+    // 加载设置
+    async function loadSettings() {
+      try {
+        const s = await fetchJSON(`${API}/settings`);
+        document.getElementById('ai-engine').value = s.ai_engine;
+        document.getElementById('ai-model').value = s.ai_model || '';
+        document.getElementById('ai-base-url').value = s.ai_base_url || '';
+        document.getElementById('ai-temperature').value = s.ai_temperature;
+        document.getElementById('temperature-value').textContent = s.ai_temperature;
+        document.getElementById('ai-max-tokens').value = s.ai_max_tokens;
+        document.getElementById('ai-timeout').value = s.ai_timeout;
+        document.getElementById('ai-api-key').value = '';
+        document.getElementById('api-key-status').textContent =
+          s.ai_api_key_configured ? '当前状态：✅ 已配置' : '当前状态：❌ 未配置';
+        document.getElementById('output-dir').value = s.output_dir || '';
+        document.getElementById('download-quality').value = s.download_quality || '1080p';
+        document.getElementById('whisper-model').value = s.whisper_model || 'small';
+        document.getElementById('save-srt').checked = s.save_srt;
+        document.getElementById('save-transcript').checked = s.save_transcript;
+        document.getElementById('save-markdown').checked = s.save_markdown;
+      } catch (e) {
+        document.getElementById('save-status').textContent = '❌ 加载设置失败';
+      }
+    }
+
+    // 温度滑块联动
+    document.getElementById('ai-temperature').addEventListener('input', function() {
+      document.getElementById('temperature-value').textContent = this.value;
+    });
+
+    // 保存设置
+    async function saveSettings() {
+      const btn = document.getElementById('save-btn');
+      const status = document.getElementById('save-status');
+      btn.disabled = true;
+      status.textContent = '保存中...';
+      status.className = '';
+
+      try {
+        const body = {
+          ai_engine: document.getElementById('ai-engine').value,
+          ai_model: document.getElementById('ai-model').value || undefined,
+          ai_base_url: document.getElementById('ai-base-url').value || undefined,
+          ai_api_key: document.getElementById('ai-api-key').value || undefined,
+          ai_temperature: parseFloat(document.getElementById('ai-temperature').value),
+          ai_max_tokens: parseInt(document.getElementById('ai-max-tokens').value),
+          ai_timeout: parseInt(document.getElementById('ai-timeout').value),
+          output_dir: document.getElementById('output-dir').value || undefined,
+          download_quality: document.getElementById('download-quality').value,
+          whisper_model: document.getElementById('whisper-model').value,
+          save_srt: document.getElementById('save-srt').checked,
+          save_transcript: document.getElementById('save-transcript').checked,
+          save_markdown: document.getElementById('save-markdown').checked,
+        };
+        // 不传空的 API Key
+        if (!body.ai_api_key) delete body.ai_api_key;
+
+        const result = await fetchJSON(`${API}/settings`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        status.textContent = '✅ 设置已保存';
+        status.className = 'save-ok';
+        // 重新加载以更新 API Key 状态显示
+        await loadSettings();
+        document.getElementById('ai-api-key').value = '';
+      } catch (e) {
+        status.textContent = '❌ ' + e.message;
+        status.className = 'save-fail';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // 测试 AI 连接
+    async function testAI() {
+      const btn = document.getElementById('test-ai-btn');
+      const result = document.getElementById('test-result');
+      btn.disabled = true;
+      btn.classList.add('loading');
+      result.textContent = '测试中...';
+      result.className = '';
+
+      try {
+        const resp = await fetch(`${API}/settings/test-ai`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+          result.textContent = '✅ ' + (data.message || '连接正常');
+          result.className = 'test-ok';
+        } else {
+          result.textContent = '❌ ' + (data.message || '连接失败');
+          result.className = 'test-fail';
+        }
+      } catch (e) {
+        result.textContent = '❌ ' + e.message;
+        result.className = 'test-fail';
+      } finally {
+        btn.disabled = false;
+        btn.classList.remove('loading');
+      }
+    }
+
+    // 切换 API Key 可见性
+    function toggleKeyVisibility() {
+      const input = document.getElementById('ai-api-key');
+      const btn = document.getElementById('toggle-key-btn');
+      if (input.type === 'password') {
+        input.type = 'text';
+        btn.textContent = '隐藏';
+      } else {
+        input.type = 'password';
+        btn.textContent = '显示';
+      }
+    }
+
+    // 加载系统状态
+    async function loadStatus() {
+      try {
+        const status = await fetchJSON(`${API}/status`);
+        document.getElementById('system-status').textContent =
+          `${status.active_tasks} 活跃任务`;
+      } catch (e) {
+        document.getElementById('system-status').textContent = 'API 未连接';
+      }
+    }
+
+    loadSettings();
+    loadStatus();
+    setInterval(loadStatus, 10000);
+  </script>
+</body>
+</html>

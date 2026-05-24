@@ -6,8 +6,6 @@ from unittest.mock import Mock, patch, MagicMock
 import threading
 import sys
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.services.transcribe_service import (
     TranscribeService,
     TranscriptSegment,

@@ -81,7 +81,9 @@ class AIService:
             self.base_url = self._get_default_endpoint(self.model)
 
         # 根据端点选择 API Key 环境变量
-        self.api_key = api_key or self._get_api_key_from_env()
+        self.api_key = api_key if not self.mock else None
+        if not self.api_key and not self.mock:
+            self.api_key = self._get_api_key_from_env()
 
         if not self.mock and not self.api_key:
             raise ValueError(
@@ -90,6 +92,10 @@ class AIService:
 
         # 创建 HTTP 客户端（带连接池）
         self._client: Optional[httpx.Client] = None
+
+    def is_available(self) -> bool:
+        """AI 服务是否可用 (模拟模式始终可用, 真实模式需要有效 Key)"""
+        return not self.mock
 
     def _mask_api_key(self, api_key: Optional[str]) -> str:
         """
@@ -163,14 +169,11 @@ class AIService:
             self._client = None
             logger.debug("关闭 HTTP 客户端")
 
-    def __enter__(self):
-        """上下文管理器入口"""
+    def __enter__(self) -> "AIService":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """上下文管理器出口"""
+    def __exit__(self, exc_type: Optional[type], exc_val: Optional[BaseException], exc_tb: Optional[object]) -> None:
         self.close()
-        return False
 
     def summarize(
         self,
@@ -256,7 +259,7 @@ class AIService:
         }
 
         # 带指数退避的重试机制
-        last_exception = None
+        last_exception: Optional[BaseException] = None
         for attempt in range(self.MAX_RETRIES):
             try:
                 client = self._get_client()

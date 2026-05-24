@@ -3,8 +3,6 @@
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 from src.utils.file_utils import sanitize_filename, safe_write_text
 from src.utils.time_utils import format_time_for_srt, seconds_to_time_str
 from src.utils.media_utils import generate_srt, Highlight
@@ -29,7 +27,6 @@ def test_sanitize_filename():
         assert len(result) <= 255, "文件名长度应限制在255字符以内"
     
     print("  ✓ sanitize_filename 测试通过")
-    return True
 
 
 def test_safe_write_text():
@@ -51,8 +48,6 @@ def test_safe_write_text():
         assert read_content == content, "内容应一致"
         
         print("  ✓ safe_write_text 测试通过")
-    
-    return True
 
 
 def test_format_time_for_srt():
@@ -72,7 +67,6 @@ def test_format_time_for_srt():
         print(f"  {seconds}s -> {result}")
     
     print("  ✓ format_time_for_srt 测试通过")
-    return True
 
 
 def test_seconds_to_time_str():
@@ -91,7 +85,6 @@ def test_seconds_to_time_str():
         print(f"  {seconds}s -> {result}")
     
     print("  ✓ seconds_to_time_str 测试通过")
-    return True
 
 
 def test_generate_srt():
@@ -113,7 +106,6 @@ def test_generate_srt():
     print("  SRT 内容预览:")
     print(srt_content[:200])
     print("  ✓ generate_srt 测试通过")
-    return True
 
 
 def test_highlight_class():
@@ -127,7 +119,6 @@ def test_highlight_class():
     assert highlight.content == "测试要点"
     
     print("  ✓ Highlight 类测试通过")
-    return True
 
 
 if __name__ == "__main__":

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VideoMind Bridge</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 顶部 -->
+    <header>
+      <div style="display:flex;align-items:center;justify-content:space-between;width:100%">
+        <div>
+          <h1>🎬 VideoMind Bridge</h1>
+          <p class="subtitle">视频知识处理工作站 — 采集→解析→理解→归档</p>
+        </div>
+        <a href="/static/settings.html" class="settings-link" title="设置">⚙️</a>
+      </div>
+    </header>
+
+    <!-- 主内容区 -->
+    <main>
+      <!-- URL 输入 -->
+      <section class="card">
+        <h2>📥 视频 URL</h2>
+        <div class="url-input-area">
+          <textarea id="url-input" placeholder="粘贴视频链接&#10;支持 Bilibili、YouTube、抖音、小红书等平台&#10;每行一个链接可批量处理" rows="3"></textarea>
+          <div class="url-actions">
+            <button id="paste-btn" class="btn-sm">📋 粘贴</button>
+            <button id="clear-btn" class="btn-sm">🗑️ 清空</button>
+            <span id="url-count" class="hint"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 处理模式 -->
+      <section class="card">
+        <h2>⚙️ 处理模式</h2>
+        <div class="mode-selector">
+          <label class="mode-card selected" data-mode="full">
+            <input type="radio" name="mode" value="full" checked>
+            <div class="mode-content">
+              <span class="mode-icon">🧠</span>
+              <div>
+                <strong>完整处理</strong>
+                <small>下载→转录→AI摘要→导出</small>
+              </div>
+            </div>
+          </label>
+          <label class="mode-card" data-mode="download_only">
+            <input type="radio" name="mode" value="download_only">
+            <div class="mode-content">
+              <span class="mode-icon">💾</span>
+              <div>
+                <strong>仅下载</strong>
+                <small>下载原始视频+音频</small>
+              </div>
+            </div>
+          </label>
+          <label class="mode-card" data-mode="transcribe_only">
+            <input type="radio" name="mode" value="transcribe_only">
+            <div class="mode-content">
+              <span class="mode-icon">📝</span>
+              <div>
+                <strong>转录存档</strong>
+                <small>生成SRT字幕，不调AI</small>
+              </div>
+            </div>
+          </label>
+        </div>
+      </section>
+
+      <!-- 导出目标 -->
+      <section class="card">
+        <h2>📤 导出目标</h2>
+        <div class="target-selector">
+          <label class="target-check">
+            <input type="checkbox" name="target" value="local" checked>
+            <span>本地文件夹</span>
+          </label>
+          <label class="target-check">
+            <input type="checkbox" name="target" value="obsidian">
+            <span>Obsidian</span>
+          </label>
+          <label class="target-check">
+            <input type="checkbox" name="target" value="notion">
+            <span>Notion</span>
+          </label>
+        </div>
+      </section>
+
+      <!-- 操作按钮 -->
+      <section class="card actions">
+        <button id="extract-btn" class="btn-secondary">⚡ 快速提取</button>
+        <button id="start-btn" class="btn-primary">▶ 完整处理</button>
+        <span id="status-hint" class="hint"></span>
+      </section>
+
+      <!-- 提取结果 -->
+      <section id="extract-result" class="card" style="display:none">
+        <h2>📄 提取结果</h2>
+        <div id="extract-content"></div>
+      </section>
+
+      <!-- 任务队列 -->
+      <section class="card">
+        <h2>📋 任务队列 <span id="task-count" class="badge"></span></h2>
+        <div id="task-list" class="task-list">
+          <p class="empty-state">暂无任务</p>
+        </div>
+      </section>
+
+      <!-- 历史记录 -->
+      <section class="card">
+        <h2>📚 历史记录</h2>
+        <div class="history-controls">
+          <input type="text" id="history-search" placeholder="搜索..." class="input-sm">
+          <button id="refresh-btn" class="btn-sm">🔄 刷新</button>
+        </div>
+        <div id="history-list" class="task-list">
+          <p class="empty-state">加载中...</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- 底部 -->
+    <footer>
+      <span id="system-status"></span>
+    </footer>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

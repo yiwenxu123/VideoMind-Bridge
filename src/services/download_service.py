@@ -9,11 +9,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
-from urllib.parse import urlparse
 
 from ..models.task import VideoMetadata
 from ..utils import get_logger, sanitize_filename
 from ..utils.exceptions import DownloadError, NetworkError, UnsupportedPlatformError
+from ..utils.platform_detector import detect_platform as _detect_platform_impl
 from .downloaders import DownloaderRouter, DownloadOptions
 
 logger = get_logger(__name__)
@@ -169,27 +169,4 @@ class DownloadService:
 
     def _detect_platform(self, url: str) -> str:
         """检测视频平台"""
-        domain = urlparse(url).netloc.lower()
-
-        if "bilibili" in domain or "b23.tv" in domain:
-            return "bilibili"
-        elif "youtube" in domain or "youtu.be" in domain:
-            return "youtube"
-        elif "douyin" in domain or "iesdouyin" in domain:
-            return "douyin"
-        elif "tiktok" in domain:
-            return "tiktok"
-        elif "xiaohongshu" in domain or "xhs.link" in domain:
-            return "xiaohongshu"
-        elif "kuaishou" in domain:
-            return "kuaishou"
-        elif "weibo" in domain:
-            return "weibo"
-        elif "zhihu" in domain:
-            return "zhihu"
-        elif "twitter" in domain or "x.com" in domain:
-            return "twitter"
-        elif "instagram" in domain:
-            return "instagram"
-        else:
-            return "unknown"
+        return _detect_platform_impl(url)

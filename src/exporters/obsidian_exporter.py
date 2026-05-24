@@ -28,7 +28,7 @@ class ObsidianExporter(BaseExporter):
 
     def __init__(
         self,
-        vault_path: Path,
+        vault_path: Optional[Path] = None,
         subfolder: str = "Inbox/Videos",
         template_path: Optional[Path] = None
     ):
@@ -40,7 +40,7 @@ class ObsidianExporter(BaseExporter):
             subfolder: 子文件夹路径
             template_path: Markdown 模板路径（可选）
         """
-        self.vault_path = Path(vault_path) if vault_path else None
+        self.vault_path: Optional[Path] = Path(vault_path) if vault_path else None
         self.subfolder = subfolder
         self.template_path = template_path
 
@@ -80,6 +80,7 @@ class ObsidianExporter(BaseExporter):
             )
 
         # 构建输出路径
+        assert self.vault_path is not None  # validated by validate_config()
         output_dir = self.vault_path / self.subfolder
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -164,7 +165,7 @@ class ObsidianExporter(BaseExporter):
         # 如果没有本地视频，使用标题作为占位
         return f"{sanitize_filename(context.video_metadata.title)}.mp4"
 
-    def _generate_note(self, context: ExportContext, video_filename: str, audio_filename: str = None) -> str:
+    def _generate_note(self, context: ExportContext, video_filename: Optional[str] = None, audio_filename: Optional[str] = None) -> str:
         """生成 Obsidian Markdown 笔记（包含可点击时间戳）"""
         meta = context.video_metadata
         now = datetime.now()
@@ -258,7 +259,7 @@ tags:
 
         return frontmatter + body + attachments_section + footer
 
-    def _format_highlights(self, context: ExportContext, video_filename: str) -> str:
+    def _format_highlights(self, context: ExportContext, video_filename: Optional[str] = None) -> str:
         """格式化时间轴要点为可点击链接"""
         # 从 context 获取 highlights（需要确保 ExportContext 包含 highlights）
         highlights = self._extract_highlights_from_context(context)
@@ -272,10 +273,10 @@ tags:
                 lines.append("")
                 # 显示前 10 个转录段落作为时间轴
                 for i, segment in enumerate(context.transcript_segments[:10]):
-                    time_str = self._format_time_for_media_extended(int(segment.start))
+                    time_str = format_time_for_media_extended(int(segment.start))
                     # 转录模式没有本地视频，链接到线上 URL
                     video_url = context.video_metadata.url
-                    link = f"[{segment.start_time}]({video_url}?t={int(segment.start)})"
+                    link = f"[{segment.start:.0f}]({video_url}?t={int(segment.start)})"
                     # 截取前 100 个字符作为摘要
                     text_preview = segment.text[:100] + "..." if len(segment.text) > 100 else segment.text
                     lines.append(f"- {link} - {text_preview}")
@@ -324,8 +325,6 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     from uuid import uuid4
-
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
     from ..models.task import VideoMetadata, ExportContext
     from ..services.ai_service import Highlight

@@ -1,5 +1,6 @@
 """后台处理工作线程 - 执行视频处理任务"""
 
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass

@@ -19,7 +19,7 @@ class TrayManager(QObject):
     show_window_requested = Signal()
     quit_requested = Signal()
 
-    def __init__(self, parent: QObject = None):
+    def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
         self._parent = parent
         self._tray_icon: Optional[QSystemTrayIcon] = None

@@ -32,9 +32,12 @@ def create_all_extractors() -> List[ContentExtractor]:
 
 
 # 延迟导入以触发注册
-from . import bilibili_extractor  # noqa: E402, F811
-from . import youtube_extractor   # noqa: E402, F811
-from . import ytdlp_extractor     # noqa: E402, F811
-from . import coze_extractor      # noqa: E402, F811
-from . import douyin_extractor    # noqa: E402, F811
-from . import xiaohongshu_extractor  # noqa: E402, F811
+from . import bilibili_extractor      # noqa: E402, F811
+from . import youtube_extractor       # noqa: E402, F811
+from . import ytdlp_extractor         # noqa: E402, F811
+from . import coze_extractor          # noqa: E402, F811
+from . import douyin_extractor        # noqa: E402, F811
+from . import xiaohongshu_extractor   # noqa: E402, F811
+from . import tikhub_extractor        # noqa: E402, F811
+from . import aliyun_asr_extractor    # noqa: E402, F811
+from . import apify_extractor         # noqa: E402, F811

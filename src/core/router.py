@@ -39,12 +39,15 @@ class RouterConfig:
 
 # 默认提取器优先级 (按成本/id 排序)
 _DEFAULT_PRIORITY = [
-    "bilibili",    # FREE - 直接API, 零Cookie
-    "youtube",     # FREE - 直接API
-    "douyin",      # FREE - iesdouyin
-    "xiaohongshu", # FREE - 页面解析
-    "coze",        # CHEAP - Coze API (有Token时)
-    "ytdlp",       # FREE - yt-dlp 兜底字幕
+    "bilibili",    # FREE    - 直接API, 零Cookie
+    "youtube",     # FREE    - 直接API
+    "douyin",      # FREE    - iesdouyin
+    "xiaohongshu", # FREE    - 页面解析
+    "coze",        # CHEAP   - Coze API (有Token时)
+    "ytdlp",       # FREE    - yt-dlp 兜底
+    "tikhub",      # PREMIUM - tikhub.io 商业API (需 KEY)
+    "apify",       # PREMIUM - Apify 商业爬虫 (需 KEY)
+    "aliyun_asr",  # EXPENSIVE - 阿里云ASR (需 KEY)
 ]
 
 

@@ -7,7 +7,7 @@ import re
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Set
+from typing import Any, Optional, Set
 from urllib.parse import urlparse
 
 import yt_dlp
@@ -175,7 +175,7 @@ class YtdlpDownloader(DownloaderBase):
         
         outtmpl = str(temp_dir / "%(title).100s.%(ext)s")
         
-        opts = {
+        opts: dict[str, Any] = {
             "format": format_spec,
             "outtmpl": outtmpl,
             "quiet": True,

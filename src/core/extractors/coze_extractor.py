@@ -22,7 +22,6 @@ from .base import ContentExtractor
 from . import register_extractor
 
 # 环境变量名称
-ENV_COZE_API_KEY = "COZE_API_KEY"
 ENV_COZE_FLOW_ID = "COZE_BOT_ID"  # Coze workflow/bot ID
 
 # Coze API 端点
@@ -58,11 +57,11 @@ class CozeExtractor(ContentExtractor):
     url_pattern = re.compile("|".join(_SUPPORTED_DOMAINS))
 
     def __init__(self) -> None:
-        self._api_key = os.getenv(ENV_COZE_API_KEY, "")
+        key = self._resolve_api_key("coze")
+        self._api_key = key.strip() if key and key.strip() else ""
         self._workflow_id = _DEFAULT_WORKFLOW_ID
 
     def is_available(self) -> bool:
-        """检查 Coze API Token 是否可用"""
         return bool(self._api_key and self._api_key.strip())
 
     def extract(self, url: str) -> ExtractResult:

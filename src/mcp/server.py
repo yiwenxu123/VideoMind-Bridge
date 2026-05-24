@@ -152,6 +152,66 @@ class MCPServer:
                     },
                 },
                 {
+                    "name": "configure",
+                    "description": "获取/设置 VideoMind 配置 (API Keys 等)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["get", "set"],
+                                "description": "get = 读取当前配置; set = 设置配置项",
+                            },
+                            "key": {
+                                "type": "string",
+                                "description": "配置键名 (set 模式必填, 可选值: coze / tikhub / apify / aliyun_access_key_id / aliyun_access_key_secret / aliyun_appkey)",
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "配置值 (set 模式必填)",
+                            },
+                        },
+                        "required": ["action"],
+                    },
+                },
+                {
+                    "name": "prescreen_video",
+                    "description": "预筛视频内容质量 (纯规则引擎, 零网络)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "视频/内容链接"},
+                            "mode": {
+                                "type": "string",
+                                "enum": ["quick", "full"],
+                                "description": "quick = 仅URL分析(<2ms, 默认); full = 先FREE提取元信息再完整评分(<10s)",
+                            },
+                        },
+                        "required": ["url"],
+                    },
+                },
+                {
+                    "name": "smart_extract",
+                    "description": "智能提取: 预筛 → 评分 → 自动决策 → 按需提取 (一步完成)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "视频/内容链接"},
+                            "max_cost": {
+                                "type": "string",
+                                "enum": ["free", "cheap", "paid", "expensive", "premium"],
+                                "description": "最大可接受成本等级 (默认: 根据预筛等级自动推荐)",
+                            },
+                            "min_grade": {
+                                "type": "string",
+                                "enum": ["S", "A", "B", "C", "D"],
+                                "description": "最低可接受预筛等级 (默认: C, C级以下跳过提取)",
+                            },
+                        },
+                        "required": ["url"],
+                    },
+                },
+                {
                     "name": "extract_video",
                     "description": "提取视频文字内容 (v2 引擎, 多提取器自动降级)",
                     "inputSchema": {
@@ -188,6 +248,9 @@ class MCPServer:
             "videomind_transcribe": self._call_transcribe,
             "videomind_supported": self._call_supported,
             "videomind_config": self._call_config,
+            "configure": self._call_configure,
+            "prescreen_video": self._call_prescreen_video,
+            "smart_extract": self._call_smart_extract,
             "extract_video": self._call_extract_video,
             "list_extractors": self._call_list_extractors,
         }.get(name)
@@ -276,7 +339,7 @@ class MCPServer:
         )
 
         orchestrator = ExportOrchestrator(
-            targets=set(target_enums),
+            targets=list(target_enums),
             config={"local_output_path": output_dir},
         )
         export_results = orchestrator.export_all(context)
@@ -358,6 +421,149 @@ class MCPServer:
             "url": url,
             "supported": supported,
             "platform": platform,
+        }
+
+    def _call_configure(self, args: dict) -> dict:
+        action = args.get("action", "get")
+
+        from src.services.config_manager import ConfigManager
+
+        config_mgr = ConfigManager()
+
+        if action == "set":
+            key = args.get("key", "")
+            value = args.get("value", "")
+
+            if not key or not value:
+                return {"success": False, "error": "set 模式需要 key 和 value 参数", "action": "set"}
+
+            valid_names = set(config_mgr.EXTRACTOR_PROVIDERS.keys())
+            if key not in valid_names:
+                return {
+                    "success": False,
+                    "error": f"未知配置键: {key}。有效键名: {', '.join(sorted(valid_names))}",
+                    "action": "set",
+                }
+
+            ok = config_mgr.set_extractor_key(key, value)
+            if not ok:
+                return {"success": False, "error": f"设置失败: {key}", "action": "set"}
+
+            logger.info(f"MCP configure set: {key}")
+            return {"success": True, "action": "set", "key": key, "message": f"{key} 已设置"}
+
+        # get 模式
+        key_status = config_mgr.list_extractor_key_status()
+        total_extractors = len(config_mgr.EXTRACTOR_GROUPS)
+        return {
+            "success": True,
+            "action": "get",
+            "config": {
+                "output_dir": str(Path.home() / "Downloads" / "VideoMind"),
+                "extractors_available": sum(
+                    1 for g in key_status.values() if g["all_configured"]
+                ),
+                "total_extractors": total_extractors,
+                "extractor_keys": key_status,
+            },
+        }
+
+    def _call_prescreen_video(self, args: dict) -> dict:
+        """执行内容预筛"""
+        url = args["url"]
+        mode = args.get("mode", "quick")
+
+        from src.core import Prescreener, ContentRouter
+
+        router = ContentRouter()
+        prescreener = Prescreener(router)
+
+        if mode == "full":
+            from src.core.models import CostTier
+            # 先用 FREE 成本提取元信息
+            quick_result = router.extract(url, max_cost=CostTier.FREE)
+            if quick_result.success and quick_result.title:
+                result = prescreener.prescreen(
+                    url,
+                    title=quick_result.title,
+                    duration_seconds=quick_result.duration_seconds,
+                )
+            else:
+                result = prescreener.prescreen_quick(url)
+        else:
+            result = prescreener.prescreen_quick(url)
+
+        return {
+            "url": result.url,
+            "platform": result.platform,
+            "grade": result.grade.value,
+            "score": round(result.score, 1),
+            "title": result.title,
+            "duration_seconds": result.duration_seconds,
+            "reasons": result.reasons,
+            "metadata": result.metadata,
+        }
+
+    def _call_smart_extract(self, args: dict) -> dict:
+        """智能提取: 预筛 + 自动提取"""
+        url = args["url"]
+        max_cost_str = args.get("max_cost")
+        min_grade_str = args.get("min_grade", "C")
+
+        from src.core import Prescreener, ContentRouter, HermesFormatter
+        from src.core.models import ContentGrade, CostTier
+
+        grade_map = {"S": ContentGrade.S, "A": ContentGrade.A, "B": ContentGrade.B, "C": ContentGrade.C, "D": ContentGrade.D}
+        cost_map = {
+            "free": CostTier.FREE, "cheap": CostTier.CHEAP,
+            "paid": CostTier.PAID, "expensive": CostTier.EXPENSIVE,
+            "premium": CostTier.PREMIUM,
+        }
+
+        min_grade = grade_map.get(min_grade_str, ContentGrade.C)
+        max_cost = cost_map.get(max_cost_str) if max_cost_str else None
+
+        router = ContentRouter()
+        prescreener = Prescreener(router)
+
+        # 1. 先用 FREE 成本获取元信息做预筛
+        quick_result = router.extract(url, max_cost=CostTier.FREE)
+        if quick_result.success and quick_result.title:
+            prescreen_result = prescreener.prescreen(
+                url,
+                title=quick_result.title,
+                duration_seconds=quick_result.duration_seconds,
+            )
+        else:
+            prescreen_result = prescreener.prescreen_quick(url)
+
+        # 2. 判断是否值得提取
+        is_worth = prescreener.is_extraction_worthwhile(prescreen_result.grade, min_grade)
+
+        # 3. 提取 (如值得)
+        extract_output = None
+        if is_worth:
+            if max_cost is None:
+                recommended = prescreener.recommend_cost_tier(prescreen_result.grade)
+                max_cost = cost_map.get(recommended, CostTier.FREE)
+            extract_result = router.extract(url, max_cost=max_cost)
+            if extract_result.success:
+                extract_output = HermesFormatter.format_extract_result_full(extract_result)
+
+        # 4. 合并输出
+        return {
+            "success": True,
+            "url": url,
+            "prescreen": {
+                "grade": prescreen_result.grade.value,
+                "score": round(prescreen_result.score, 1),
+                "reasons": prescreen_result.reasons,
+                "extraction_recommended": is_worth,
+            },
+            "extraction_performed": is_worth,
+            "extraction_skipped": not is_worth,
+            "skip_reason": f"预筛 {prescreen_result.grade.value} 级, 低于 {min_grade_str} 级阈值" if not is_worth else None,
+            "result": extract_output,
         }
 
     def _call_extract_video(self, args: dict) -> dict:
