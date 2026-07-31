@@ -24,13 +24,10 @@ from PySide6.QtWidgets import (
 
 from ..models.task import ExportTarget as ModelExportTarget
 from ..models.task import TaskHistory
-from ..services.ai_service import AIService
 from ..services.config_manager import get_config_manager
 
 # 导入服务
-from ..services.download_service import DownloadService
 from ..services.task_database import get_task_database
-from ..services.transcribe_service import TranscribeService
 from ..utils import get_logger
 
 # 导入组件
@@ -62,11 +59,6 @@ class MainWindow(QMainWindow):
         # 初始化配置管理器
         self.config_manager = get_config_manager()
         self.config = self.config_manager.config
-
-        # 初始化服务
-        self.download_service: DownloadService | None = None
-        self.transcribe_service: TranscribeService | None = None
-        self.ai_service: AIService | None = None
 
         # 活跃的任务线程
         self._workers_mutex = QMutex()

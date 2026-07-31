@@ -60,7 +60,7 @@ class TestHealth:
 
     def test_returns_correct_version(self, client):
         resp = client.get("/health")
-        assert resp.json()["version"] == "1.0.0"
+        assert resp.json()["version"] == "3.0.0"
 
 
 # ── System Status ────────────────────────────────────────────────
@@ -76,7 +76,7 @@ class TestSystemStatus:
     def test_has_valid_shape(self, client):
         resp = client.get("/api/v1/status")
         data = resp.json()
-        assert data["version"] == "1.0.0"
+        assert data["version"] == "3.0.0"
         assert data["status"] == "running"
         assert isinstance(data["active_tasks"], int)
         assert isinstance(data["queued_tasks"], int)
@@ -302,6 +302,26 @@ class TestExtraction:
         resp = client.post(
             "/api/v1/extract",
             json={"url": "https://unsupported-example.com/video"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert "error" in data
+
+
+class TestExtractionArchive:
+    """POST /api/v1/extract/archive 提取并归档 (v2)"""
+
+    def test_missing_url_returns_400(self, client):
+        resp = client.post("/api/v1/extract/archive", json={})
+        assert resp.status_code == 400
+        assert "url" in resp.json()["detail"].lower()
+
+    def test_unsupported_url_returns_error(self, client):
+        """不支持/无内容的 URL 返回 success=False"""
+        resp = client.post(
+            "/api/v1/extract/archive",
+            json={"url": "https://unsupported-example.com/video", "targets": ["local"]},
         )
         assert resp.status_code == 200
         data = resp.json()

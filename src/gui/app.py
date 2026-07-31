@@ -19,7 +19,7 @@ class VideoMindApp(QApplication):
 
         # 设置应用程序属性
         self.setApplicationName("VideoMind Bridge")
-        self.setApplicationVersion("1.0.0")
+        self.setApplicationVersion("3.0.0")
         self.setOrganizationName("VideoMind")
 
         # 设置全局字体

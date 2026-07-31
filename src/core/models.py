@@ -57,7 +57,12 @@ class PlatformInfo:
 
 @dataclass
 class PrescreenResult:
-    """内容预筛结果"""
+    """内容预筛结果
+
+    grade/score: 内容基本面分级 (SEO/时长/营销规则, 向后兼容)
+    cost_grade/recommended_cost_tier/skip_reason: 提取成本决策 (v3)
+        回答"提取这个链接要花多少钱", 而非"内容质量如何"。
+    """
 
     url: str
     platform: str
@@ -67,6 +72,14 @@ class PrescreenResult:
     score: float = 50.0  # 0-100
     reasons: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # 提取成本决策 (v3)
+    cost_grade: ContentGrade | None = None        # 提取成本分级 (S=免费可及, D=不值得提取)
+    recommended_cost_tier: CostTier | None = None  # 推荐提取成本上限
+    skip_reason: str | None = None                # C/D 级时不建议提取的原因
+
+    def effective_cost_grade(self) -> ContentGrade:
+        """获取成本分级 (未设置时回退到基本面分级)"""
+        return self.cost_grade or self.grade
 
 
 @dataclass

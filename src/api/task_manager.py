@@ -9,7 +9,6 @@ import contextlib
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from ..models.task import (
@@ -24,18 +23,9 @@ from ..services.ai_service import AIService
 from ..services.config_manager import get_config_manager
 from ..services.download_service import DownloadService
 from ..services.export_orchestrator import ExportOrchestrator
-from ..services.interfaces import (
-    IAIProvider,
-    IDownloadService,
-    IExportOrchestrator,
-    ITranscribeService,
-)
 from ..services.task_database import get_task_database
 from ..services.transcribe_service import TranscribeService
 from ..utils import get_logger
-
-if TYPE_CHECKING:
-    pass
 
 logger = get_logger(__name__)
 
@@ -67,13 +57,13 @@ class TaskManager:
         self._tasks: dict[UUID, VideoTask] = {}
         self._task_callbacks: dict[UUID, list[Callable]] = {}
 
-        self._download_service: IDownloadService = DownloadService(self.output_dir)
-        self._transcribe_service: ITranscribeService = TranscribeService()
+        self._download_service: DownloadService = DownloadService(self.output_dir)
+        self._transcribe_service: TranscribeService = TranscribeService()
 
         self._config_manager = get_config_manager()
         api_key = self._config_manager.get_api_key()
         if api_key:
-            self._ai_service: IAIProvider = AIService(
+            self._ai_service: AIService = AIService(
                 api_key=api_key,
                 model=self._config_manager.ai.model
             )
@@ -82,7 +72,7 @@ class TaskManager:
             self._ai_service = AIService(mock=True)
             logger.warning("AI服务使用mock模式，未配置API Key")
 
-        self._export_orchestrator: IExportOrchestrator = ExportOrchestrator(
+        self._export_orchestrator: ExportOrchestrator = ExportOrchestrator(
             targets=[ExportTarget.LOCAL],
             config={"local_output_path": self.output_dir}
         )

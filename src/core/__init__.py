@@ -3,12 +3,19 @@
 分层架构:
 - models: 数据模型 (PrescreenResult, ExtractResult, ContentGrade, CostTier)
 - prescreener: 内容预筛引擎
-- prescreen_rules: SEO/时长/营销/原创性规则
+- prescreen_rules: SEO/时长/营销/成本决策规则
 - router: 成本感知路由 (优先级列表遍历)
+- archiver: 提取即归档 (Obsidian/本地/HTML)
 - formatter: Hermes 兼容输出格式化
 - extractors/: 各平台提取器 (基类 + 平台实现)
 """
 
+from .archiver import (
+    ArchiverConfig,
+    SUPPORTED_ARCHIVE_TARGETS,
+    archive_extract_result,
+    build_export_context,
+)
 from .formatter import HermesFormatter
 from .models import (
     ContentGrade,
@@ -31,4 +38,8 @@ __all__ = [
     "ContentRouter",
     "HermesFormatter",
     "Prescreener",
+    "ArchiverConfig",
+    "SUPPORTED_ARCHIVE_TARGETS",
+    "archive_extract_result",
+    "build_export_context",
 ]

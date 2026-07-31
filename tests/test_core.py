@@ -8,9 +8,11 @@
 from src.core.formatter import HermesFormatter
 from src.core.models import ContentGrade, CostTier
 from src.core.prescreen_rules import (
+    apply_cost_rules,
     apply_duration_rules,
     apply_marketing_rules,
     apply_seo_rules,
+    build_skip_reason,
     compute_grade,
     run_all_rules,
 )
@@ -291,10 +293,72 @@ def test_is_extraction_worthwhile():
 
 def test_recommend_cost_tier():
     p = Prescreener(None)
-    assert p.recommend_cost_tier(ContentGrade.S) == "paid"
-    assert p.recommend_cost_tier(ContentGrade.A) == "paid"
-    assert p.recommend_cost_tier(ContentGrade.B) == "free"
-    assert p.recommend_cost_tier(ContentGrade.D) == "free"
+    # 成本决策语义: 免费平台字幕可得 → FREE; 需付费 ASR → PAID
+    assert p.recommend_cost_tier(ContentGrade.S) == "free"
+    assert p.recommend_cost_tier(ContentGrade.A) == "free"
+    assert p.recommend_cost_tier(ContentGrade.B) == "cheap"
+    assert p.recommend_cost_tier(ContentGrade.C) == "paid"
+    assert p.recommend_cost_tier(ContentGrade.D) == "paid"
+
+
+# ============================================================
+# 提取成本决策规则 (v3)
+# ============================================================
+
+def test_cost_rules_bilibili_free():
+    """B站: 零 Cookie + 官方字幕 + 适中时长 → 免费高分级"""
+    grade, reasons = apply_cost_rules("bilibili", 600)
+    assert grade in ("S", "A"), f"B站适中时长预期 S/A, 实际 {grade} ({reasons})"
+
+
+def test_cost_rules_youtube_free():
+    """YouTube: 预期有官方字幕 → 免费"""
+    grade, reasons = apply_cost_rules("youtube", 3600)
+    assert grade in ("S", "A", "B"), f"YouTube预期 S/A/B, 实际 {grade}"
+
+
+def test_cost_rules_unknown_platform_low():
+    """未知平台: 无法直接提取 → 需商业 API 兜底, 低分级"""
+    grade, reasons = apply_cost_rules("unknown", 600)
+    assert grade in ("C", "D"), f"unknown 平台预期 C/D, 实际 {grade} ({reasons})"
+
+
+def test_cost_rules_short_duration_downgrade():
+    """超短内容: 提取性价比低 → 降级"""
+    grade, reasons = apply_cost_rules("bilibili", 10)
+    assert grade in ("B", "C", "D"), f"超短视频预期降级, 实际 {grade}"
+
+
+def test_cost_rules_long_without_subtitle_paid():
+    """超长无字幕平台 (douyin): ASR 成本高 → 需付费"""
+    grade, reasons = apply_cost_rules("douyin", 7200)
+    assert grade in ("B", "C", "D"), f"超长无字幕预期 C/D, 实际 {grade}"
+
+
+def test_cost_rules_skip_reason():
+    """C/D 级应给出 skip_reason, S/A/B 级无"""
+    assert build_skip_reason("S", "bilibili") is None
+    assert build_skip_reason("B", "douyin") is None
+    c_reason = build_skip_reason("C", "douyin")
+    assert c_reason is not None and "付费" in c_reason
+    d_reason = build_skip_reason("D", "unknown")
+    assert d_reason is not None and "跳过" in d_reason
+
+
+def test_prescreen_includes_cost_decision():
+    """prescreen() 应输出成本决策字段 (cost_grade / recommended_cost_tier / skip_reason)"""
+    p = Prescreener(None)
+    result = p.prescreen(
+        "https://www.bilibili.com/video/BV1xx411c7mD",
+        title="Python 入门教程：从零开始掌握编程基础",
+        duration_seconds=600,
+    )
+    assert result.cost_grade is not None
+    assert result.recommended_cost_tier is not None
+    assert result.effective_cost_grade() == result.cost_grade
+    # B站适中时长 → 免费推荐
+    assert result.recommended_cost_tier.value == "free"
+    assert result.skip_reason is None
 
 
 # ============================================================

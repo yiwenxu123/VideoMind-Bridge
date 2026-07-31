@@ -98,7 +98,7 @@ class ConnectionManager:
 class APIServer:
     """API服务器"""
 
-    VERSION = "1.0.0"
+    VERSION = "3.0.0"
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8787
 
@@ -294,6 +294,60 @@ class APIServer:
                     "error": str(e),
                     "url": url,
                 }
+
+        # v2 提取 + 归档 API
+        @app.post("/api/v1/extract/archive")
+        async def extract_and_archive(request: dict):
+            """提取并归档 (v2): 提取全文 → 写入 Obsidian/本地/HTML"""
+            url = request.get("url")
+            if not url:
+                raise HTTPException(status_code=400, detail="url 不能为空")
+            targets = request.get("targets") or ["obsidian", "local"]
+            obsidian_vault = request.get("obsidian_vault")
+            obsidian_subfolder = request.get("obsidian_subfolder", "Inbox/Videos")
+            local_output = request.get("local_output")
+
+            try:
+                from pathlib import Path
+
+                from src.core import ContentRouter, HermesFormatter
+                from src.core.archiver import ArchiverConfig, archive_extract_result
+                from src.core.models import CostTier
+
+                router = ContentRouter()
+                result = router.extract(url, max_cost=CostTier.FREE)
+
+                if not result.success or not result.content.strip():
+                    return {
+                        "success": False,
+                        "url": url,
+                        "error": result.error or "提取失败, 无真实内容",
+                    }
+
+                config = ArchiverConfig(
+                    obsidian_vault_path=Path(obsidian_vault) if obsidian_vault else None,
+                    obsidian_subfolder=obsidian_subfolder,
+                    local_output_path=Path(local_output) if local_output else None,
+                )
+                archive_results = archive_extract_result(result, list(targets), config)
+
+                return {
+                    "success": True,
+                    "url": url,
+                    "extract": HermesFormatter.format_extract_result_full(result),
+                    "archive": [
+                        {
+                            "success": r.success,
+                            "target": r.target.value,
+                            "output_path": str(r.output_path) if r.output_path else None,
+                            "error": r.error_msg,
+                        }
+                        for r in archive_results
+                    ],
+                }
+            except Exception as e:
+                logger.error(f"v2 提取归档失败: {e}")
+                return {"success": False, "url": url, "error": str(e)}
 
         # 提取器 API Key 管理
         @app.get("/api/v1/keys", response_model=KeysListResponse)

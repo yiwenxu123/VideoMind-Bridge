@@ -67,12 +67,20 @@ def make_prescreen_result(
     title: str = "测试视频标题",
     duration_seconds: float = 600.0,
     reasons: list[str] | None = None,
+    cost_grade: str = "B",
+    recommended_cost_tier: str = "cheap",
+    skip_reason: str | None = None,
 ) -> MagicMock:
+    from src.core.models import ContentGrade, CostTier
+
     result = MagicMock()
     result.url = url
     result.platform = platform
-    result.grade = MagicMock()
-    result.grade.value = grade
+    result.grade = ContentGrade(grade)
+    result.cost_grade = ContentGrade(cost_grade)
+    result.recommended_cost_tier = CostTier(recommended_cost_tier)
+    result.skip_reason = skip_reason
+    result.effective_cost_grade.return_value = result.cost_grade
     result.score = score
     result.title = title
     result.duration_seconds = duration_seconds
@@ -134,7 +142,7 @@ class TestProtocolInitialize:
         assert "result" in data
         assert data["result"]["protocolVersion"] == "2025-03-26"
         assert data["result"]["serverInfo"]["name"] == "VideoMind Bridge"
-        assert data["result"]["serverInfo"]["version"] == "1.0.0"
+        assert data["result"]["serverInfo"]["version"] == "3.0.0"
         assert "tools" in data["result"]["capabilities"]
         assert "resources" in data["result"]["capabilities"]
 
@@ -169,11 +177,12 @@ class TestProtocolToolsList:
         expected = [
             "videomind_process", "videomind_download", "videomind_transcribe",
             "videomind_supported", "videomind_config", "configure",
-            "prescreen_video", "smart_extract", "extract_video", "list_extractors",
+            "prescreen_video", "smart_extract", "extract_video",
+            "archive_extract", "list_extractors",
         ]
         for name in expected:
             assert name in tool_names
-        assert len(tools) == 10
+        assert len(tools) == 11
 
     def test_each_tool_has_required_fields(self, server, captured_send):
         server.handle_message({
@@ -407,7 +416,7 @@ class TestCallSmartExtract:
         )
         mock_prescreener = MockPrescreener.return_value
         mock_prescreener.prescreen.return_value = make_prescreen_result(
-            grade="D", score=20.0,
+            grade="D", score=20.0, cost_grade="D", recommended_cost_tier="paid",
         )
         mock_prescreener.is_extraction_worthwhile.return_value = False
 
@@ -472,7 +481,9 @@ class TestCallSmartExtract:
         mock_router = MockContentRouter.return_value
         mock_router.extract.side_effect = [placeholder, success]
         mock_prescreener = MockPrescreener.return_value
-        mock_prescreener.prescreen.return_value = make_prescreen_result(grade="A", score=80.0)
+        mock_prescreener.prescreen.return_value = make_prescreen_result(
+            grade="A", score=80.0, cost_grade="A", recommended_cost_tier="paid",
+        )
         mock_prescreener.is_extraction_worthwhile.return_value = True
         mock_prescreener.recommend_cost_tier.return_value = "paid"
         mock_formatted = {"success": True, "content": "正文内容"}
@@ -488,8 +499,9 @@ class TestCallSmartExtract:
 
         from src.core.models import CostTier
         assert mock_router.extract.call_count == 2
+        # 直接消费 prescreen_result.recommended_cost_tier, 无需再调用方法
         assert mock_router.extract.call_args.kwargs.get("max_cost") == CostTier.PAID
-        assert mock_prescreener.recommend_cost_tier.called
+        assert not mock_prescreener.recommend_cost_tier.called
 
         result = captured_send[0]["result"]
         assert result["extraction_performed"] is True
@@ -601,6 +613,75 @@ class TestCallExtractVideo:
         result = captured_send[0]["result"]
         assert result["success"] is False
         assert "error" in result
+
+
+# ============================================================
+# _call_archive_extract
+# ============================================================
+
+
+class TestCallArchiveExtract:
+
+    @patch(f"{CORE_PATCH}.HermesFormatter")
+    @patch(f"{CORE_PATCH}.ContentRouter")
+    def test_successful_archive(self, MockContentRouter, MockFormatter, server, captured_send):
+        """提取成功后归档到 local, 返回提取+归档结果"""
+        mock_router = MockContentRouter.return_value
+        mock_router.extract.return_value = make_extract_result(
+            title="归档测试", content="这是要归档的内容",
+        )
+        MockFormatter.format_extract_result_full.return_value = {
+            "success": True, "content": "这是要归档的内容", "platform": "bilibili",
+        }
+
+        with patch("src.core.archiver.archive_extract_result") as mock_archive:
+            mock_archive.return_value = [
+                MagicMock(success=True, target=MagicMock(value="local"), output_path=Path("/tmp/out.md"), error_msg=None),
+            ]
+
+            server.handle_message({
+                "jsonrpc": "2.0", "id": 31, "method": "tools/call",
+                "params": {
+                    "name": "archive_extract",
+                    "arguments": {
+                        "url": _MOCK_URL,
+                        "targets": ["local"],
+                        "local_output": "/tmp/out",
+                    },
+                },
+            })
+
+        from src.core.models import CostTier
+        mock_router.extract.assert_called_once_with(_MOCK_URL, max_cost=CostTier.FREE)
+        mock_archive.assert_called_once()
+        result = captured_send[0]["result"]
+        assert result["success"] is True
+        assert result["extract"]["content"] == "这是要归档的内容"
+        assert len(result["archive"]) == 1
+        assert result["archive"][0]["target"] == "local"
+
+    @patch(f"{CORE_PATCH}.HermesFormatter")
+    @patch(f"{CORE_PATCH}.ContentRouter")
+    def test_failed_extract_returns_error(self, MockContentRouter, MockFormatter, server, captured_send):
+        """提取失败 → 返回失败, 不归档"""
+        mock_router = MockContentRouter.return_value
+        mock_router.extract.return_value = make_extract_result(
+            success=False, error="提取失败",
+        )
+
+        with patch("src.core.archiver.archive_extract_result") as mock_archive:
+            server.handle_message({
+                "jsonrpc": "2.0", "id": 31, "method": "tools/call",
+                "params": {
+                    "name": "archive_extract",
+                    "arguments": {"url": _MOCK_URL, "targets": ["local"]},
+                },
+            })
+
+        mock_archive.assert_not_called()
+        result = captured_send[0]["result"]
+        assert result["success"] is False
+        assert "提取失败" in (result.get("error") or "")
 
 
 # ============================================================

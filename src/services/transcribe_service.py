@@ -332,29 +332,3 @@ class TranscribeService:
         """获取可用模型列表"""
         return self.SUPPORTED_MODELS.copy()
 
-
-# 测试代码
-if __name__ == "__main__":
-    def print_progress(status: str, percent: float):
-        print(f"[{percent:5.1f}%] {status}")
-
-    # 测试 tiny 模型速度
-    print("=== 测试 tiny 模型 ===")
-    service = TranscribeService("tiny")
-
-    test_audio = Path("./output/RPA失去王座，微软Playwright MCP重新定义浏览器.m4a")
-    if test_audio.exists():
-        import time
-        start = time.time()
-
-        result = service.transcribe(test_audio, progress_callback=print_progress)
-
-        elapsed = time.time() - start
-        print(f"\n转录完成! 耗时: {elapsed:.1f}秒")
-        print(f"语言: {result.language} ({result.language_probability:.1%})")
-        print(f"片段数: {len(result.segments)}")
-        print("\n前3条转录:")
-        for seg in result.segments[:3]:
-            print(f"[{service._format_time(seg.start)}] {seg.text}")
-    else:
-        print(f"测试音频不存在: {test_audio}")

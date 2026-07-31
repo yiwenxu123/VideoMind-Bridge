@@ -27,7 +27,7 @@ mypy src/ --ignore-missing-imports  # 类型检查
 |-------|------|-----------|
 | Entrypoint | `main.py` | argparse → GUI / API (FastAPI) / MCP |
 | CLI | `src/cli.py` | rich, argparse (v1+v2 dual mode) |
-| v2 Engine | `src/core/` | 6 extractors + router + prescreener + Hermes formatter |
+| v2 Engine | `src/core/` | 6 extractors + router + prescreener + archiver + Hermes formatter |
 | v1 Services | `src/services/` | download, transcribe (faster-whisper), AI, export |
 | API | `src/api/` | FastAPI + WebSocket |
 | MCP | `src/mcp/server.py` | stdio JSON-RPC (Model Context Protocol) |
@@ -75,12 +75,15 @@ Coze 位于优先级首位，使用免费每日积分覆盖全平台。Coze 失�
 
 ### Prescreener (`prescreener.py` + `prescreen_rules.py`)
 
-纯规则引擎（零网络）。评分基准 50/100，范围 0-100。  
-等级阈值: S≥85 / A≥70 / B≥55 / C≥40 / D<40
+两套分级语义:
+1. **内容基本面** (`grade`/`score`): SEO/时长/营销规则，评分基准 50/100，等级阈值 S≥85/A≥70/B≥55/C≥40/D<40
+2. **提取成本决策** (`cost_grade`/`recommended_cost_tier`/`skip_reason`): 回答"提取这个链接要花多少钱"——平台可达性/字幕可得性/时长期望。`recommended_cost_tier` 直接供 router 消费
 
 两条重点:
 1. `prescreen()` 方法**不发起网络请求** — 需要外部传入 title + duration
-2. `is_extraction_worthwhile(grade, min_grade=ContentGrade.C)` — 默认 C 级以上值得提取
+2. `is_extraction_worthwhile(grade, min_grade=ContentGrade.C)` — 默认 C 级以上值得提取；MCP/CLI 基于 `effective_cost_grade()` 判断
+3. `effective_cost_grade()` — 返回成本分级（未设置时回退基本面分级）；`cost_grade` 的 S/A/B → 免费/便宜提取，C/D → 需付费或建议跳过（含 `skip_reason`）
+4. **职责边界**: VMB 不实现内容价值评估（那是 content-value-evaluator 的职责），只做提取成本决策
 
 ### CLI v2 模式 (`src/cli.py` v2 section)
 
@@ -90,7 +93,16 @@ Coze 位于优先级首位，使用免费每日积分覆盖全平台。Coze 失�
 --prescreen-only  # 仅 URL 分析，无网络，默认 B 级
 --cost-tier       # 限制最大提取成本
 --list-extractors # 列出可用提取器
+--archive         # 提取即归档 (obsidian,local,html_player 逗号分隔)
 ```
+
+### Archiver (`archiver.py`)
+
+提取即归档: 把 `ExtractResult` 直接写入 Obsidian/本地/HTML, 无需 v1 下载/转录。
+- `archive_extract_result(result, targets, config)` — 复用 v1 导出器做纯文本归档
+- `build_export_context(result)` — ExtractResult → ExportContext (无媒体文件, 导出器自动降级为纯文本笔记)
+- CLI: `--archive obsidian,local --obsidian-vault <path>`; MCP: `archive_extract` 工具
+- 无真实内容 (占位/失败) 时拒绝归档
 
 ### Hermes Formatter (`formatter.py`)
 

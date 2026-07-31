@@ -2,6 +2,13 @@
 
 纯规则, 无网络请求。每条规则返回 (score_delta: int, reasons: list[str])。
 
+两套规则语义:
+1. 内容基本面 (apply_seo_rules / apply_duration_rules / apply_marketing_rules):
+   评分 0-100, 基准 50, 判断标题/时长/营销信号 (向后兼容)。
+2. 提取成本决策 (apply_cost_rules):
+   回答"提取这个链接要花多少钱" — 平台可达性 / 字幕可得性 / 时长期望。
+   输出成本分级 (S/A/B/C/D) 与推荐成本等级, 供路由直接消费。
+
 评分体系: 基础分 50, 每条规则 +/- 分数, 最终 0-100。
 等级阈值: S≥85, A≥70, B≥55, C≥40, D<40
 """
@@ -9,6 +16,8 @@
 from __future__ import annotations
 
 import re
+
+from .models import CostTier
 
 # ============================================================
 # 平台最佳时长 (秒)
@@ -282,3 +291,127 @@ def run_all_rules(
     all_reasons.insert(0, f"评分 {score:.0f}/100 → {grade} 级 ({grade_desc})")
 
     return score, grade, all_reasons
+
+
+# ============================================================
+# 提取成本决策规则 (v3)
+# 回答: "提取这个链接要花多少钱"
+# ============================================================
+
+# 零 Cookie 提取器覆盖的平台 (免费, 无需凭证)
+_FREE_EXTRACT_PLATFORMS = {"bilibili", "youtube", "douyin", "xiaohongshu"}
+
+# yt-dlp 可及 (免费但需下载/可能无字幕) 的平台
+_FALLBACK_PLATFORMS = {
+    "tiktok", "twitter", "instagram", "weibo", "zhihu",
+    "kuaishou", "vimeo", "facebook", "reddit",
+}
+
+# 预期有官方字幕的平台 (免费提取完整内容)
+_SUBTITLE_PLATFORMS = {"bilibili", "youtube"}
+
+# 仅页面文案可得的平台 (免费但内容有限)
+_PAGE_TEXT_PLATFORMS = {"douyin", "xiaohongshu"}
+
+# 短于该时长: 内容过少, 提取性价比低 (秒)
+_SHORT_DURATION_THRESHOLD = 30
+_SUB_SHORT_DURATION_THRESHOLD = 60
+
+# 超过该时长且无字幕: ASR 成本显著 (秒)
+_LONG_DURATION_THRESHOLD = 3600
+
+# 成本分级 → 推荐提取成本上限
+_COST_TIER_RECOMMENDATION: dict[str, CostTier] = {
+    "S": CostTier.FREE,
+    "A": CostTier.FREE,
+    "B": CostTier.CHEAP,
+    "C": CostTier.PAID,
+    "D": CostTier.PAID,
+}
+
+
+def apply_cost_rules(
+    platform: str,
+    duration_seconds: float,
+) -> tuple[str, list[str]]:
+    """计算提取成本分级 (纯规则, 零网络)
+
+    成本评分基准 50, 依据:
+      - 平台可达性: 零 Cookie 平台加分, unknown/罕见平台减分
+      - 字幕/内容可得性: 有官方字幕 → 免费完整内容; 仅页面文案 → 内容有限
+      - 时长期望: 过短不值得提取, 超长无字幕 ASR 成本高
+
+    Returns:
+        (cost_grade, reasons): 成本分级 (S/A/B/C/D) 与决策理由
+    """
+    reasons: list[str] = []
+    cost_score = 50.0
+
+    # 1. 平台可达性
+    if platform in _FREE_EXTRACT_PLATFORMS:
+        cost_score += 15
+        reasons.append(f"平台 {platform}: 零 Cookie 免费提取")
+    elif platform in _FALLBACK_PLATFORMS:
+        cost_score += 5
+        reasons.append(f"平台 {platform}: 需 yt-dlp 兜底 (可能无字幕)")
+    else:
+        cost_score -= 15
+        reasons.append(f"平台 {platform}: 无法直接提取, 需商业 API 兜底")
+
+    # 2. 字幕/内容可得性
+    if platform in _SUBTITLE_PLATFORMS:
+        cost_score += 10
+        reasons.append(f"平台 {platform}: 预期有官方字幕 (免费完整内容)")
+    elif platform in _PAGE_TEXT_PLATFORMS:
+        cost_score += 5
+        reasons.append(f"平台 {platform}: 可获取页面文案 (免费但内容有限)")
+    else:
+        reasons.append(f"平台 {platform}: 无官方字幕, 完整内容需付费 ASR")
+
+    # 3. 时长期望
+    if duration_seconds <= 0:
+        reasons.append("时长未知, 无法精确评估成本")
+    elif duration_seconds < _SHORT_DURATION_THRESHOLD:
+        cost_score -= 15
+        reasons.append(f"内容过短 (<{_SHORT_DURATION_THRESHOLD}s), 提取性价比低")
+    elif duration_seconds < _SUB_SHORT_DURATION_THRESHOLD:
+        cost_score -= 5
+        reasons.append(f"内容较短 (<{_SUB_SHORT_DURATION_THRESHOLD}s), 提取价值有限")
+    elif duration_seconds <= _LONG_DURATION_THRESHOLD:
+        cost_score += 10
+        reasons.append(f"时长适中 ({int(duration_seconds / 60)} 分钟), 提取性价比高")
+    else:
+        if platform in _SUBTITLE_PLATFORMS:
+            cost_score += 5
+            reasons.append("超长视频但有官方字幕, 免费可提取")
+        else:
+            cost_score -= 10
+            reasons.append("超长视频且无字幕, 付费 ASR 成本高")
+
+    # 截断 0-100
+    cost_score = max(0.0, min(100.0, cost_score))
+    cost_grade, _ = compute_grade(cost_score)
+
+    reasons.insert(0, f"提取成本评分 {cost_score:.0f}/100 → {cost_grade} 级")
+
+    return cost_grade, reasons
+
+
+def cost_tier_for_grade(cost_grade: str) -> CostTier:
+    """成本分级 → 推荐提取成本上限"""
+    return _COST_TIER_RECOMMENDATION.get(cost_grade, CostTier.PAID)
+
+
+def build_skip_reason(cost_grade: str, platform: str) -> str | None:
+    """C/D 级时给出不建议提取的原因"""
+    if cost_grade in ("S", "A", "B"):
+        return None
+    if cost_grade == "D":
+        return (
+            f"提取成本分级 D 级: 平台 {platform} 提取性价比低, "
+            "建议跳过或人工确认"
+        )
+    return (
+        f"提取成本分级 C 级: 平台 {platform} 需付费通道才能获取完整内容, "
+        "请确认内容价值后再提取"
+    )

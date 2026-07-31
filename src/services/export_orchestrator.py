@@ -130,32 +130,3 @@ class ExportOrchestrator:
             return ExportTarget.WEBHOOK
         return ExportTarget.LOCAL
 
-
-# 测试代码
-if __name__ == "__main__":
-    from pathlib import Path
-    from uuid import uuid4
-
-    from ..models.task import ExportContext, VideoMetadata
-
-    # 创建测试上下文
-    context = ExportContext(
-        task_id=uuid4(),
-        video_metadata=VideoMetadata(
-            title="测试视频",
-            author="测试作者",
-            duration=120,
-            platform="bilibili",
-            url="https://test.com"
-        ),
-        transcript_text="这是测试转录内容",
-        ai_summary="这是测试摘要"
-    )
-
-    # 测试编排器
-    orchestrator = ExportOrchestrator(
-        targets=[ExportTarget.LOCAL],
-        config={"local_output_path": Path("./test_export")}
-    )
-
-    print(f"加载了 {len(orchestrator.exporters)} 个 exporter")

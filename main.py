@@ -83,7 +83,7 @@ def main() -> int:
     parser.add_argument(
         "--version",
         action="version",
-        version="VideoMind Bridge 1.0.0"
+        version="VideoMind Bridge 3.0.0"
     )
 
     args = parser.parse_args()

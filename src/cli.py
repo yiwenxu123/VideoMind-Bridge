@@ -91,6 +91,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help="Obsidian Vault 路径 (用于导出到 Obsidian)"
     )
+    parser.add_argument(
+        "--obsidian-subfolder",
+        default="Inbox/Videos",
+        help="Obsidian 子文件夹 (默认: Inbox/Videos)"
+    )
+    parser.add_argument(
+        "--archive",
+        default=None,
+        help="提取即归档目标，逗号分隔 (可选: obsidian,local,html_player)。示例: --archive obsidian,local"
+    )
 
     # 新增视频控制参数
     parser.add_argument(
@@ -241,20 +251,29 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
     # --prescreen-only: 仅预筛 (快速模式, 无网络)
     if args.prescreen_only:
         ps_result = prescreener.prescreen_quick(url)
+        cost_grade = ps_result.effective_cost_grade()
         if use_json:
             print(json.dumps({
                 "url": ps_result.url,
                 "platform": ps_result.platform,
                 "grade": ps_result.grade.value,
+                "cost_grade": cost_grade.value,
                 "score": ps_result.score,
                 "reasons": ps_result.reasons,
+                "recommended_cost_tier": ps_result.recommended_cost_tier.value if ps_result.recommended_cost_tier else None,
+                "skip_reason": ps_result.skip_reason,
                 "note": "快速预筛 — 执行 --prescreen 获取完整评分",
             }, ensure_ascii=False, indent=2))
         else:
             grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
-            color = grade_color.get(ps_result.grade.value, "white")
-            console.print(f"  [bold]预筛结果:[/bold] [{color}]{ps_result.grade.value} 级[/{color}]")
+            color = grade_color.get(cost_grade.value, "white")
+            console.print(f"  [bold]预筛(成本):[/bold] [{color}]{cost_grade.value} 级[/{color}] "
+                          f"(基本面 {ps_result.grade.value} 级)")
             console.print(f"  平台: {ps_result.platform}")
+            if ps_result.recommended_cost_tier:
+                console.print(f"  推荐成本: {ps_result.recommended_cost_tier.value}")
+            if ps_result.skip_reason:
+                console.print(f"  [yellow]⚠ {ps_result.skip_reason}[/yellow]")
             if ps_result.platform == "unknown":
                 console.print("  [yellow]⚠ 未识别的平台 — 可能无法正常提取内容[/yellow]")
             for reason in ps_result.reasons:
@@ -280,15 +299,18 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
             else:
                 prescreen_result = prescreener.prescreen_quick(url)
 
-            is_worth = prescreener.is_extraction_worthwhile(prescreen_result.grade, ContentGrade.C)
+            cost_grade = prescreen_result.effective_cost_grade()
+            is_worth = prescreener.is_extraction_worthwhile(cost_grade, ContentGrade.C)
             prescreen_meta = {
                 "url": prescreen_result.url,
                 "platform": prescreen_result.platform,
                 "title": prescreen_result.title,
                 "duration_seconds": prescreen_result.duration_seconds,
                 "grade": prescreen_result.grade.value,
+                "cost_grade": cost_grade.value,
                 "score": prescreen_result.score,
                 "reasons": prescreen_result.reasons,
+                "recommended_cost_tier": prescreen_result.recommended_cost_tier.value if prescreen_result.recommended_cost_tier else None,
                 "extraction_recommended": is_worth,
                 "extraction_skipped": False,
                 "extract_result": quick_result,  # 缓存提取结果, 避免重复提取
@@ -296,31 +318,34 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
 
             if not use_json:
                 grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
-                color = grade_color.get(prescreen_result.grade.value, "white")
-                console.print(f"  [bold]预筛:[/bold] [{color}]{prescreen_result.grade.value} 级 ({prescreen_result.score:.0f}/100)[/{color}]")
-                for reason in prescreen_result.reasons[:5]:
+                color = grade_color.get(cost_grade.value, "white")
+                console.print(f"  [bold]预筛(成本):[/bold] [{color}]{cost_grade.value} 级[/{color}] "
+                              f"(基本面 {prescreen_result.grade.value} 级, {prescreen_result.score:.0f}/100)")
+                for reason in (prescreen_result.reasons[:3] + prescreen_result.metadata.get("cost_reasons", [])[:3]):
                     console.print(f"  [dim]• {reason}[/dim]")
 
             # 跳过不通过视频
             if not is_worth:
                 prescreen_meta["extraction_skipped"] = True
-                prescreen_meta["skip_reason"] = f"预筛 {prescreen_result.grade.value} 级, 低于提取阈值 C 级"
+                prescreen_meta["skip_reason"] = (
+                    prescreen_result.skip_reason
+                    or f"成本分级 {cost_grade.value} 级, 低于提取阈值 C 级"
+                )
                 # extract_result 是 ExtractResult 对象, 需转 dict 或移除
                 prescreen_meta.pop("extract_result", None)
                 if use_json:
                     print(json.dumps(prescreen_meta, ensure_ascii=False, indent=2))
                 else:
-                    console.print(f"[yellow]⏭ 跳过提取: {prescreen_result.grade.value} 级低于 C 级阈值[/yellow]")
+                    console.print(f"[yellow]⏭ 跳过提取: 成本分级 {cost_grade.value} 级低于 C 级阈值[/yellow]")
                     console.print(f"  [dim]{prescreen_meta['skip_reason']}[/dim]")
                     console.print("  [dim]提示: 使用 --prescreen 强制提取（跳过预筛判断）[/dim]")
                 return 0
 
-            # 根据等级推荐成本
-            recommended = prescreener.recommend_cost_tier(prescreen_result.grade)
-            if max_cost is None:
-                max_cost = cost_map.get(recommended, CostTier.FREE)
+            # 推荐提取成本 (来自成本分级决策)
+            if max_cost is None and prescreen_result.recommended_cost_tier is not None:
+                max_cost = prescreen_result.recommended_cost_tier
                 if not use_json:
-                    console.print(f"  推荐成本: [cyan]{recommended}[/cyan]")
+                    console.print(f"  推荐成本: [cyan]{max_cost.value}[/cyan]")
         else:
             # --prescreen 模式: 提取一次, 用提取结果做预筛评分
             max_cost_info = max_cost or CostTier.CHEAP
@@ -331,14 +356,18 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
                 duration_seconds=prescreen_extract.duration_seconds if prescreen_extract.success else 0.0,
             )
 
+            cost_grade = prescreen_result.effective_cost_grade()
             prescreen_meta = {
                 "url": prescreen_result.url,
                 "platform": prescreen_result.platform,
                 "title": prescreen_result.title,
                 "duration_seconds": prescreen_result.duration_seconds,
                 "grade": prescreen_result.grade.value,
+                "cost_grade": cost_grade.value,
                 "score": prescreen_result.score,
                 "reasons": prescreen_result.reasons,
+                "recommended_cost_tier": prescreen_result.recommended_cost_tier.value if prescreen_result.recommended_cost_tier else None,
+                "skip_reason": prescreen_result.skip_reason,
                 "extraction_recommended": True,
             }
 
@@ -352,9 +381,10 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
 
             if not use_json:
                 grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
-                color = grade_color.get(prescreen_result.grade.value, "white")
-                console.print(f"  [bold]预筛:[/bold] [{color}]{prescreen_result.grade.value} 级 ({prescreen_result.score:.0f}/100)[/{color}]")
-                for reason in prescreen_result.reasons[:5]:
+                color = grade_color.get(cost_grade.value, "white")
+                console.print(f"  [bold]预筛(成本):[/bold] [{color}]{cost_grade.value} 级[/{color}] "
+                              f"(基本面 {prescreen_result.grade.value} 级, {prescreen_result.score:.0f}/100)")
+                for reason in (prescreen_result.reasons[:3] + prescreen_result.metadata.get("cost_reasons", [])[:3]):
                     console.print(f"  [dim]• {reason}[/dim]")
 
     # 提取内容 (复用 --prescreen 的结果, 避免重复提取)
@@ -371,6 +401,24 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
         output = HermesFormatter.format_extract_result_full(result)
         if prescreen_meta:
             output["prescreen"] = prescreen_meta
+        if args.archive and result.success and result.content.strip():
+            from src.core.archiver import ArchiverConfig, archive_extract_result
+            archive_targets = [t.strip() for t in args.archive.split(",") if t.strip()]
+            archiver_config = ArchiverConfig(
+                obsidian_vault_path=Path(args.obsidian_vault) if args.obsidian_vault else None,
+                obsidian_subfolder=args.obsidian_subfolder,
+                local_output_path=Path(args.output_dir),
+            )
+            archive_results = archive_extract_result(result, archive_targets, archiver_config)
+            output["archive"] = [
+                {
+                    "success": r.success,
+                    "target": r.target.value,
+                    "output_path": str(r.output_path) if r.output_path else None,
+                    "error": r.error_msg,
+                }
+                for r in archive_results
+            ]
         print(json.dumps(output, ensure_ascii=False, indent=2))
     else:
         if result.success:
@@ -388,6 +436,21 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
                 console.print(f"  时长: {format_duration(result.duration_seconds)}")
             preview = result.content[:200] + "..." if len(result.content) > 200 else result.content
             console.print(f"\n[dim]{preview}[/dim]")
+
+            if args.archive and result.content.strip():
+                from src.core.archiver import ArchiverConfig, archive_extract_result
+                archive_targets = [t.strip() for t in args.archive.split(",") if t.strip()]
+                archiver_config = ArchiverConfig(
+                    obsidian_vault_path=Path(args.obsidian_vault) if args.obsidian_vault else None,
+                    obsidian_subfolder=args.obsidian_subfolder,
+                    local_output_path=Path(args.output_dir),
+                )
+                console.print("\n[cyan]归档中...[/cyan]")
+                for r in archive_extract_result(result, archive_targets, archiver_config):
+                    if r.success:
+                        console.print(f"  [green]✓[/green] {r.target.value}: {r.output_path}")
+                    else:
+                        console.print(f"  [red]✗[/red] {r.target.value}: {r.error_msg}")
         else:
             console.print(f"[red]✗ 提取失败: {result.error}[/red]")
             return 1

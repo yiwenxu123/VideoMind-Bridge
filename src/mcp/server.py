@@ -88,7 +88,7 @@ class MCPServer:
             },
             "serverInfo": {
                 "name": "VideoMind Bridge",
-                "version": "1.0.0",
+                "version": "3.0.0",
             },
         })
 
@@ -97,7 +97,7 @@ class MCPServer:
             "tools": [
                 {
                     "name": "videomind_process",
-                    "description": "完整处理视频：下载→转录→AI摘要→导出",
+                    "description": "[DEPRECATED] 完整处理视频：下载→转录→AI摘要→导出 (v1 扩展模式, 推荐使用 smart_extract + archive_extract)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -127,7 +127,7 @@ class MCPServer:
                 },
                 {
                     "name": "videomind_download",
-                    "description": "仅下载视频/音频",
+                    "description": "[DEPRECATED] 仅下载视频/音频 (v1 扩展模式)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -143,7 +143,7 @@ class MCPServer:
                 },
                 {
                     "name": "videomind_transcribe",
-                    "description": "仅转录音频生成 SRT 字幕",
+                    "description": "[DEPRECATED] 仅转录音频生成 SRT 字幕 (v1 扩展模式)",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -219,6 +219,25 @@ class MCPServer:
                     },
                 },
                 {
+                    "name": "archive_extract",
+                    "description": "提取并归档: 一条命令完成「提取全文 → 写入 Obsidian/本地」。无需下载视频/音频, 直接生成带时间轴的 Markdown 笔记。",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "视频/内容链接"},
+                            "targets": {
+                                "type": "array",
+                                "items": {"type": "string", "enum": ["obsidian", "local", "html_player"]},
+                                "description": "归档目标 (默认 [\"obsidian\", \"local\"])",
+                            },
+                            "obsidian_vault": {"type": "string", "description": "Obsidian Vault 路径 (归档到 obsidian 时必填)"},
+                            "obsidian_subfolder": {"type": "string", "description": "Obsidian 子文件夹 (默认 Inbox/Videos)"},
+                            "local_output": {"type": "string", "description": "本地输出目录 (归档到 local 时使用)"},
+                        },
+                        "required": ["url"],
+                    },
+                },
+                {
                     "name": "list_extractors",
                     "description": "列出所有可用的内容提取器及其状态、优先级、成本等级",
                     "inputSchema": {
@@ -274,6 +293,7 @@ class MCPServer:
             "prescreen_video": self._call_prescreen_video,
             "smart_extract": self._call_smart_extract,
             "extract_video": self._call_extract_video,
+            "archive_extract": self._call_archive_extract,
             "list_extractors": self._call_list_extractors,
         }.get(name)
 
@@ -515,14 +535,18 @@ class MCPServer:
         else:
             result = prescreener.prescreen_quick(url)
 
+        cost_grade = result.effective_cost_grade()
         return {
             "url": result.url,
             "platform": result.platform,
             "grade": result.grade.value,
+            "cost_grade": cost_grade.value,
             "score": round(result.score, 1),
             "title": result.title,
             "duration_seconds": result.duration_seconds,
             "reasons": result.reasons,
+            "recommended_cost_tier": result.recommended_cost_tier.value if result.recommended_cost_tier else None,
+            "skip_reason": result.skip_reason,
             "metadata": result.metadata,
         }
 
@@ -559,8 +583,9 @@ class MCPServer:
         else:
             prescreen_result = prescreener.prescreen_quick(url)
 
-        # 2. 判断是否值得提取
-        is_worth = prescreener.is_extraction_worthwhile(prescreen_result.grade, min_grade)
+        # 2. 判断是否值得提取 (基于成本分级)
+        cost_grade = prescreen_result.effective_cost_grade()
+        is_worth = prescreener.is_extraction_worthwhile(cost_grade, min_grade)
 
         # 3. 提取 (如值得)
         extract_output = None
@@ -571,8 +596,10 @@ class MCPServer:
             else:
                 # FREE 失败/仅占位时, 按推荐成本二次提取 (缓存中无成功结果, 不会命中)
                 if max_cost is None:
-                    recommended = prescreener.recommend_cost_tier(prescreen_result.grade)
-                    max_cost = cost_map.get(recommended, CostTier.FREE)
+                    max_cost = (
+                        prescreen_result.recommended_cost_tier
+                        or cost_map.get(prescreener.recommend_cost_tier(cost_grade), CostTier.FREE)
+                    )
                 extract_result = router.extract(url, max_cost=max_cost)
             if extract_result.success and extract_result.content.strip() and not extract_result.is_placeholder:
                 extract_output = HermesFormatter.format_extract_result_full(extract_result)
@@ -583,13 +610,18 @@ class MCPServer:
             "url": url,
             "prescreen": {
                 "grade": prescreen_result.grade.value,
+                "cost_grade": cost_grade.value,
                 "score": round(prescreen_result.score, 1),
                 "reasons": prescreen_result.reasons,
+                "recommended_cost_tier": prescreen_result.recommended_cost_tier.value if prescreen_result.recommended_cost_tier else None,
                 "extraction_recommended": is_worth,
             },
             "extraction_performed": is_worth,
             "extraction_skipped": not is_worth,
-            "skip_reason": f"预筛 {prescreen_result.grade.value} 级, 低于 {min_grade_str} 级阈值" if not is_worth else None,
+            "skip_reason": (
+                prescreen_result.skip_reason
+                or (f"成本分级 {cost_grade.value} 级, 低于 {min_grade_str} 级阈值" if not is_worth else None)
+            ),
             "result": extract_output,
         }
 
@@ -610,6 +642,53 @@ class MCPServer:
         router = ContentRouter()
         result = router.extract(url, max_cost=max_cost)
         return HermesFormatter.format_extract_result_full(result)
+
+    def _call_archive_extract(self, args: dict) -> dict:
+        """提取并归档: 一条命令完成「提取全文 → 写入 Obsidian/本地」"""
+        url = args["url"]
+        targets = args.get("targets") or ["obsidian", "local"]
+        obsidian_vault = args.get("obsidian_vault")
+        obsidian_subfolder = args.get("obsidian_subfolder", "Inbox/Videos")
+        local_output = args.get("local_output")
+
+        from pathlib import Path
+
+        from src.core import ContentRouter, HermesFormatter
+        from src.core.archiver import ArchiverConfig, archive_extract_result
+        from src.core.models import CostTier
+
+        router = ContentRouter()
+        result = router.extract(url, max_cost=CostTier.FREE)
+
+        if not result.success or not result.content.strip():
+            return {
+                "success": False,
+                "url": url,
+                "error": result.error or "提取失败, 无真实内容",
+            }
+
+        config = ArchiverConfig(
+            obsidian_vault_path=Path(obsidian_vault) if obsidian_vault else None,
+            obsidian_subfolder=obsidian_subfolder,
+            local_output_path=Path(local_output) if local_output else None,
+        )
+
+        archive_results = archive_extract_result(result, list(targets), config)
+
+        return {
+            "success": True,
+            "url": url,
+            "extract": HermesFormatter.format_extract_result_full(result),
+            "archive": [
+                {
+                    "success": r.success,
+                    "target": r.target.value,
+                    "output_path": str(r.output_path) if r.output_path else None,
+                    "error": r.error_msg,
+                }
+                for r in archive_results
+            ],
+        }
 
     def _call_list_extractors(self, _args: dict) -> dict:
         from src.core import ContentRouter
