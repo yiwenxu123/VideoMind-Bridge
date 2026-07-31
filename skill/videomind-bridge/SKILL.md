@@ -1,32 +1,33 @@
 ---
 name: videomind-bridge
 description: |
-  视频知识提取工具 - 支持 v1 (下载+转录+AI摘要) 和 v2 (多引擎提取+内容预筛+智能路由)。
+  视频知识提取工具 - v3 (提取成本决策 + 多引擎提取 + 提取即归档)。
   
-  触发词："视频处理", "视频提取", "视频转文字", "视频摘要", "视频预筛", "内容评估", "视频笔记", "video extract", "video transcript", "video summary", "B站提取", "YouTube 转录", "内容提取"
+  触发词："视频处理", "视频提取", "视频转文字", "视频摘要", "视频预筛", "内容评估", "视频笔记", "video extract", "video transcript", "video summary", "B站提取", "YouTube 转录", "内容提取", "视频归档", "归档到Obsidian"
   
   触发场景：
   - 用户提供视频链接并希望获取文字内容
-  - 用户需要评估视频内容价值（预筛）
+  - 用户需要评估提取成本（预筛 cost_grade）
   - 用户需要提取视频字幕/文本
+  - 用户需要将视频内容归档到 Obsidian/本地
   - 用户需要下载视频或转录音频
-  - 用户需要将视频知识导出到 Obsidian
   
   不触发：
   - 纯文本摘要（不涉及视频）
   - 图片处理
   - 音频编辑（非转录）
+  - 深度内容价值评估（交给 content-value-evaluator skill）
   
-  输出：结构化视频内容（提取文本、预筛评分、字幕、摘要、导出文件路径）
-version: 2.0.0
+  输出：结构化视频内容（提取文本、成本分级、字幕、归档文件路径）
+version: 3.0.0
 user-invocable: true
-metadata: {"openclaw":{"requires":{"bins":["uv","yt-dlp"],"anyBins":["ffmpeg"],"env":["DEEPSEEK_API_KEY"]},"primaryEnv":"DEEPSEEK_API_KEY","emoji":"🎬","os":["darwin","linux"],"install":[{"id":"uv","kind":"brew","formula":"uv","bins":["uv"],"label":"Install uv (brew)"},{"id":"yt-dlp","kind":"brew","formula":"yt-dlp","bins":["yt-dlp"],"label":"Install yt-dlp (brew)"},{"id":"ffmpeg","kind":"brew","formula":"ffmpeg","bins":["ffmpeg"],"label":"Install ffmpeg (brew, 可选)"}]},"author":"VideoMind","category":"productivity","tags":["video","transcription","extraction","prescreen","ai-summary","mcp"]}
+metadata: {"openclaw":{"requires":{"bins":["uv","yt-dlp"],"anyBins":["ffmpeg"],"env":["DEEPSEEK_API_KEY"]},"primaryEnv":"DEEPSEEK_API_KEY","emoji":"🎬","os":["darwin","linux"],"install":[{"id":"uv","kind":"brew","formula":"uv","bins":["uv"],"label":"Install uv (brew)"},{"id":"yt-dlp","kind":"brew","formula":"yt-dlp","bins":["yt-dlp"],"label":"Install yt-dlp (brew)"},{"id":"ffmpeg","kind":"brew","formula":"ffmpeg","bins":["ffmpeg"],"label":"Install ffmpeg (brew, 可选)"}]},"author":"VideoMind","category":"productivity","tags":["video","transcription","extraction","prescreen","ai-summary","archive","mcp"]}
 ---
-# VideoMind Bridge v2 - 视频内容提取 + 预筛工具
+# VideoMind Bridge v3 - 视频内容提取 + 成本决策 + 归档工具
 
-双引擎设计:
-- **v1 (Legacy)**: 下载 → 转录 (Whisper) → AI摘要 → 导出
-- **v2 (Engine)**: 多引擎提取 (B站/YouTube/抖音/小红书) → 内容预筛 → 成本感知路由 → 结构化输出
+主链 (v2 Engine):
+- **提取成本决策** → **多引擎提取** (B站/YouTube/抖音/小红书) → **结构化输出** → **提取即归档**
+- 职责边界: VMB 只做采集与成本决策; 深度价值评估交给 content-value-evaluator
 
 ## Instructions
 
@@ -107,6 +108,16 @@ uv run python -m src.cli "URL" --cost-tier premium --json
 uv run python -m src.cli --list-extractors
 ```
 
+**模式 F: 提取即归档 (一条命令入库)**
+
+```bash
+# 提取全文 → 写入 Obsidian + 本地
+uv run python -m src.cli "URL" --archive obsidian,local --obsidian-vault /path/to/vault --json
+
+# 仅归档到本地
+uv run python -m src.cli "URL" --archive local --json
+```
+
 ### 步骤 4: v1 处理模式 (视频下载 + 转录 + 摘要)
 
 当需要完整处理（含 AI 摘要和文件导出）时使用:
@@ -150,6 +161,12 @@ MCP Server 提供工具，Agent 可直接调用:
   "args": { "url": "https://...", "cost_tier": "free" }
 }
 
+// 提取并归档 (写入 Obsidian/本地)
+{
+  "tool": "archive_extract",
+  "args": { "url": "https://...", "targets": ["obsidian", "local"], "obsidian_vault": "/path/to/vault" }
+}
+
 // 列出提取器
 {
   "tool": "list_extractors"
@@ -163,19 +180,24 @@ MCP Server 提供工具，Agent 可直接调用:
 ```json
 {
   "grade": "B",
+  "cost_grade": "A",
   "score": 72.5,
   "platform": "bilibili",
-  "reasons": ["已识别内容价值", "标题无SEO倾向"],
-  "extraction_recommended": true
+  "reasons": ["评分 72/100 → A 级", "平台 bilibili: 零 Cookie 免费提取", "平台 bilibili: 预期有官方字幕 (免费完整内容)"],
+  "recommended_cost_tier": "free",
+  "skip_reason": null
 }
 ```
 
-等级含义:
-- **S** (85+): 必须提取 — 高价值内容
-- **A** (70+): 建议提取
-- **B** (55+): 值得提取
-- **C** (40+): 低优先级
-- **D** (<40): 不值得提取
+两套分级含义 (注意区分):
+- **grade** (内容基本面, 兼容保留): SEO/时长/营销规则评分
+- **cost_grade** (提取成本决策, v3 主用): 回答"提取要花多少钱"
+  - **S/A**: 免费可及 (零 Cookie + 官方字幕) → 推荐 `free`
+  - **B**: 免费但内容有限 → 推荐 `cheap` (Coze 免费积分)
+  - **C**: 需付费通道 (无字幕需 ASR) → 推荐 `paid`
+  - **D**: 提取性价比低 → `skip_reason` 说明, 建议跳过
+- **recommended_cost_tier**: 直接作为 router 的 `max_cost` 输入
+- 深度内容价值评估**不在此处** — 交给 content-value-evaluator skill
 
 **提取结果 (extract_video):**
 
@@ -211,12 +233,13 @@ MCP Server 提供工具，Agent 可直接调用:
 }
 ```
 
+`prescreen` 内含 `cost_grade`（成本分级）与 `recommended_cost_tier`（推荐成本），Agent 可直接据此决策是否升级提取成本。
+
 ### 步骤 7: 向用户呈现 v2 结果
 
 ```
 📹 视频标题 (bilibili | 12分30秒)
-📊 预筛等级: A级 (78/100)
-🔍 提取方式: bilibili_api (免费)
+📊 成本分级: A级 (推荐免费提取)
 📝 内容预览: [前200字...]
 ```
 
