@@ -20,8 +20,8 @@ class Defaults:
     # 输出目录
     OUTPUT_DIR = Path.home() / "Downloads" / "VideoMind"
 
-    # Obsidian 默认子文件夹
-    OBSIDIAN_SUBFOLDER = "00 Inbox/Videos"
+    # Obsidian 默认子文件夹 (与 models/config.py ExportConfig.obsidian.subfolder 默认值一致)
+    OBSIDIAN_SUBFOLDER = "Inbox/Videos"
 
     # 处理模式
     PROCESSING_MODE = "full"  # download_only, transcribe_only, full
@@ -159,11 +159,11 @@ class ConfigMaps:
         "en_US": "English"
     })
 
-    # 组织方式映射
+    # 组织方式映射 (与 local_exporter 支持的 organize_by 对齐)
     ORGANIZE = BidirectionalMap({
         "date": "按日期",
-        "source": "按来源",
-        "none": "不组织"
+        "title": "按标题",
+        "flat": "不组织"
     })
 
     # 视频质量映射
@@ -174,16 +174,3 @@ class ConfigMaps:
         "480p": "480p",
         "worst": "最低质量"
     })
-
-
-# Backward compatibility re-exports — GUI-specific constants moved to src/gui/constants.py
-from src.gui.constants import (  # noqa: F401
-    ButtonConfig,
-    DatabaseConfig,
-    DialogConfig,
-    HistoryConfig,
-    Icons,
-    SliderConfig,
-    SpinBoxConfig,
-    UIConfig,
-)

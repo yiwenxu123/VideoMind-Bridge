@@ -55,6 +55,29 @@ class MCPServer:
             "result": result,
         })
 
+    def _send_tool_result(self, req_id: Any, result: dict):
+        """工具调用成功响应 (MCP CallToolResult 规范: content 数组 + isError)"""
+        self._send({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                **result,  # 平铺兼容字段, 便于旧客户端直接读取
+                "content": [{"type": "text", "text": json.dumps(result, ensure_ascii=False)}],
+                "isError": False,
+            },
+        })
+
+    def _send_tool_error(self, req_id: Any, message: str):
+        """工具调用失败响应 (MCP 规范: 返回 isError:true 的 result, 而非 JSON-RPC error)"""
+        self._send({
+            "jsonrpc": "2.0",
+            "id": req_id,
+            "result": {
+                "content": [{"type": "text", "text": message}],
+                "isError": True,
+            },
+        })
+
     def _handle_initialize(self, req_id: Any):
         self._initialized = True
         self._send_result(req_id, {
@@ -143,47 +166,16 @@ class MCPServer:
                     },
                 },
                 {
-                    "name": "videomind_config",
-                    "description": "获取当前系统配置信息",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {},
-                    },
-                },
-                {
-                    "name": "configure",
-                    "description": "获取/设置 VideoMind 配置 (API Keys 等)",
+                    "name": "extract_video",
+                    "description": "提取视频/内容的文字内容。智能路由: Coze(优先,免费积分)→平台API→yt-dlp+ASR, 自动降级。返回标题+正文+来源。",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "action": {
+                            "url": {"type": "string", "description": "视频/内容链接，支持抖音/B站/小红书/YouTube"},
+                            "cost_tier": {
                                 "type": "string",
-                                "enum": ["get", "set"],
-                                "description": "get = 读取当前配置; set = 设置配置项",
-                            },
-                            "key": {
-                                "type": "string",
-                                "description": "配置键名 (set 模式必填, 可选值: coze / tikhub / apify / aliyun_access_key_id / aliyun_access_key_secret / aliyun_appkey)",
-                            },
-                            "value": {
-                                "type": "string",
-                                "description": "配置值 (set 模式必填)",
-                            },
-                        },
-                        "required": ["action"],
-                    },
-                },
-                {
-                    "name": "prescreen_video",
-                    "description": "预筛视频内容质量 (纯规则引擎, 零网络)",
-                    "inputSchema": {
-                        "type": "object",
-                        "properties": {
-                            "url": {"type": "string", "description": "视频/内容链接"},
-                            "mode": {
-                                "type": "string",
-                                "enum": ["quick", "full"],
-                                "description": "quick = 仅URL分析(<2ms, 默认); full = 先FREE提取元信息再完整评分(<10s)",
+                                "enum": ["free", "cheap", "paid", "expensive", "premium"],
+                                "description": "最大可接受成本等级 (默认 cheap, 允许使用 Coze 免费积分)",
                             },
                         },
                         "required": ["url"],
@@ -191,7 +183,7 @@ class MCPServer:
                 },
                 {
                     "name": "smart_extract",
-                    "description": "智能提取: 预筛 → 评分 → 自动决策 → 按需提取 (一步完成)",
+                    "description": "智能提取: 先预筛内容质量(规则引擎)，再按等级自动决定是否值得提取。低于C级自动跳过避免浪费配额。适合批量处理前的快速决策。",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -199,28 +191,28 @@ class MCPServer:
                             "max_cost": {
                                 "type": "string",
                                 "enum": ["free", "cheap", "paid", "expensive", "premium"],
-                                "description": "最大可接受成本等级 (默认: 根据预筛等级自动推荐)",
+                                "description": "最大成本等级 (默认: 根据预筛等级自动推荐)",
                             },
                             "min_grade": {
                                 "type": "string",
                                 "enum": ["S", "A", "B", "C", "D"],
-                                "description": "最低可接受预筛等级 (默认: C, C级以下跳过提取)",
+                                "description": "最低可接受等级 (默认 C)",
                             },
                         },
                         "required": ["url"],
                     },
                 },
                 {
-                    "name": "extract_video",
-                    "description": "提取视频文字内容 (v2 引擎, 多提取器自动降级)",
+                    "name": "prescreen_video",
+                    "description": "预筛视频内容质量。纯规则引擎零网络请求。根据URL/标题/时长评分(0-100)返回S/A/B/C/D等级。适合先判断内容是否值得处理或用于批量过滤。",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
                             "url": {"type": "string", "description": "视频/内容链接"},
-                            "cost_tier": {
+                            "mode": {
                                 "type": "string",
-                                "enum": ["free", "cheap", "paid", "expensive", "premium"],
-                                "description": "最大可接受成本等级 (默认 free)",
+                                "enum": ["quick", "full"],
+                                "description": "quick=仅URL分析(<2ms), full=先提取元信息再评分(<10s)",
                             },
                         },
                         "required": ["url"],
@@ -228,10 +220,41 @@ class MCPServer:
                 },
                 {
                     "name": "list_extractors",
-                    "description": "列出所有可用的内容提取器及其状态",
+                    "description": "列出所有可用的内容提取器及其状态、优先级、成本等级",
                     "inputSchema": {
                         "type": "object",
                         "properties": {},
+                    },
+                },
+                {
+                    "name": "videomind_config",
+                    "description": "获取当前系统配置和平台支持信息",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                    },
+                },
+                {
+                    "name": "configure",
+                    "description": "设置/查看 VideoMind API Keys。支持的 key: coze (Coze API Token), coze_ali_key (ASR用阿里云Key), tikhub, apify, aliyun_access_key_id/secret/appkey",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "action": {
+                                "type": "string",
+                                "enum": ["get", "set"],
+                                "description": "get=读取, set=设置",
+                            },
+                            "key": {
+                                "type": "string",
+                                "description": "set 时必填: coze / coze_ali_key / tikhub / apify / aliyun_access_key_id / secret / appkey",
+                            },
+                            "value": {
+                                "type": "string",
+                                "description": "set 时必填",
+                            },
+                        },
+                        "required": ["action"],
                     },
                 },
             ],
@@ -260,10 +283,10 @@ class MCPServer:
 
         try:
             result = handler(arguments)
-            self._send_result(req_id, result)
+            self._send_tool_result(req_id, result)
         except Exception as e:
             logger.error(f"Tool call failed: {name}: {e}")
-            self._send_error(req_id, -32603, str(e))
+            self._send_tool_error(req_id, str(e))
 
     def _call_process(self, args: dict) -> dict:
         url = args["url"]
@@ -542,11 +565,16 @@ class MCPServer:
         # 3. 提取 (如值得)
         extract_output = None
         if is_worth:
-            if max_cost is None:
-                recommended = prescreener.recommend_cost_tier(prescreen_result.grade)
-                max_cost = cost_map.get(recommended, CostTier.FREE)
-            extract_result = router.extract(url, max_cost=max_cost)
-            if extract_result.success:
+            # FREE 提取已拿到完整内容时直接复用, 避免重复提取
+            if quick_result.success and quick_result.content.strip() and not quick_result.is_placeholder:
+                extract_result = quick_result
+            else:
+                # FREE 失败/仅占位时, 按推荐成本二次提取 (缓存中无成功结果, 不会命中)
+                if max_cost is None:
+                    recommended = prescreener.recommend_cost_tier(prescreen_result.grade)
+                    max_cost = cost_map.get(recommended, CostTier.FREE)
+                extract_result = router.extract(url, max_cost=max_cost)
+            if extract_result.success and extract_result.content.strip() and not extract_result.is_placeholder:
                 extract_output = HermesFormatter.format_extract_result_full(extract_result)
 
         # 4. 合并输出
@@ -567,7 +595,7 @@ class MCPServer:
 
     def _call_extract_video(self, args: dict) -> dict:
         url = args["url"]
-        cost_tier_str = args.get("cost_tier", "free")
+        cost_tier_str = args.get("cost_tier", "cheap")
 
         from src.core import ContentRouter, HermesFormatter
         from src.core.models import CostTier
@@ -583,12 +611,12 @@ class MCPServer:
         result = router.extract(url, max_cost=max_cost)
         return HermesFormatter.format_extract_result_full(result)
 
-    def _call_list_extractors(self, args: dict) -> dict:
+    def _call_list_extractors(self, _args: dict) -> dict:
         from src.core import ContentRouter
         router = ContentRouter()
         return router.list_extractors()
 
-    def _call_config(self, args: dict) -> dict:
+    def _call_config(self, _args: dict) -> dict:
         import yt_dlp
         ies = {type(ie).__name__ for ie in yt_dlp.extractor.gen_extractors()}
         platforms = []
@@ -614,6 +642,8 @@ class MCPServer:
             self._handle_initialize(req_id)
         elif method == "notifications/initialized":
             self._initialized = True
+        elif method == "ping":
+            self._send_result(req_id, {})
         elif method == "tools/list":
             self._handle_tools_list(req_id)
         elif method == "tools/call":
@@ -629,12 +659,6 @@ class MCPServer:
                 self._send_error(req_id, -32601, f"Method not found: {method}")
 
     def run(self):
-        self._send({
-            "jsonrpc": "2.0",
-            "method": "server/initialized",
-            "params": {},
-        })
-
         for line in sys.stdin:
             line = line.strip()
             if not line:

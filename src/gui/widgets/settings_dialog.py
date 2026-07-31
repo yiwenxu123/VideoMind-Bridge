@@ -22,14 +22,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...config.constants import (
-    ConfigMaps,
-    Defaults,
-    DialogConfig,
-    Icons,
-    SliderConfig,
-    SpinBoxConfig,
-)
+from ...config.constants import ConfigMaps, Defaults
+from ..constants import DialogConfig, Icons, SliderConfig, SpinBoxConfig
 from ...services.config_manager import get_config_manager
 
 
@@ -449,8 +443,9 @@ class SettingsDialog(QDialog):
         local_layout.addRow("输出路径:", local_row)
 
         self.organize_by_combo = QComboBox()
-        self.organize_by_combo.addItems(["按日期", "按来源", "不组织"])
-        self.organize_by_combo.setCurrentText("按日期")
+        # 与 ConfigMaps.ORGANIZE / local_exporter 支持的 organize_by 对齐
+        self.organize_by_combo.addItems(ConfigMaps.ORGANIZE.display_values)
+        self.organize_by_combo.setCurrentText(ConfigMaps.ORGANIZE.to_display("date"))
         self.organize_by_combo.setMinimumWidth(200)
         local_layout.addRow("组织方式:", self.organize_by_combo)
 
@@ -543,7 +538,7 @@ class SettingsDialog(QDialog):
         groups = self.config_manager.EXTRACTOR_GROUPS
         providers = self.config_manager.EXTRACTOR_PROVIDERS
 
-        for group_name, group in groups.items():
+        for _group_name, group in groups.items():
             group_box = QGroupBox(group["label"])
             group_box.setStyleSheet("QGroupBox { font-weight: bold; font-size: 13px; }")
             group_layout = QVBoxLayout(group_box)
@@ -667,7 +662,7 @@ class SettingsDialog(QDialog):
     def _refresh_extractor_status(self):
         """刷新所有提取器 Key 的状态指示器"""
         status = self.config_manager.list_extractor_key_status()
-        for group_name, group in status.items():
+        for _group_name, group in status.items():
             for key_info in group["keys"]:
                 key_name = key_info["name"]
                 configured = key_info["configured"]

@@ -1,12 +1,12 @@
 """配置数据模型"""
 
 from dataclasses import asdict, dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 
-class AIEngine(str, Enum):
+class AIEngine(StrEnum):
     """AI 引擎类型"""
     DEEPSEEK = "DeepSeek-V3"
     OLLAMA = "Ollama"

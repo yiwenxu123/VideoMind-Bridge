@@ -58,11 +58,13 @@ class YouTubeExtractor(ContentExtractor):
                     success=True,
                     platform="youtube",
                     title=title or f"YouTube 视频 {video_id}",
-                    content=f"[YouTube] {title or video_id}\n无可用字幕。请使用 yt-dlp 或 Whisper 提取音频转录。",
+                    content="",
                     source="youtube",
                     url=url,
                     cost_tier=CostTier.FREE,
+                    is_placeholder=True,
                     metadata={"video_id": video_id},
+                    error="无可用字幕，需要 yt-dlp 或 Whisper 转录兜底",
                 )
 
             return ExtractResult(

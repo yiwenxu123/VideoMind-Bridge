@@ -232,6 +232,27 @@ def test_prescreen_mid_quality():
     assert grade in ("B", "C"), f"中等质量预期 B/C, 实际 {grade} ({score})"
 
 
+def test_short_title_not_double_penalized():
+    """普通短标题 (≤5 字) 不应命中「纯括号标题」低质量规则 (回归: 正则过宽 bug)"""
+    score, grade, reasons = run_all_rules(
+        "学习",
+        600,
+        "bilibili",
+    )
+    # 短标题仅被「标题过短」扣 15 分, 不应被低质量规则再扣 20 分
+    assert not any("低质量" in r for r in reasons), reasons
+
+
+def test_bracket_only_title_is_low_quality():
+    """纯括号标题 (【文案】) 应命中低质量规则"""
+    score, grade, reasons = run_all_rules(
+        "【】",
+        600,
+        "bilibili",
+    )
+    assert any("低质量" in r for r in reasons), reasons
+
+
 # ============================================================
 # Prescreener
 # ============================================================

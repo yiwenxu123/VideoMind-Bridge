@@ -4,12 +4,13 @@
 """
 
 import asyncio
-from contextlib import asynccontextmanager
+import os
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..models.task import ProcessingMode, TaskStatus, VideoTask
@@ -52,7 +53,7 @@ class ConnectionManager:
             self.active_connections.remove(websocket)
 
         # 从所有订阅中移除
-        for task_id, connections in self.task_subscriptions.items():
+        for _task_id, connections in self.task_subscriptions.items():
             connections.discard(websocket)
 
         logger.info(f"WebSocket连接已断开: {websocket.client}")
@@ -101,6 +102,15 @@ class APIServer:
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8787
 
+    # 允许的浏览器 Origin (前缀匹配, 兼容任意浏览器扩展 ID)
+    ALLOWED_ORIGINS = [
+        "chrome-extension://",
+        "moz-extension://",
+        "http://127.0.0.1",
+        "http://localhost",
+        "http://[::1]",
+    ]
+
     def __init__(self, host: str | None = None, port: int | None = None):
         """
         初始化API服务器
@@ -111,6 +121,9 @@ class APIServer:
         """
         self.host = host or self.DEFAULT_HOST
         self.port = port or self.DEFAULT_PORT
+
+        # 可选鉴权 token: 设置 VIDEOMIND_API_TOKEN 后 /api/v1 需携带 Bearer token
+        self._api_token = os.environ.get("VIDEOMIND_API_TOKEN", "")
 
         # 任务管理器
         self.task_manager = TaskManager()
@@ -147,22 +160,27 @@ class APIServer:
             lifespan=lifespan,
         )
 
-        allowed_origins = [
-            "chrome-extension://",
-            "moz-extension://",
-            "http://127.0.0.1",
-            "http://localhost",
-            "http://[::1]",
-        ]
+        allowed_origins = self.ALLOWED_ORIGINS
 
         @app.middleware("http")
-        async def cors_middleware(request, call_next):
+        async def security_middleware(request, call_next):
             origin = request.headers.get("origin", "")
 
             is_allowed = (
                 not origin or
                 any(origin.startswith(allowed) for allowed in allowed_origins)
             )
+
+            # CSRF 防护: 带非白名单 Origin 的请求直接拒绝 (而非仅不返回 CORS 头)
+            if not is_allowed:
+                logger.warning(f"请求被拒绝，非法 Origin: {origin} {request.url.path}")
+                return JSONResponse(status_code=403, content={"detail": "非法 Origin"})
+
+            # 鉴权: 配置了 token 时, /api/v1 需携带 Bearer token
+            if self._api_token and request.url.path.startswith("/api/v1") and request.method != "OPTIONS":
+                auth = request.headers.get("authorization", "")
+                if auth != f"Bearer {self._api_token}":
+                    return JSONResponse(status_code=401, content={"detail": "未授权"})
 
             response = await call_next(request)
 
@@ -182,8 +200,11 @@ class APIServer:
         # 注册路由
         self._register_routes(app)
 
-        # 挂载静态文件 (Web UI)
-        app.mount("/static", StaticFiles(directory="web"), name="static")
+        # 挂载静态文件 (Web UI) — 基于文件位置解析, 不依赖 CWD
+        from pathlib import Path as _Path
+        web_dir = _Path(__file__).resolve().parent.parent.parent / "web"
+        if web_dir.is_dir():
+            app.mount("/static", StaticFiles(directory=str(web_dir)), name="static")
 
         return app
 
@@ -193,7 +214,12 @@ class APIServer:
         @app.get("/")
         async def root():
             """Web UI 首页"""
-            return FileResponse("web/index.html")
+            from pathlib import Path as _Path
+            web_dir = _Path(__file__).resolve().parent.parent.parent / "web"
+            index = web_dir / "index.html"
+            if index.is_file():
+                return FileResponse(str(index))
+            return JSONResponse(content={"message": "Web UI 未找到, 请从项目根目录启动"})
 
         @app.get("/health", response_model=dict)
         async def health():
@@ -341,10 +367,8 @@ class APIServer:
             if request.ai_engine is not None:
                 from ..models.config import AIEngine
                 engine_val = request.ai_engine
-                try:
+                with suppress(ValueError):
                     engine_val = AIEngine(request.ai_engine)
-                except ValueError:
-                    pass
                 config_mgr.update_ai(engine=engine_val)
                 changed.append("ai_engine")
             if request.ai_model is not None:
@@ -479,8 +503,8 @@ class APIServer:
         @app.get("/api/v1/tasks", response_model=TaskListResponse)
         async def list_tasks(
             status: TaskStatus | None = None,
-            limit: int = 20,
-            offset: int = 0,
+            limit: int = Query(20, ge=1, le=100),
+            offset: int = Query(0, ge=0),
         ):
             """获取任务列表"""
             tasks = await self.task_manager.get_tasks(
@@ -536,17 +560,9 @@ class APIServer:
             """WebSocket连接，用于实时接收任务进度更新"""
             origin = websocket.headers.get("origin", "")
 
-            allowed_origins = [
-                "chrome-extension://",
-                "moz-extension://",
-                "http://127.0.0.1",
-                "http://localhost",
-                "http://[::1]",
-            ]
-
             is_allowed = (
                 not origin or
-                any(origin.startswith(allowed) for allowed in allowed_origins)
+                any(origin.startswith(allowed) for allowed in self.ALLOWED_ORIGINS)
             )
 
             if not is_allowed:

@@ -1,7 +1,7 @@
 """成本感知内容路由
 
 遍历优先级列表自动选择提取器, 失败自动跳过。
-优先级: 直接API(FREE) → Coze(CHEAP) → yt-dlp(FREE) → Whisper(EXPENSIVE) → 商业API(PREMIUM)
+优先级: coze(CHEAP) → 平台原生(FREE) → yt-dlp(FREE) → yt-dlp+ASR(CHEAP) → 商业API(PREMIUM)
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from .extractors import create_all_extractors
 from .extractors.base import ContentExtractor
-from .models import CostTier, ExtractResult
+from .models import CostTier, ExtractResult, _COST_TIER_PRIORITY
 
 logger = logging.getLogger(__name__)
 
@@ -36,17 +36,19 @@ class RouterConfig:
     cache: dict[str, ExtractResult] = field(default_factory=dict)
 
 
-# 默认提取器优先级 (按成本/id 排序)
+# 默认提取器优先级 (按提取能力排列)
+# Coze 优先 — 使用免费每日积分，覆盖全平台提取+转写
+# Coze 失败后按平台走各自的免费链路，最后用付费 API 兜底
 _DEFAULT_PRIORITY = [
-    "bilibili",    # FREE    - 直接API, 零Cookie
-    "youtube",     # FREE    - 直接API
-    "douyin",      # FREE    - iesdouyin
-    "xiaohongshu", # FREE    - 页面解析
-    "coze",        # CHEAP   - Coze API (有Token时)
-    "ytdlp",       # FREE    - yt-dlp 兜底
-    "tikhub",      # PREMIUM - tikhub.io 商业API (需 KEY)
-    "apify",       # PREMIUM - Apify 商业爬虫 (需 KEY)
-    "aliyun_asr",  # EXPENSIVE - 阿里云ASR (需 KEY)
+    "coze",        # CHEAP   - 免费每日积分，全平台通用
+    "bilibili",    # FREE    - B站字幕API，Coze 失败时兜底
+    "youtube",     # FREE    - YouTube字幕API
+    "douyin",      # FREE    - 抖音页面解析
+    "xiaohongshu", # FREE    - 小红书页面解析
+    "ytdlp",       # FREE    - yt-dlp 字幕兜底
+    "ytdlp_asr",   # CHEAP   - yt-dlp下载+阿里云ASR (无字幕视频转写)
+    "tikhub",      # PREMIUM - TikHub商业API (付费兜底)
+    "apify",       # PREMIUM - Apify商业爬虫
 ]
 
 
@@ -87,7 +89,7 @@ class ContentRouter:
         # 检查缓存
         if url in self.config.cache:
             cached = self.config.cache[url]
-            if max_cost is None or cached.cost_tier.value <= max_cost.value:
+            if max_cost is None or _COST_TIER_PRIORITY.get(cached.cost_tier, 99) <= _COST_TIER_PRIORITY.get(max_cost, 99):
                 return cached
 
         # 确定优先级列表
@@ -110,12 +112,7 @@ class ContentRouter:
 
             effective_max = max_cost or self.config.max_cost_tier
             if effective_max is not None:
-                cost_order = {
-                    CostTier.FREE: 0, CostTier.CHEAP: 1,
-                    CostTier.PAID: 2, CostTier.EXPENSIVE: 3,
-                    CostTier.PREMIUM: 4,
-                }
-                if cost_order.get(extractor.cost_tier(), 99) > cost_order.get(effective_max, 99):
+                if _COST_TIER_PRIORITY.get(extractor.cost_tier(), 99) > _COST_TIER_PRIORITY.get(effective_max, 99):
                     logger.debug(f"提取器 {name} 成本超限 (跳过)")
                     continue
 
@@ -124,11 +121,17 @@ class ContentRouter:
                 result = extractor.extract(url)
                 last_result = result
 
-                if result.success:
-                    # 缓存成功结果
+                if result.success and result.content.strip() and not result.is_placeholder:
+                    # 真成功 (非占位): 缓存并返回
                     self.config.cache[url] = result
                     logger.info(f"✓ 提取成功: {name}")
                     return result
+
+                if result.is_placeholder:
+                    # 占位结果: 仅元信息/说明文本, 不缓存, 继续降级
+                    failure_msg = result.error or f"{name}: 仅获取到元信息，无真实内容"
+                    failures.append(failure_msg)
+                    logger.warning(f"✗ 提取器 {name} 返回占位结果: {failure_msg}")
                 else:
                     failure_msg = f"{name}: {result.error or '未知错误'}"
                     failures.append(failure_msg)

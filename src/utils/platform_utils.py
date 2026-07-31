@@ -149,10 +149,7 @@ class URLValidator:
 
             # 检查 scheme 是否合法
             valid_schemes = ['http', 'https', 'ftp', 'ftps']
-            if parsed.scheme.lower() not in valid_schemes:
-                return False
-
-            return True
+            return parsed.scheme.lower() in valid_schemes
         except Exception:
             return False
 
@@ -170,22 +167,9 @@ class URLValidator:
         if not URLValidator.is_valid_url(url):
             return None
 
-        url_lower = url.lower()
-
-        platforms = {
-            'bilibili': ['bilibili.com', 'b23.tv'],
-            'youtube': ['youtube.com', 'youtu.be'],
-            'douyin': ['douyin.com'],
-            'tiktok': ['tiktok.com'],
-            'xiaohongshu': ['xiaohongshu.com'],
-        }
-
-        for platform_name, domains in platforms.items():
-            for domain in domains:
-                if domain in url_lower:
-                    return platform_name
-
-        return None
+        from .platform_detector import detect_platform
+        platform = detect_platform(url)
+        return platform if platform != "unknown" else None
 
 
 class ProgressCalculator:

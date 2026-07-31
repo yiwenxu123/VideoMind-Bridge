@@ -446,7 +446,7 @@ class MainWindow(QMainWindow):
 
             # 添加按钮
             skip_button = msg_box.addButton("跳过", QMessageBox.ButtonRole.RejectRole)
-            reprocess_button = msg_box.addButton("重新处理", QMessageBox.ButtonRole.AcceptRole)
+            msg_box.addButton("重新处理", QMessageBox.ButtonRole.AcceptRole)
             view_button = msg_box.addButton("查看结果", QMessageBox.ButtonRole.ActionRole)
 
             msg_box.exec()
@@ -506,7 +506,7 @@ class MainWindow(QMainWindow):
 
         # 添加按钮
         cancel_button = msg_box.addButton("取消", QMessageBox.ButtonRole.RejectRole)
-        start_button = msg_box.addButton("开始处理", QMessageBox.ButtonRole.AcceptRole)
+        msg_box.addButton("开始处理", QMessageBox.ButtonRole.AcceptRole)
 
         # 如果有重复，添加"全部重新处理"选项
         if duplicate_count > 0:
@@ -607,20 +607,27 @@ class MainWindow(QMainWindow):
         worker = ProcessingWorker(config, parent=self)
 
         # 连接信号 - 使用默认参数捕获当前值，避免闭包问题
+        # 显式 QueuedConnection: 信号从 worker 线程 emit 时排队到主线程执行, 避免跨线程访问 Qt 对象
         worker.progress_updated.connect(
-            lambda tid, progress, msg, task_id=task_id: self._on_task_progress(tid, progress, msg, task_id)
+            lambda tid, progress, msg, task_id=task_id: self._on_task_progress(tid, progress, msg, task_id),
+            Qt.ConnectionType.QueuedConnection,
         )
-        worker.status_changed.connect(self._on_task_status_changed)
+        worker.status_changed.connect(self._on_task_status_changed, Qt.ConnectionType.QueuedConnection)
         worker.task_completed.connect(
-            lambda tid, success, result, url=url, mode=mode: self._on_task_completed(tid, url, mode, success, result)
+            lambda tid, success, result, url=url, mode=mode: self._on_task_completed(tid, url, mode, success, result),
+            Qt.ConnectionType.QueuedConnection,
         )
         worker.task_failed.connect(
-            lambda tid, err, url=url: self._on_task_failed(tid, url, err)
+            lambda tid, err, url=url: self._on_task_failed(tid, url, err),
+            Qt.ConnectionType.QueuedConnection,
         )
-        worker.title_updated.connect(self._on_task_title_updated)
-        worker.metadata_updated.connect(self._on_task_metadata_updated)
-        worker.retrying.connect(self._on_task_retrying)
-        worker.finished.connect(lambda tid=task_id: self._on_worker_finished(tid))
+        worker.title_updated.connect(self._on_task_title_updated, Qt.ConnectionType.QueuedConnection)
+        worker.metadata_updated.connect(self._on_task_metadata_updated, Qt.ConnectionType.QueuedConnection)
+        worker.retrying.connect(self._on_task_retrying, Qt.ConnectionType.QueuedConnection)
+        worker.finished.connect(
+            lambda tid=task_id: self._on_worker_finished(tid),
+            Qt.ConnectionType.QueuedConnection,
+        )
 
         # 添加处理记录（状态为 pending）
         from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
@@ -656,7 +663,7 @@ class MainWindow(QMainWindow):
             )
             current_running += 1
 
-    def _on_task_progress(self, task_id: str, progress: int, message: str, original_task_id: str = ""):
+    def _on_task_progress(self, task_id: str, progress: int, message: str, _original_task_id: str = ""):
         """任务进度更新"""
         # 获取预估时间（需要知道视频时长，在下载完成后才能准确预估）
         time_estimate = ""
@@ -697,7 +704,7 @@ class MainWindow(QMainWindow):
         logger.info(f"任务 {task_id} 第 {attempt}/{max_attempts} 次重试: {error}")
         self.status_bar.showMessage(f"任务 {task_id[:8]}... 正在重试 ({attempt}/{max_attempts})")
 
-    def _on_task_completed(self, task_id: str, url: str, mode: ProcessingMode, success: bool, result: dict):
+    def _on_task_completed(self, task_id: str, url: str, _mode: ProcessingMode, success: bool, result: dict):
         """任务完成"""
         from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
@@ -1080,7 +1087,7 @@ class MainWindow(QMainWindow):
         """清理资源"""
         try:
             # 停止所有工作线程
-            for task_id, worker in list(self.active_workers.items()):
+            for _task_id, worker in list(self.active_workers.items()):
                 try:
                     if worker.isRunning():
                         worker.cancel()

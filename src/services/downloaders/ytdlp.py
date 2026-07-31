@@ -3,6 +3,7 @@
 基于 yt-dlp 的视频下载器，支持国际平台。
 """
 
+import contextlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -236,9 +237,6 @@ class YtdlpDownloader(DownloaderBase):
         output_dir = options.output_dir / date_str / safe_title
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        ext = options.audio_format if not options.keep_video else options.video_format
-        expected_file = temp_dir / f"{safe_title}.{ext}"
-
         downloaded_files = list(temp_dir.glob(f"{safe_title}.*"))
         if not downloaded_files:
             downloaded_files = list(temp_dir.glob("*"))
@@ -271,10 +269,8 @@ class YtdlpDownloader(DownloaderBase):
         )
 
         import shutil
-        try:
+        with contextlib.suppress(Exception):
             shutil.rmtree(temp_dir)
-        except Exception:
-            pass
 
         logger.info(f"yt-dlp 下载完成: {title}")
 

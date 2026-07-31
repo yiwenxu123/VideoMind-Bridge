@@ -22,6 +22,9 @@ from .mode_selector import ProcessingMode
 
 logger = logging.getLogger(__name__)
 
+# 运行中状态按钮文本 (统一常量, 避免文本判断漂移)
+RUNNING_BUTTON_TEXT = "暂停"
+
 
 class TaskStatus(Enum):
     """任务状态枚举"""
@@ -197,7 +200,7 @@ class TaskItemWidget(QFrame):
         elif status in [TaskStatus.PENDING, TaskStatus.DOWNLOADING,
                       TaskStatus.TRANSCRIBING, TaskStatus.AI_PROCESSING, TaskStatus.AI_RETRYING, TaskStatus.EXPORTING]:
             # 运行中状态：显示"暂停"，隐藏删除按钮
-            self.action_button.setText("暂停")
+            self.action_button.setText(RUNNING_BUTTON_TEXT)
             self.delete_button.setVisible(False)
         else:
             # 失败/已完成/已取消：显示"删除"按钮
@@ -207,12 +210,10 @@ class TaskItemWidget(QFrame):
     def _on_action_clicked(self):
         """操作按钮点击"""
         text = self.action_button.text()
-        if text == "暂停":
+        if text == RUNNING_BUTTON_TEXT:
             self.pause_clicked.emit(self.task_id)
         elif text == "恢复":
             self.resume_clicked.emit(self.task_id)
-        elif text == "取消":
-            self.cancel_clicked.emit(self.task_id)
         elif text == "删除":
             self.delete_clicked.emit(self.task_id)
 
@@ -424,15 +425,15 @@ class TaskQueueWidget(QWidget):
     def has_running_tasks(self) -> bool:
         """是否有运行中的任务"""
         for task_widget in self.tasks.values():
-            # 检查按钮文本判断状态
-            if task_widget.action_button.text() == "取消":
+            # 运行中任务的操作按钮为 RUNNING_BUTTON_TEXT
+            if task_widget.action_button.text() == RUNNING_BUTTON_TEXT:
                 return True
         return False
 
     def _update_count(self):
         """更新任务计数"""
         total = len(self.tasks)
-        pending = sum(1 for w in self.tasks.values() if w.action_button.text() == "取消")
+        pending = sum(1 for w in self.tasks.values() if w.action_button.text() == RUNNING_BUTTON_TEXT)
 
         if pending > 0:
             self.count_label.setText(f"({pending} 个进行中, {total} 个总计)")

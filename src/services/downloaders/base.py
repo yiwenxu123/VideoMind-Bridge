@@ -71,7 +71,7 @@ class DownloadResult:
 
 class DownloaderBase(ABC):
     """下载器基类
-    
+
     所有下载器必须继承此类并实现相应方法。
     """
 
@@ -90,10 +90,10 @@ class DownloaderBase(ABC):
     def can_handle(self, url: str) -> bool:
         """
         检查是否能处理该 URL
-        
+
         Args:
             url: 视频 URL
-            
+
         Returns:
             是否能处理
         """
@@ -108,24 +108,24 @@ class DownloaderBase(ABC):
     ) -> DownloadResult:
         """
         下载视频
-        
+
         Args:
             url: 视频 URL
             options: 下载选项
             progress_callback: 进度回调函数
-            
+
         Returns:
             下载结果
         """
         ...
 
-    def get_metadata(self, url: str) -> VideoMetadata | None:
+    def get_metadata(self, _url: str) -> VideoMetadata | None:
         """
         获取视频元数据（不下载）
-        
+
         Args:
             url: 视频 URL
-            
+
         Returns:
             视频元数据，如果不支持则返回 None
         """
@@ -134,7 +134,7 @@ class DownloaderBase(ABC):
     def get_supported_platforms(self) -> set[str]:
         """
         获取支持的平台列表
-        
+
         Returns:
             平台名称集合
         """
@@ -143,10 +143,10 @@ class DownloaderBase(ABC):
     def has_capability(self, capability: DownloaderCapability) -> bool:
         """
         检查是否具有指定能力
-        
+
         Args:
             capability: 能力类型
-            
+
         Returns:
             是否具有该能力
         """

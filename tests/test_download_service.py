@@ -37,7 +37,7 @@ class TestDownloadServiceValidation:
 
     def test_supported_platforms(self, tmp_path):
         """测试支持的平台检测"""
-        service = DownloadService(tmp_path)
+        DownloadService(tmp_path)
 
         supported_urls = [
             ("https://www.bilibili.com/video/BV1xx411c7mD", "bilibili"),
@@ -46,7 +46,7 @@ class TestDownloadServiceValidation:
             ("https://www.xiaohongshu.com/explore/123456", "xiaohongshu"),
         ]
 
-        for url, expected_platform in supported_urls:
+        for url, _expected_platform in supported_urls:
             if "bilibili" in url:
                 assert "bilibili" in url
             elif "youtube" in url:
@@ -75,7 +75,7 @@ class TestDownloadServiceMock:
             'description': '测试描述',
         }
 
-        service = DownloadService(tmp_path)
+        DownloadService(tmp_path)
         info = mock_instance.extract_info('https://www.bilibili.com/video/BV1xx', download=False)
 
         assert info['title'] == '测试视频标题'
@@ -90,7 +90,7 @@ class TestDownloadServiceMock:
         mock_ydl.return_value.__enter__.return_value = mock_instance
         mock_instance.extract_info.side_effect = yt_dlp.utils.DownloadError("Video unavailable")
 
-        service = DownloadService(tmp_path)
+        DownloadService(tmp_path)
 
         with pytest.raises(yt_dlp.utils.DownloadError):
             mock_instance.extract_info('https://invalid.url', download=False)
@@ -99,7 +99,7 @@ class TestDownloadServiceMock:
 class TestDownloadErrorHandling:
     """下载错误处理测试"""
 
-    def test_video_not_found_error(self, tmp_path):
+    def test_video_not_found_error(self, tmp_path):  # noqa: ARG002
         """测试视频不存在错误"""
         error = DownloadError(
             "视频不存在或已被删除",
@@ -111,7 +111,7 @@ class TestDownloadErrorHandling:
         assert "视频不存在" in error.message
         assert error.details["url"] == "https://example.com/video/123"
 
-    def test_age_restricted_error(self, tmp_path):
+    def test_age_restricted_error(self, tmp_path):  # noqa: ARG002
         """测试年龄限制错误"""
         error = DownloadError(
             "视频有年龄限制",
@@ -121,7 +121,7 @@ class TestDownloadErrorHandling:
 
         assert error.error_code == "AGE_RESTRICTED"
 
-    def test_region_blocked_error(self, tmp_path):
+    def test_region_blocked_error(self, tmp_path):  # noqa: ARG002
         """测试地区限制错误"""
         error = DownloadError(
             "视频在您的地区不可用",
@@ -131,7 +131,7 @@ class TestDownloadErrorHandling:
 
         assert error.error_code == "REGION_BLOCKED"
 
-    def test_network_error(self, tmp_path):
+    def test_network_error(self, tmp_path):  # noqa: ARG002
         """测试网络错误"""
         error = DownloadError(
             "网络连接失败",

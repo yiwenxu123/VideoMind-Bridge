@@ -1,5 +1,6 @@
 """输出目标选择组件"""
 
+import contextlib
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -354,10 +355,8 @@ class TargetSelector(QWidget):
             headers = {}
             headers_text = self.webhook_headers_input.text().strip()
             if headers_text:
-                try:
+                with contextlib.suppress(json.JSONDecodeError):
                     headers = json.loads(headers_text)
-                except json.JSONDecodeError:
-                    pass
             targets.append({
                 "type": ExportTarget.WEBHOOK,
                 "url": self.webhook_url_input.text(),

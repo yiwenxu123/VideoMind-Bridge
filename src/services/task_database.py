@@ -36,8 +36,11 @@ class TaskDatabase:
     @contextmanager
     def _get_connection(self):
         """获取数据库连接的上下文管理器"""
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
+        # WAL 模式支持多进程并发读写; busy_timeout 避免并发写时立即报 database is locked
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
         try:
             yield conn
             conn.commit()
@@ -212,7 +215,7 @@ class TaskDatabase:
                     params.append(platform)
 
                 query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                params.extend([str(limit), str(offset)])
+                params.extend([limit, offset])
 
                 cursor.execute(query, params)
 
@@ -291,11 +294,9 @@ class TaskDatabase:
             with self._get_connection() as conn:
                 cursor = conn.cursor()
 
-                cutoff_date = datetime.now().isoformat()
-
                 cursor.execute("""
                     DELETE FROM task_history
-                    WHERE created_at < datetime('now', '-' || ? || ' days')
+                    WHERE julianday(created_at) < julianday('now', '-' || ? || ' days')
                 """, (days,))
 
                 count = cursor.rowcount
@@ -408,19 +409,23 @@ class TaskDatabase:
 
                 if platform:
                     cursor.execute("""
-                        SELECT AVG(processing_time_seconds * 1.0 / duration_seconds) as ratio
-                        FROM processing_stats
-                        WHERE mode = ? AND platform = ?
-                        ORDER BY created_at DESC
-                        LIMIT ?
+                        SELECT AVG(ratio) FROM (
+                            SELECT processing_time_seconds * 1.0 / duration_seconds as ratio
+                            FROM processing_stats
+                            WHERE mode = ? AND platform = ?
+                            ORDER BY created_at DESC
+                            LIMIT ?
+                        )
                     """, (mode, platform, limit))
                 else:
                     cursor.execute("""
-                        SELECT AVG(processing_time_seconds * 1.0 / duration_seconds) as ratio
-                        FROM processing_stats
-                        WHERE mode = ?
-                        ORDER BY created_at DESC
-                        LIMIT ?
+                        SELECT AVG(ratio) FROM (
+                            SELECT processing_time_seconds * 1.0 / duration_seconds as ratio
+                            FROM processing_stats
+                            WHERE mode = ?
+                            ORDER BY created_at DESC
+                            LIMIT ?
+                        )
                     """, (mode, limit))
 
                 row = cursor.fetchone()

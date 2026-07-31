@@ -77,9 +77,8 @@ class BilibiliExtractor(ContentExtractor):
             subtitle_content, segments, language = self._get_subtitle(bvid)
 
             if not subtitle_content:
-                # 无字幕时回退到纯元信息
                 return ExtractResult(
-                    success=True,
+                    success=False,
                     platform="bilibili",
                     title=title,
                     content=f"[Bilibili 视频] {title}\n时长: {duration}秒\n"

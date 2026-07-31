@@ -1,10 +1,22 @@
-"""Coze 提取器适配器
+"""Coze 提取器适配器 — Coze 优先策略
 
-封装现有 Coze 工作流代码为 ContentExtractor 接口。
-复用 Hermes video-content-extractor skill 的 Coze 调用代码。
+使用 Coze 工作流提取视频内容。支持三种模式:
 
-注意: Coze 不是必需的提取器。有 Token 时优先使用 (免费+快),
-无 Token 或过期时 is_available() 返回 False, 自动跳过。
+模式 A (推荐): 平台专用工作流
+  自动识别 URL 平台, 使用 skill 已验证的专用工作流 + stream_run SSE 端点。
+  抖音 → 7645116403896385562, B站 → 7545785780040564799, 小红书 → 7545776707971039241
+
+模式 B: 自定义工作流 (COZE_BOT_ID)
+  设置 COZE_BOT_ID 环境变量覆盖, 使用同步 run 端点。
+
+模式 C: Chat API (无工作流配置时兜底)
+  通过 v3/chat 端点 Bot 对话提取内容。
+
+配置要求 (环境变量):
+  - COZE_API_KEY 或 COZE_API_TOKEN: 必需
+  - COZE_BOT_ID: 可选, 覆盖自定义工作流
+  - ALI_API_KEY: 可选, 传递到平台工作流做 ASR 兜底
+  - COZE_DAILY_LIMIT: 可选, 每日调用上限 (默认 200)
 """
 
 from __future__ import annotations
@@ -12,7 +24,8 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
+import threading
+from datetime import date
 from typing import Any
 
 import httpx
@@ -20,18 +33,40 @@ import httpx
 from ..models import CostTier, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
+from ...utils import get_logger
 
-# 环境变量名称
-ENV_COZE_FLOW_ID = "COZE_BOT_ID"  # Coze workflow/bot ID
+logger = get_logger(__name__)
+
+# ── 平台专用工作流注册表 (来自已验证的 skill) ────────────────────
+
+PLATFORM_WORKFLOWS: dict[str, dict[str, Any]] = {
+    "douyin": {
+        "workflow_id": "7645116403896385562",
+        "params_fn": lambda url, ali_key: {"input": url, "ali_api": ali_key or ""},
+        "response_format": "json",
+    },
+    "bilibili": {
+        "workflow_id": "7545785780040564799",
+        "params_fn": lambda url, ali_key: {"url": url, "ali_api_key": ali_key or ""},
+        "response_format": "text",
+    },
+    "xiaohongshu": {
+        "workflow_id": "7545776707971039241",
+        "params_fn": lambda url, ali_key: {"url": url, "ali_aip_key": ali_key or ""},
+        "response_format": "text",
+    },
+}
+
+# ── 环境变量 ──────────────────────────────────────────────
+
+ENV_COZE_FLOW_ID = "COZE_BOT_ID"
+ENV_COZE_DAILY_LIMIT = "COZE_DAILY_LIMIT"
+ENV_ALI_API_KEY = "ALI_API_KEY"
 
 # Coze API 端点
 COZE_API_BASE = "https://api.coze.cn"
-COZE_CHAT_URL = f"{COZE_API_BASE}/v1/chat"
-COZE_MESSAGE_URL = f"{COZE_API_BASE}/v1/chat/message/list"
 COZE_WORKFLOW_URL = f"{COZE_API_BASE}/v1/workflow/run"
-
-# Coze 工作流 ID (从 .env 或环境变量读取)
-_DEFAULT_WORKFLOW_ID = os.getenv(ENV_COZE_FLOW_ID, "")
+COZE_STREAM_RUN_URL = f"{COZE_API_BASE}/v1/workflow/stream_run"
 
 # 支持的 URL 模式
 _SUPPORTED_DOMAINS = [
@@ -40,31 +75,124 @@ _SUPPORTED_DOMAINS = [
 ]
 
 
+# ── 平台识别 ──────────────────────────────────────────────
+
+def identify_platform(url: str) -> str:
+    """委托统一的平台检测器 (单一来源)"""
+    from ...utils.platform_detector import detect_platform
+    return detect_platform(url)
+
+
+# ── SSE 响应解析 ─────────────────────────────────────────
+
+def _content_is_error(text: str) -> bool:
+    text = text.strip()
+    if not text:
+        return True
+    error_patterns = (
+        "失败", "错误", "error", "fail", "exception",
+        "transcription_url", "Invalid", "invalid",
+    )
+    return any(p in text.lower() for p in error_patterns) and len(text) < 200
+
+
+def _parse_sse_response(raw_data: str, response_format: str, platform: str) -> dict[str, Any] | None:
+    for line in raw_data.split("\n"):
+        if line.startswith("data:") and '"node_title":"End"' in line:
+            try:
+                event_data = json.loads(line[5:].strip())
+                content = event_data.get("content", "")
+                usage = event_data.get("usage", {}) or {}
+                token_count = usage.get("token_count", 0)
+
+                # 仅当既无内容又无 token 时才跳过 (工作流可能不上报 usage, 但有内容仍应返回)
+                if token_count == 0 and not content:
+                    continue
+
+                if response_format == "json" and platform == "douyin":
+                    data = json.loads(content) if isinstance(content, str) and content.startswith("{") else content
+                    if isinstance(data, dict):
+                        output1 = data.get("output1", {})
+                        if isinstance(output1, dict):
+                            text = output1.get("text", "") or data.get("output", "")
+                            desc = output1.get("desc", "") or data.get("desc", "")
+                            if not _content_is_error(text):
+                                return {
+                                    "success": True,
+                                    "title": desc,
+                                    "content": text,
+                                    "source": f"coze_{platform}",
+                                }
+                        text = data.get("output", "") or data.get("text", "")
+                        if text and not _content_is_error(text):
+                            return {
+                                "success": True,
+                                "title": data.get("desc", ""),
+                                "content": text,
+                                "source": f"coze_{platform}",
+                            }
+
+                if response_format == "text":
+                    title = ""
+                    title_match = re.search(r"标题[：:](.*?)(?:\n|$)", content)
+                    if title_match:
+                        title = title_match.group(1).strip()
+                    body_match = re.search(r"正文[：:](.*)", content, re.DOTALL)
+                    body = body_match.group(1).strip() if body_match else content
+                    if not _content_is_error(body):
+                        return {
+                            "success": True,
+                            "title": title,
+                            "content": body,
+                            "source": f"coze_{platform}",
+                        }
+
+                if content and not _content_is_error(content):
+                    return {
+                        "success": True,
+                        "title": "",
+                        "content": content if isinstance(content, str) else json.dumps(content, ensure_ascii=False),
+                        "source": f"coze_{platform}",
+                    }
+
+            except (json.JSONDecodeError, AttributeError):
+                continue
+
+    return None
+
+
 class CozeExtractor(ContentExtractor):
-    """Coze 工作流提取器适配器
-
-    配置要求 (环境变量):
-    - COZE_API_KEY: Coze API Token (必需)
-    - COZE_BOT_ID: 工作流/机器人 ID (可选, 有默认值)
-
-    行为:
-    - is_available(): COZE_API_KEY 存在且非空 → True
-    - extract(): 调用 Coze chat API, 等待异步结果
-    """
+    """Coze 提取器 (全平台, 优先使用免费每日积分)"""
 
     platform_name = "coze"
     _cost_tier = CostTier.CHEAP
     url_pattern = re.compile("|".join(_SUPPORTED_DOMAINS))
 
+    # 每日调用配额 (类级别共享, 线程锁保护)
+    _call_count: int = 0
+    _call_date: str = ""
+    _quota_lock = threading.Lock()
+
     def __init__(self) -> None:
-        key = self._resolve_api_key("coze")
+        key = self._resolve_api_key("coze") or self._resolve_api_key("coze_token")
         self._api_key = key.strip() if key and key.strip() else ""
-        self._workflow_id = _DEFAULT_WORKFLOW_ID
+        self._workflow_id = os.getenv(ENV_COZE_FLOW_ID, "")
+        ali_key = self._resolve_api_key("coze_ali_key") or os.getenv(ENV_ALI_API_KEY, "")
+        self._ali_api_key = ali_key.strip() if ali_key and ali_key.strip() else ""
+
+        # 延迟读取配额上限, 支持运行期修改; 非法值回退默认 200
+        raw_limit = os.getenv(ENV_COZE_DAILY_LIMIT, "200")
+        try:
+            self._daily_limit = int(raw_limit)
+        except ValueError:
+            logger.warning(f"COZE_DAILY_LIMIT 非法值: {raw_limit!r}, 使用默认 200")
+            self._daily_limit = 200
 
     def is_available(self) -> bool:
-        return bool(self._api_key and self._api_key.strip())
+        return bool(self._api_key)
 
     def extract(self, url: str) -> ExtractResult:
+
         if not self.is_available():
             return ExtractResult(
                 success=False, platform="coze", title="", content="",
@@ -72,28 +200,43 @@ class CozeExtractor(ContentExtractor):
                 error="Coze API Key 未配置",
             )
 
+        # 检查每日配额
+        if not self._check_quota():
+            return ExtractResult(
+                success=False, platform="coze", title="", content="",
+                source="coze", url=url, cost_tier=CostTier.CHEAP,
+                error=f"Coze 每日调用量已达上限 ({self._daily_limit}), 自动跳过",
+            )
+
         try:
-            # 调用 Coze 工作流
-            result = self._call_coze_workflow(url)
+            result = self._call_coze(url)
 
             if not result or result.get("success") is False:
                 error_msg = result.get("msg", "Coze 工作流返回空结果") if result else "Coze 工作流无响应"
+                if any(kw in error_msg.lower() for kw in ("balance", "quota", "insufficient", "limit", "积分")):
+                    self._mark_quota_exhausted(error_msg)
                 return ExtractResult(
                     success=False, platform="coze", title="", content="",
                     source="coze", url=url, cost_tier=CostTier.CHEAP,
                     error=f"Coze 提取失败: {error_msg}",
                 )
 
-            # 解析 Coze 返回内容
-            content = result.get("data", "") or result.get("content", "") or ""
-            title = self._parse_title_from_result(content, url)
+            content = result.get("content", "") or result.get("data", "") or ""
+            if not content.strip():
+                return ExtractResult(
+                    success=False, platform="coze", title="", content="",
+                    source="coze", url=url, cost_tier=CostTier.CHEAP,
+                    error="Coze 提取失败: 内容为空",
+                )
+
+            title = result.get("title", "") or self._parse_title_from_result(content, url)
 
             return ExtractResult(
                 success=True,
-                platform="coze",
+                platform=result.get("source_platform", "coze"),
                 title=title,
                 content=content,
-                source="coze",
+                source=result.get("source", "coze"),
                 url=url,
                 cost_tier=CostTier.CHEAP,
                 metadata={"raw_result": result},
@@ -105,7 +248,14 @@ class CozeExtractor(ContentExtractor):
                 return ExtractResult(
                     success=False, platform="coze", title="", content="",
                     source="coze", url=url, cost_tier=CostTier.CHEAP,
-                    error="Coze Token 过期 (HTTP 401), 自动跳过到其他提取器",
+                    error="Coze Token 过期 (HTTP 401), 自动跳过",
+                )
+            if status == 402:
+                self._mark_quota_exhausted("402 Payment Required")
+                return ExtractResult(
+                    success=False, platform="coze", title="", content="",
+                    source="coze", url=url, cost_tier=CostTier.CHEAP,
+                    error="Coze 积分耗尽 (HTTP 402), 自动跳过",
                 )
             return ExtractResult(
                 success=False, platform="coze", title="", content="",
@@ -116,7 +266,7 @@ class CozeExtractor(ContentExtractor):
             return ExtractResult(
                 success=False, platform="coze", title="", content="",
                 source="coze", url=url, cost_tier=CostTier.CHEAP,
-                error="Coze 请求超时 (120s), 自动跳过到其他提取器",
+                error="Coze 请求超时 (60s), 自动跳过",
             )
         except Exception as e:
             return ExtractResult(
@@ -125,131 +275,136 @@ class CozeExtractor(ContentExtractor):
                 error=f"Coze 提取异常: {e}",
             )
 
-    def _call_coze_workflow(self, url: str) -> dict[str, Any] | None:
-        """调用 Coze 工作流 API
+    # ── 配额管理 ──────────────────────────────────────
 
-        参考: Hermes coze-workflow.md 的 chat API 流程
-        """
+    def _check_quota(self) -> bool:
+        """检查是否还有配额 (不预扣)"""
+        today = str(date.today())
+        with CozeExtractor._quota_lock:
+            if CozeExtractor._call_date != today:
+                CozeExtractor._call_date = today
+                CozeExtractor._call_count = 0
+            if CozeExtractor._call_count >= self._daily_limit:
+                return False
+            return True
+
+    def _count_call(self) -> None:
+        """在真实 API 调用后计数 (线程安全)"""
+        today = str(date.today())
+        with CozeExtractor._quota_lock:
+            if CozeExtractor._call_date != today:
+                CozeExtractor._call_date = today
+                CozeExtractor._call_count = 0
+            CozeExtractor._call_count += 1
+
+    def _mark_quota_exhausted(self, _reason: str) -> None:
+        with CozeExtractor._quota_lock:
+            CozeExtractor._call_count = self._daily_limit
+            CozeExtractor._call_date = str(date.today())
+
+    # ── API 调用 ──────────────────────────────────────
+
+    def _call_coze(self, url: str) -> dict[str, Any] | None:
+        """调用 Coze: 平台工作流 → 自定义工作流, 均不支持时让路由器降级"""
+        platform = identify_platform(url)
+
         if self._workflow_id:
-            return self._call_workflow_run(url)
+            return self._call_workflow_run(self._workflow_id, {"url": url})
 
-        return self._call_chat_api(url)
+        if platform in PLATFORM_WORKFLOWS:
+            return self._call_platform_workflow(url, platform)
 
-    def _call_chat_api(self, url: str) -> dict[str, Any] | None:
-        """通过 Coze Chat API 调用工作流"""
+        return None
+
+    def _call_platform_workflow(self, url: str, platform: str) -> dict[str, Any] | None:
+        """调用平台专用工作流 (stream_run SSE)"""
+        config = PLATFORM_WORKFLOWS[platform]
+        workflow_id = config["workflow_id"]
+        params = config["params_fn"](url, self._ali_api_key)
+
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-
-        # 1. 创建聊天
         payload = {
-            "bot_id": self._workflow_id,
-            "user_id": "videomind-bridge",
-            "query": f"请提取并整理这个视频的文字内容: {url}",
-            "stream": False,
+            "workflow_id": workflow_id,
+            "parameters": params,
         }
 
         with httpx.Client(timeout=120.0) as client:
-            chat_resp = client.post(
-                f"{COZE_API_BASE}/v3/chat",
-                headers=headers,
-                json=payload,
-            )
-            chat_resp.raise_for_status()
-            chat_data = chat_resp.json()
+            resp = client.post(COZE_STREAM_RUN_URL, headers=headers, json=payload)
+            resp.raise_for_status()
+            raw_data = resp.text
 
-            if chat_data.get("code") != 0:
-                msg = chat_data.get("msg", "unknown")
-                raise RuntimeError(f"Coze chat API 错误: {msg}")
+        # 真实 API 调用成功后才计一次配额
+        self._count_call()
 
-            chat_id = chat_data.get("data", {}).get("id", "")
-            conversation_id = chat_data.get("data", {}).get("conversation_id", "")
+        result = _parse_sse_response(raw_data, config["response_format"], platform)
+        if result:
+            result["source_platform"] = platform
+            return result
 
-            if not chat_id:
-                return None
+        return {"success": False, "msg": f"Coze {platform} 工作流返回空结果"}
 
-            # 2. 等待完成并获取消息
-            # Coze chat 是异步的, 需要轮询
-            for _ in range(60):  # 最多等 60 次
-                status_resp = client.get(
-                    f"{COZE_API_BASE}/v3/chat/{chat_id}",
-                    headers=headers,
-                    params={"conversation_id": conversation_id},
-                )
-                status_data = status_resp.json()
-                chat_status = status_data.get("data", {}).get("status", "")
-
-                if chat_status == "completed":
-                    break
-                elif chat_status in ("failed", "cancelled"):
-                    return {"success": False, "msg": f"Coze chat status: {chat_status}"}
-
-                time.sleep(2)
-            else:
-                return {"success": False, "msg": "Coze chat 超时"}
-
-            # 3. 获取消息
-            msg_resp = client.get(
-                f"{COZE_API_BASE}/v3/chat/message/list",
-                headers=headers,
-                params={"chat_id": chat_id, "conversation_id": conversation_id},
-            )
-            msg_data = msg_resp.json()
-
-            messages = msg_data.get("data", [])
-            content_parts = []
-            for msg in messages:
-                if msg.get("role") == "assistant" and msg.get("content"):
-                    content_parts.append(msg["content"])
-
-            full_content = "\n".join(content_parts)
-            return {
-                "success": True,
-                "data": full_content,
-                "source": "coze_chat",
-            }
-
-    def _call_workflow_run(self, url: str) -> dict[str, Any] | None:
-        """通过 Coze Workflow Run API (简化版, 同步)"""
+    def _call_workflow_run(self, workflow_id: str, parameters: dict[str, str]) -> dict[str, Any] | None:
+        """调用自定义工作流 (同步 run)"""
         headers = {
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-
         payload = {
-            "workflow_id": self._workflow_id,
-            "parameters": json.dumps({"url": url}),
+            "workflow_id": workflow_id,
+            "parameters": parameters,
         }
 
-        with httpx.Client(timeout=120.0) as client:
+        with httpx.Client(timeout=60.0) as client:
             resp = client.post(COZE_WORKFLOW_URL, headers=headers, json=payload)
             resp.raise_for_status()
             data = resp.json()
 
-            if data.get("code") != 0:
-                msg = data.get("msg", "unknown")
-                # 401 Token 过期
-                if resp.status_code == 401 or data.get("code") == 401:
-                    return {"success": False, "msg": f"Token expired: {msg}"}
-                return {"success": False, "msg": f"Coze workflow error: {msg}"}
+        # 真实 API 调用成功后才计一次配额
+        self._count_call()
 
-            execute_data = data.get("data", {})
-            return {
-                "success": True,
-                "data": execute_data.get("output", ""),
-                "source": "coze_workflow",
-            }
+        if data.get("code") != 0:
+            msg = data.get("msg", "unknown")
+            if resp.status_code == 401 or data.get("code") == 401:
+                return {"success": False, "msg": f"Token expired: {msg}"}
+            if resp.status_code == 402:
+                return {"success": False, "msg": "Insufficient balance (402)"}
+            return {"success": False, "msg": f"Coze workflow error: {msg}"}
+
+        execute_data = data.get("data", {})
+        if isinstance(execute_data, str):
+            try:
+                execute_data = json.loads(execute_data)
+            except json.JSONDecodeError:
+                execute_data = {}
+        content = execute_data.get("output", "")
+        if not content:
+            return {"success": False, "msg": "Coze 工作流返回空内容"}
+        return {"success": True, "data": content, "source": "coze_workflow", "source_platform": "coze"}
 
     @staticmethod
     def _parse_title_from_result(content: str, url: str) -> str:
-        """从 Coze 返回结果中解析标题"""
-        lines = content.strip().split("\n")
-        for line in lines[:10]:
-            line = line.strip()
-            if line and len(line) > 5 and len(line) < 200 and not line.startswith(("http", "#", "---")):
-                return line
-        return f"Coze 提取结果 ({url})"
+        text = content.strip()
+        if not text:
+            return f"Coze 提取结果 ({url})"
+
+        MAX_TITLE = 60
+        for delim in ("。", "！", "？", "!", "?", ". "):
+            idx = text.find(delim)
+            if idx != -1 and 10 < idx < MAX_TITLE:
+                return text[:idx + 1].strip()
+
+        for delim in ("，", ", "):
+            idx = text.find(delim)
+            if idx != -1 and 10 < idx < MAX_TITLE:
+                return text[:idx].strip()
+
+        if len(text) > MAX_TITLE:
+            return text[:MAX_TITLE].rstrip("，, ") + "…"
+
+        return text
 
 
 register_extractor("coze", CozeExtractor)

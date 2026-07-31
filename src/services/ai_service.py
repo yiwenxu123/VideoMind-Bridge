@@ -206,11 +206,7 @@ class AIService:
             # 从模板管理器获取
             manager = get_prompt_template_manager()
             template_obj = manager.get_template(template_id)
-            if template_obj:
-                template_content = template_obj.template
-            else:
-                # 模板不存在，使用默认
-                template_content = self._default_prompt()
+            template_content = template_obj.template if template_obj else self._default_prompt()
         else:
             # 使用默认模板
             template_content = self._default_prompt()
@@ -294,6 +290,15 @@ class AIService:
                 # 超时，可以重试
                 last_exception = e
                 logger.warning(f"请求超时，第 {attempt + 1} 次尝试失败，准备重试...")
+
+            except (KeyError, TypeError, ValueError) as e:
+                # 响应解析错误 (格式/结构问题): 属代码或上游协议缺陷, 重试无益, 立即抛出
+                logger.error(f"API 响应解析失败（第 {attempt + 1} 次尝试）: {e}")
+                raise AIError(
+                    f"API 响应解析失败: {e}",
+                    error_code="GENERATION_FAILED",
+                    details={"retries": attempt + 1},
+                ) from e
 
             except Exception as e:
                 # 其他错误，记录后重试
@@ -460,7 +465,7 @@ class AIService:
 
             # 提取内容（去掉时间戳部分）
             content = re.sub(time_pattern, "", line)
-            content = content.lstrip("- *:. ").strip()
+            content = content.lstrip("- *:. ").strip()  # noqa: B005
 
             if content:
                 return Highlight(time=time_str, seconds=seconds, content=content)
@@ -489,7 +494,7 @@ class AIService:
             Highlight(time="00:00:00", seconds=0, content="视频开始"),
         ]
 
-    def _mock_summarize(self, transcript: str, title: str) -> SummaryResult:
+    def _mock_summarize(self, _transcript: str, title: str) -> SummaryResult:
         """模拟摘要（用于测试）"""
         return SummaryResult(
             title=title or "测试视频标题",

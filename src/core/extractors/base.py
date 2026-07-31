@@ -90,5 +90,5 @@ class ContentExtractor(ABC):
         from ...services.config_manager import get_config_manager
         return get_config_manager().get_extractor_key(key_name)
 
-    def _resolve_short_url(self, url: str) -> str | None:
+    def _resolve_short_url(self, _url: str) -> str | None:
         return None

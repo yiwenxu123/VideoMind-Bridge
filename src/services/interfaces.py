@@ -37,7 +37,7 @@ class DownloadResult:
 class IDownloadService(Protocol):
     """
     视频下载服务接口 (Protocol 版本)
-    
+
     支持静态类型检查，任何实现以下方法的类都被视为有效实现。
     """
 
@@ -62,7 +62,7 @@ class IDownloadService(Protocol):
 class DownloadServiceInterface(ABC):
     """
     视频下载服务接口 (ABC 版本)
-    
+
     负责从各种平台下载视频/音频
     """
 
@@ -75,15 +75,15 @@ class DownloadServiceInterface(ABC):
     ) -> DownloadResult:
         """
         下载视频/音频
-        
+
         Args:
             url: 视频链接
             progress_callback: 进度回调函数
             keep_video: 是否保留原始视频文件
-            
+
         Returns:
             DownloadResult: 下载结果，包含音频路径和元数据
-            
+
         Raises:
             DownloadError: 下载失败
             UnsupportedPlatformError: 不支持的平台
@@ -94,10 +94,10 @@ class DownloadServiceInterface(ABC):
     def get_metadata(self, url: str) -> VideoMetadata | None:
         """
         获取视频元数据（不下载）
-        
+
         Args:
             url: 视频链接
-            
+
         Returns:
             VideoMetadata: 视频元数据
         """
@@ -107,10 +107,10 @@ class DownloadServiceInterface(ABC):
     def supports(self, url: str) -> bool:
         """
         检查是否支持该URL
-        
+
         Args:
             url: 视频链接
-            
+
         Returns:
             bool: 是否支持
         """
@@ -147,7 +147,7 @@ class ITranscribeService(Protocol):
 class TranscribeServiceInterface(ABC):
     """
     语音转录服务接口
-    
+
     基于 faster-whisper 实现
     """
 
@@ -161,16 +161,16 @@ class TranscribeServiceInterface(ABC):
     ) -> TranscriptResult:
         """
         转录音频为文本
-        
+
         Args:
             audio_path: 音频文件路径
             model_size: Whisper 模型大小 (tiny/base/small/medium/large)
             language: 语言代码 (zh/en/ja/...)，None 表示自动检测
             progress_callback: 进度回调
-            
+
         Returns:
             TranscriptResult: 转录结果
-            
+
         Raises:
             TranscribeError: 转录失败
         """
@@ -180,7 +180,7 @@ class TranscribeServiceInterface(ABC):
     def get_available_models(self) -> list[str]:
         """
         获取可用的模型列表
-        
+
         Returns:
             List[str]: 模型名称列表
         """
@@ -214,7 +214,7 @@ class AISummaryInput:
 class IAIProvider(Protocol):
     """
     AI 提供商接口 (Protocol 版本)
-    
+
     支持多种 AI 模型实现，包括：
     - AIService (原有实现)
     - DeepSeekSkill (Skills 实现)
@@ -238,7 +238,7 @@ class IAIProvider(Protocol):
 class AIServiceInterface(ABC):
     """
     AI 服务接口 (ABC 版本)
-    
+
     支持多厂商 LLM (OpenAI/DeepSeek/Anthropic/本地Ollama)
     """
 
@@ -253,17 +253,17 @@ class AIServiceInterface(ABC):
     ) -> SummaryResult:
         """
         生成视频摘要
-        
+
         Args:
             transcript: 转录文本
             prompt_template: Prompt 模板（支持变量注入）
             provider: AI 提供商名称
             model: 指定模型名称（可选，使用默认）
             progress_callback: 进度回调
-            
+
         Returns:
             SummaryResult: 摘要结果
-            
+
         Raises:
             AIError: AI 调用失败
             RateLimitError: API 限流
@@ -274,7 +274,7 @@ class AIServiceInterface(ABC):
     def get_available_providers(self) -> list[str]:
         """
         获取可用的 AI 提供商列表
-        
+
         Returns:
             List[str]: 提供商名称列表
         """
@@ -284,10 +284,10 @@ class AIServiceInterface(ABC):
     def validate_provider_config(self, provider: str) -> bool:
         """
         验证提供商配置是否有效
-        
+
         Args:
             provider: 提供商名称
-            
+
         Returns:
             bool: 配置是否有效
         """
@@ -324,7 +324,7 @@ class ExportOutput:
 class IExporter(Protocol):
     """
     导出器接口 (Protocol 版本)
-    
+
     支持多种导出目标，包括：
     - LocalExporter (原有实现)
     - ObsidianExporter (原有实现)
@@ -354,7 +354,7 @@ class IExporter(Protocol):
 class IExportOrchestrator(Protocol):
     """
     导出编排器接口 (Protocol 版本)
-    
+
     管理多个导出目标，协调并发导出。
     """
 

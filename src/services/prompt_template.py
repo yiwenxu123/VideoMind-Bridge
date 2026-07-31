@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +12,7 @@ from jinja2 import BaseLoader, Environment
 logger = logging.getLogger(__name__)
 
 
-class TemplateStyle(str, Enum):
+class TemplateStyle(StrEnum):
     """模板风格类型"""
     DEFAULT = "default"           # 默认风格
     ACADEMIC = "academic"         # 学术风格
@@ -323,7 +323,7 @@ class PromptTemplateManager:
 
         template = self._templates[template_id]
         if template.is_builtin:
-            print("内置模板不能删除")
+            logging.getLogger(__name__).warning("内置模板不能删除")
             return False
 
         del self._templates[template_id]

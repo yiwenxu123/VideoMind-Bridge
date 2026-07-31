@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import contextlib
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -41,10 +42,10 @@ logger = get_logger(__name__)
 
 class TaskManager:
     """API任务管理器
-    
+
     协调各服务组件完成视频处理流程：
     下载 → 转录 → AI摘要 → 导出
-    
+
     服务组件通过接口类型声明，支持未来替换为 Skills 实现。
     """
 
@@ -89,6 +90,7 @@ class TaskManager:
         self._running = False
         self._task_queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: asyncio.Task | None = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
     def is_ai_available(self) -> bool:
         """AI 服务是否已配置可用"""
@@ -100,6 +102,7 @@ class TaskManager:
             return
 
         self._running = True
+        self._event_loop = asyncio.get_running_loop()
         self._worker_task = asyncio.create_task(self._process_queue())
         logger.info("任务管理器已启动")
 
@@ -114,10 +117,8 @@ class TaskManager:
         # 停止工作线程
         if self._worker_task:
             self._worker_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._worker_task
-            except asyncio.CancelledError:
-                pass
 
         logger.info("任务管理器已停止")
 
@@ -348,10 +349,8 @@ class TaskManager:
         self._notify_task_update(task)
 
         try:
-            # 1. 下载
+            # 1. 下载 (失败时 _download_audio 抛出带真实原因的异常)
             audio_path = await self._download_audio(task)
-            if not audio_path:
-                raise Exception("下载失败")
 
             task.audio_path = audio_path
             task.progress = 30.0
@@ -419,40 +418,51 @@ class TaskManager:
 
         self._notify_task_update(task)
 
-    async def _download_audio(self, task: VideoTask) -> Path | None:
-        """下载音频"""
-        try:
-            loop = asyncio.get_event_loop()
+    async def _download_audio(self, task: VideoTask) -> Path:
+        """下载音频 (失败时抛出带真实原因的异常)"""
+        loop = asyncio.get_event_loop()
 
-            def do_download():
-                result = self._download_service.download(
-                    task.url,
-                    download_video=False,
-                    progress_callback=lambda status, percent: self._update_download_progress(task, percent),
-                    cookies_from_browser=getattr(task, 'cookies_from_browser', None),
-                )
-                return result
+        def do_download():
+            return self._download_service.download(
+                task.url,
+                download_video=False,
+                progress_callback=lambda status, percent: self._update_download_progress(task, percent),
+                cookies_from_browser=getattr(task, 'cookies_from_browser', None),
+            )
 
-            result = await loop.run_in_executor(None, do_download)
+        result = await loop.run_in_executor(None, do_download)
 
-            if result and result.audio_path:
-                if result.metadata:
-                    task.metadata = result.metadata
-                return result.audio_path
+        if not result or not result.audio_path:
+            raise Exception(f"下载失败: 未获取到音频文件{getattr(result, 'error', '')}")
 
-            return None
-        except Exception as e:
-            logger.error(f"下载音频失败: {e}")
-            return None
+        if result.metadata:
+            task.metadata = result.metadata
+        return result.audio_path
 
     def _update_download_progress(self, task: VideoTask, progress: float) -> None:
-        """更新下载进度"""
+        """更新下载进度
+
+        在 executor 线程 (download 回调) 中被调用,
+        调度回事件循环线程修改 task 状态, 避免跨线程写。
+        """
+        loop = self._event_loop
+        if loop is None or loop.is_closed() or not loop.is_running():
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(
+                self._apply_download_progress(task, progress), loop,
+            )
+        except Exception as e:
+            logger.error(f"调度下载进度更新失败: {e}")
+
+    async def _apply_download_progress(self, task: VideoTask, progress: float) -> None:
+        """在事件循环线程应用下载进度"""
         task.progress = 10.0 + progress * 0.2  # 10% - 30%
         self._notify_task_update(task)
 
     async def _transcribe_audio(
         self,
-        task: VideoTask,
+        _task: VideoTask,
         audio_path: Path,
     ) -> list:
         """转录音频"""
@@ -560,7 +570,11 @@ class TaskManager:
                 completed_at=datetime.now() if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED) else None,
                 summary=task.ai_summary,
                 highlights_count=0,
-                transcript_path=task.audio_path,
+                transcript_path=next(
+                    (p for p in (task.output_files if hasattr(task, 'output_files') else [])
+                     if p.suffix.lower() in (".srt", ".vtt", ".txt", ".md")),
+                    None,
+                ),
                 output_files=task.output_files if hasattr(task, 'output_files') and task.output_files else [],
                 export_success_count=0,
                 export_total_count=len(task.targets),

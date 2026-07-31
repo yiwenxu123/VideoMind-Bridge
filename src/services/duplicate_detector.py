@@ -3,13 +3,17 @@
 import hashlib
 from dataclasses import dataclass
 from datetime import datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 
 import yaml
 
+from ..utils import get_logger
 
-class ProcessingStatus(str, Enum):
+logger = get_logger(__name__)
+
+
+class ProcessingStatus(StrEnum):
     """处理状态"""
     PENDING = "pending"      # 处理中
     COMPLETED = "completed"  # 已完成
@@ -89,9 +93,9 @@ class DuplicateDetector:
                         try:
                             self._records[url_hash] = ProcessingRecord.from_dict(record_data)
                         except Exception as e:
-                            print(f"加载处理记录失败: {e}")
+                            logger.warning(f"加载处理记录失败: {e}")
             except Exception as e:
-                print(f"加载处理记录文件失败: {e}")
+                logger.warning(f"加载处理记录文件失败: {e}")
 
     def _save_records(self) -> bool:
         """保存记录到文件"""
@@ -102,7 +106,7 @@ class DuplicateDetector:
                 yaml.dump(data, f, allow_unicode=True, sort_keys=False)
             return True
         except Exception as e:
-            print(f"保存处理记录失败: {e}")
+            logger.error(f"保存处理记录失败: {e}")
             return False
 
     @staticmethod

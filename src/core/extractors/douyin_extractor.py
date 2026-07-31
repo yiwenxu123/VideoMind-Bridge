@@ -68,7 +68,7 @@ class DouyinExtractor(ContentExtractor):
 
             if not content:
                 return ExtractResult(
-                    success=True,
+                    success=False,
                     platform="douyin",
                     title=title or f"抖音视频 {video_id}",
                     content=f"[抖音] {title or video_id}\n无可用字幕文案。",

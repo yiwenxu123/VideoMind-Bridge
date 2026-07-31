@@ -186,7 +186,7 @@ _MARKETING_KEYWORDS = [
 _LOW_QUALITY_TITLE_PATTERNS = [
     r"^测试",           # 测试视频
     r"^test",            # test video
-    r"^【?.{0,5}】?$",  # 纯括号标题
+    r"^【[^】]{0,5}】$",  # 纯括号标题 (必须同时有左右括号)
     r"^\d{5,}$",         # 纯数字
 ]
 

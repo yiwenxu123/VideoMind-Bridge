@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...config.constants import DialogConfig, Icons
+from ..constants import DialogConfig, Icons
 from ...services.prompt_template import TemplateStyle, get_prompt_template_manager
 
 
@@ -176,7 +176,7 @@ class PromptTemplateDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "错误", f"加载模板失败: {e}")
 
-    def _on_template_selected(self, current: QListWidgetItem, previous: QListWidgetItem) -> None:
+    def _on_template_selected(self, current: QListWidgetItem, _previous: QListWidgetItem) -> None:
         """选中模板"""
         if not current:
             return

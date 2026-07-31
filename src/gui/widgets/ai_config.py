@@ -224,7 +224,7 @@ class AIConfigWidget(QGroupBox):
             # 加载失败时添加默认选项
             self.template_combo.addItem("默认风格", "default")
 
-    def _on_template_changed(self, index: int):
+    def _on_template_changed(self, _index: int):
         """模板选择变更"""
         template_id = self.template_combo.currentData()
         logger.debug(f"选择模板: {template_id}")
@@ -431,7 +431,7 @@ class PromptTemplateDialog(QDialog):
         except Exception as e:
             print(f"加载模板失败: {e}")
 
-    def _on_template_selected(self, index: int):
+    def _on_template_selected(self, _index: int):
         """模板选择变更"""
         template_id = self.template_list.currentData()
         if not template_id:

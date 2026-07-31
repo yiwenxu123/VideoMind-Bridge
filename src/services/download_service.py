@@ -29,7 +29,7 @@ class DownloadResult:
 
 class DownloadService:
     """视频下载服务
-    
+
     使用 yt-dlp 下载器支持 YouTube、Bilibili、抖音、小红书等多平台。
     """
 

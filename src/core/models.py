@@ -96,6 +96,7 @@ class ExtractResult:
     segments: list[dict[str, Any]] | None = None  # 字幕片段
     metadata: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    is_placeholder: bool = False  # 占位结果 (仅元信息/说明文本, 无真实内容)
 
     def to_dict(self) -> dict[str, Any]:
         """转为字典 (Hermes 兼容)"""

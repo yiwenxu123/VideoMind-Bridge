@@ -23,7 +23,7 @@ def sanitize_filename(title: str, max_length: int = 100) -> str:
     # 替换全角字符为半角
     fullwidth_chars = {
         '｜': '|', '／': '/', '＼': '\\', '：': ':', '＊': '*',
-        '？': '?', '＜': '<', '＞': '>', '｜': '|', '＂': '"',
+        '？': '?', '＜': '<', '＞': '>', '＂': '"',
     }
     for full, half in fullwidth_chars.items():
         title = title.replace(full, half)

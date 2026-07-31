@@ -107,7 +107,7 @@ class ExportResult:
 class VideoTask:
     """
     视频任务实体
-    
+
     这是一个聚合根，包含任务的所有信息和状态
     """
     # 基础标识

@@ -269,7 +269,7 @@ tags:
                 lines.append("### 转录时间轴")
                 lines.append("")
                 # 显示前 10 个转录段落作为时间轴
-                for i, segment in enumerate(context.transcript_segments[:10]):
+                for _i, segment in enumerate(context.transcript_segments[:10]):
                     time_str = format_time_for_media_extended(int(segment.start))
                     # 转录模式没有本地视频，链接到线上 URL
                     video_url = context.video_metadata.url

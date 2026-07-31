@@ -42,4 +42,5 @@ from . import (
     xiaohongshu_extractor,  # noqa: E402, F811
     youtube_extractor,  # noqa: E402, F811
     ytdlp_extractor,  # noqa: E402, F811
+    ytdlp_asr_extractor,  # noqa: E402, F811
 )

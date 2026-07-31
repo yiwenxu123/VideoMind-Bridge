@@ -41,11 +41,32 @@ mypy src/ --ignore-missing-imports  # 类型检查
 
 默认优先级 (成本排序):
 ```
-bilibili → youtube → douyin → xiaohongshu → coze → ytdlp
-FREE        FREE       FREE      FREE           CHEAP   FREE
+coze → bilibili → youtube → douyin → xiaohongshu → ytdlp → ytdlp_asr → tikhub → apify
+CHEAP   FREE       FREE      FREE       FREE           FREE    CHEAP      PREMIUM   PREMIUM
 ```
 
+Coze 位于优先级首位，使用免费每日积分覆盖全平台。Coze 失败时自动降级到免费平台 API。
+
 提取器接口: `extract()`, `is_available()`, `supports()`, `should_try()`
+
+### Coze 提取器 (`coze_extractor.py`)
+
+平台专用工作流 (stream_run SSE):
+
+| 平台 | Workflow ID | 参数 |
+|------|------------|------|
+| 抖音 | `7645116403896385562` | `input` + `ali_api` |
+| B站 | `7545785780040564799` | `url` + `ali_api_key` |
+| 小红书 | `7545776707971039241` | `url` + `ali_aip_key` |
+
+降级链: 平台工作流 → `COZE_BOT_ID` 自定义 → Chat API
+
+配置要求:
+- `COZE_API_KEY` 或 `COZE_API_TOKEN`: Coze API Token
+- `ALI_API_KEY`: 阿里云 DashScope Key (工作流内部 ASR 用)
+- `COZE_DAILY_LIMIT`: 每日调用上限 (默认 200)
+
+所有 Key 通过 `ConfigManager` 统一管理: 系统密钥环(持久化) → 环境变量(兜底)。
 
 ### Router (`router.py`)
 
@@ -78,12 +99,15 @@ FREE        FREE       FREE      FREE           CHEAP   FREE
 
 ## Known Quirks & Gotchas
 
-- **sys.path 动态注入**: `main.py` 和 `cli.py` 都会将 `src/` 插入 sys.path。`cli.py` 用 try/except 做双模式导入兜底
+- **sys.path 动态注入**: `main.py` 会将 `src/` 插入 sys.path。`cli.py` 使用 `from src.*` 导入，需以 `python -m src.cli`（项目根）方式运行
 - **两种 TranscriptSegment 类型**: `src.models.task.TranscriptSegment` vs `src.services.transcribe_service.TranscriptSegment` — 已有类型冲突（预存问题，不影响运行）
 - **Bilibili API**: URL 必须全小写 `/x/web-interface/view`，大写 `I` 会 404
 - **Extractor 注册**: 通过 import 时跑的模块级代码自动注册，无需手动配置
-- **Coze 提取器**: 401 时不阻塞，自动跳到下一个提取器
-- **`--prescreen` 复用提取**: 在 CLI 层面用 `prescreen_meta["extract_result"]` 缓存，不会被二次提取
+- **Coze 提取器**: 401 时不阻塞，自动跳到下一个提取器；配额只在真实 API 调用成功后计数（`_count_call`），平台不支持/Key 失效不烧配额
+- **占位结果语义**: `ExtractResult.is_placeholder=True` 表示仅元信息/说明文本（无真实内容）。router 对占位结果不缓存、继续降级链；真正成功才缓存并返回
+- **`--smart`/MCP smart_extract**: FREE 提取到完整内容时直接复用（不二次提取）；仅当 FREE 失败/占位时才按推荐成本升级提取
+- **`--prescreen` 复用提取**: 仅真成功（有内容、非占位）结果被复用；失败/占位时允许二次高成本提取
+- **API 鉴权**: 默认绑定 127.0.0.1。设置环境变量 `VIDEOMIND_API_TOKEN` 后，`/api/v1/*` 需携带 `Authorization: Bearer <token>`；带非白名单 Origin 的浏览器请求被 403 拒绝（防 CSRF）
 - **GUI 使用 PySide6**: 依赖较重，macOS 需提前安装 Qt 运行时
 - **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)
@@ -136,3 +160,4 @@ Release workflow 自动构建 macOS DMG + Windows ZIP，标签推送 `v*` 触发
 - 添加新提取器时: 继承 `ContentExtractor` → 调用 `register_extractor()` → 在 `__init__.py` 中 import
 - GUI 的 `main_window.py.bak` 文件需要手动删除（一次性遗留）
 - MCP 通过 stdio 通信，不支持 HTTP — 仅适用 MCP 兼容的 AI Agent
+- **钥匙串弹窗**: macOS keyring 弹窗「python 想要使用钥匙串中的机密信息」是因为 `CozeExtractor.__init__()` 访问了系统钥匙串。解决：(1) 设置环境变量（优先级高于钥匙串），无需钥匙串；或 (2) 在 `~/.zshrc` 添加 `export COZE_API_KEY=xxx` 等；测试已通过 `tests/conftest.py` 全局 mock keyring 避免弹窗

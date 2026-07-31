@@ -305,6 +305,8 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
             if not is_worth:
                 prescreen_meta["extraction_skipped"] = True
                 prescreen_meta["skip_reason"] = f"预筛 {prescreen_result.grade.value} 级, 低于提取阈值 C 级"
+                # extract_result 是 ExtractResult 对象, 需转 dict 或移除
+                prescreen_meta.pop("extract_result", None)
                 if use_json:
                     print(json.dumps(prescreen_meta, ensure_ascii=False, indent=2))
                 else:
@@ -321,7 +323,7 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
                     console.print(f"  推荐成本: [cyan]{recommended}[/cyan]")
         else:
             # --prescreen 模式: 提取一次, 用提取结果做预筛评分
-            max_cost_info = max_cost or CostTier.FREE
+            max_cost_info = max_cost or CostTier.CHEAP
             prescreen_extract = router.extract(url, max_cost=max_cost_info)
             prescreen_result = prescreener.prescreen(
                 url,
@@ -338,8 +340,15 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
                 "score": prescreen_result.score,
                 "reasons": prescreen_result.reasons,
                 "extraction_recommended": True,
-                "extract_result": prescreen_extract,  # 复用提取结果, 避免二次提取
             }
+
+            # 仅真成功 (有真实内容) 才复用提取结果, 避免失败/占位结果被二次使用
+            if (
+                prescreen_extract.success
+                and prescreen_extract.content.strip()
+                and not prescreen_extract.is_placeholder
+            ):
+                prescreen_meta["extract_result"] = prescreen_extract
 
             if not use_json:
                 grade_color = {"S": "green", "A": "cyan", "B": "yellow", "C": "red", "D": "dim"}
@@ -586,7 +595,7 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
     use_json = args.json_output
     use_quiet = args.quiet or use_json
 
-    out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None
+    out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None  # noqa: SIM115
     def _write_json(data: dict) -> None:
         text = json.dumps(data, ensure_ascii=False, indent=2)
         if out_file:
@@ -815,7 +824,7 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
         console.print(f"\n[bold green]✓ 完成![/bold green] 总耗时: {format_duration(elapsed)}")
         if highlights:
             console.print("\n[cyan]关键时间轴预览:[/cyan]")
-            for i, h in enumerate(highlights[:5], 1):
+            for _i, h in enumerate(highlights[:5], 1):
                 console.print(f"  [{h.time}] {h.content[:40]}...")
             if len(highlights) > 5:
                 console.print(f"  ... 还有 {len(highlights) - 5} 个要点")

@@ -38,9 +38,11 @@ _SUPPORTED_PATTERNS = {
 
 
 def _detect_apify_platform(url: str) -> str | None:
-    for platform, pattern in _SUPPORTED_PATTERNS.items():
-        if pattern.search(url):
-            return platform
+    """委托统一的平台检测器, 再过滤到 Apify 支持的平台集"""
+    from ...utils.platform_detector import detect_platform
+    platform = detect_platform(url)
+    if platform in _SUPPORTED_PATTERNS:
+        return platform
     return None
 
 

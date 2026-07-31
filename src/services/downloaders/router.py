@@ -20,7 +20,7 @@ logger = get_logger(__name__)
 
 class DownloaderRouter:
     """下载器路由
-    
+
     自动选择合适的下载器处理 URL。
     支持按优先级和平台匹配选择下载器。
     """
@@ -97,7 +97,7 @@ class DownloaderRouter:
         platforms = set()
         for downloader in self._downloaders:
             platforms.update(downloader.info.platforms)
-        return sorted(list(platforms))
+        return sorted(platforms)
 
     def list_downloaders(self) -> list[dict]:
         return [

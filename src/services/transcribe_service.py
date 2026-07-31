@@ -13,6 +13,7 @@ from faster_whisper import WhisperModel
 from ..models.task import TranscriptSegment
 from ..utils import get_logger
 from ..utils.exceptions import TranscribeError
+from ..utils.retry import is_retryable_error
 
 logger = get_logger(__name__)
 
@@ -32,7 +33,7 @@ class TranscriptResult:
 class ModelCache:
     """
     Whisper 模型缓存管理器
-    
+
     使用 LRU (Least Recently Used) 策略管理模型缓存，
     防止内存无限增长。
     """
@@ -47,7 +48,7 @@ class ModelCache:
     def get(self, model_size: str) -> WhisperModel:
         """
         获取模型（如果不存在则加载）
-        
+
         使用 LRU 策略：访问时移动到末尾，淘汰最旧的
         """
         with self._lock:
@@ -189,19 +190,14 @@ class TranscribeService:
         for attempt in range(self.MAX_RETRIES):
             try:
                 return self._do_transcribe(audio_path, language, progress_callback)
-            except (IndexError, RuntimeError) as e:
+            except TranscribeError as e:
                 last_error = e
-                error_msg = str(e)
 
-                # 某些错误不需要重试
-                if "不支持的模型" in error_msg or "音频文件不存在" in error_msg:
-                    raise TranscribeError(
-                        error_msg,
-                        error_code="TRANSCRIBE_FAILED",
-                        details={"audio_path": str(audio_path)}
-                    ) from e
+                # 不可重试的错误 (文件不存在/音频损坏等) 直接抛出
+                if not is_retryable_error(e):
+                    raise
 
-                # 其他错误可以重试
+                # 可重试错误 (模型加载/通用转录失败) 指数退避重试
                 if attempt < self.MAX_RETRIES - 1:
                     delay = self.RETRY_DELAY * (self.RETRY_BACKOFF ** attempt)
                     logger.warning(f"转录失败（尝试 {attempt + 1}/{self.MAX_RETRIES}）: {e}，{delay:.1f}秒后重试...")

@@ -49,11 +49,9 @@ class AliyunASRExtractor(ContentExtractor):
         return bool(self.url_pattern.search(url))
 
     def should_try(self, url: str, max_cost: CostTier | None = None) -> bool:
-        if not super().should_try(url, max_cost):
-            return False
         # ASR 提取器只在其他方式均失败时作为兜底
         # 实际路由层通过 max_cost 和优先级控制
-        return True
+        return bool(super().should_try(url, max_cost))
 
     def extract(self, url: str) -> ExtractResult:
         # Aliyun ASR 需要音频文件路径作为输入, 而非 URL
@@ -100,7 +98,7 @@ class AliyunASRExtractor(ContentExtractor):
                 error=f"阿里云 ASR 调用失败: {e}",
             )
 
-    def _call_asr_api(self, audio_path: Path, file_url: str) -> ExtractResult:
+    def _call_asr_api(self, audio_path: Path, _file_url: str) -> ExtractResult:
         """调用阿里云语音识别 RESTful API"""
         audio_data = audio_path.read_bytes()
         audio_b64 = base64.b64encode(audio_data).decode("utf-8")

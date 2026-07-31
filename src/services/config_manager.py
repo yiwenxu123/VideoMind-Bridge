@@ -76,7 +76,7 @@ class ConfigManager:
 
     def get_api_key(self, provider: str | None = None) -> str | None:
         """
-        获取 API Key（从密钥环）
+        获取 API Key（环境变量 → 密钥环）
 
         Args:
             provider: 服务提供商，默认为当前配置的引擎
@@ -86,6 +86,11 @@ class ConfigManager:
         """
         if provider is None:
             provider = self._config.ai.engine.lower()
+
+        env_key = os.getenv(f"{provider.upper()}_API_KEY")
+        if env_key:
+            return env_key.strip()
+
         return CredentialManager.get_api_key(provider)
 
     def set_api_key(self, api_key: str, provider: str | None = None) -> bool:
@@ -107,15 +112,17 @@ class ConfigManager:
 
     EXTRACTOR_PROVIDERS: dict[str, dict[str, str]] = {
         "coze": {"env": "COZE_API_KEY", "label": "Coze API Token"},
+        "coze_token": {"env": "COZE_API_TOKEN", "label": "Coze API Token (别名)"},
         "tikhub": {"env": "TIKHUB_API_KEY", "label": "Tikhub.io API Key"},
         "apify": {"env": "APIFY_API_KEY", "label": "Apify API Token"},
         "aliyun_access_key_id": {"env": "ALIYUN_ACCESS_KEY_ID", "label": "阿里云 AccessKey ID"},
         "aliyun_access_key_secret": {"env": "ALIYUN_ACCESS_KEY_SECRET", "label": "阿里云 AccessKey Secret"},
         "aliyun_appkey": {"env": "ALIYUN_APPKEY", "label": "阿里云 AppKey"},
+        "coze_ali_key": {"env": "ALI_API_KEY", "label": "Coze ASR 阿里云 Key (DashScope)"},
     }
 
     EXTRACTOR_GROUPS: dict[str, dict[str, Any]] = {
-        "coze": {"label": "Coze 提取加速", "keys": ["coze"]},
+        "coze": {"label": "Coze 提取加速", "keys": ["coze", "coze_token", "coze_ali_key"]},
         "tikhub": {"label": "Tikhub.io 商业 API", "keys": ["tikhub"]},
         "apify": {"label": "Apify 商业爬虫", "keys": ["apify"]},
         "aliyun_asr": {
@@ -129,15 +136,15 @@ class ConfigManager:
         return f"extractor_{name}"
 
     def get_extractor_key(self, name: str) -> str | None:
-        """获取提取器 Key: 密钥环 → 环境变量 → None"""
-        key = CredentialManager.get_api_key(self._keyring_name(name))
-        if key:
-            return key
+        """获取提取器 Key: 环境变量 → 密钥环 → None"""
         info = self.EXTRACTOR_PROVIDERS.get(name)
         if info:
             env_val = os.getenv(info["env"])
             if env_val and env_val.strip():
                 return env_val.strip()
+        key = CredentialManager.get_api_key(self._keyring_name(name))
+        if key:
+            return key.strip()
         return None
 
     def set_extractor_key(self, name: str, value: str) -> bool:

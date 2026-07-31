@@ -80,6 +80,9 @@ class ExportOrchestrator:
         """
         results = []
 
+        if not self.exporters:
+            return results
+
         # 使用线程池并发执行
         with ThreadPoolExecutor(max_workers=len(self.exporters)) as executor:
             # 提交所有任务

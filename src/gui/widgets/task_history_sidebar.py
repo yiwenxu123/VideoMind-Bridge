@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ...config.constants import ButtonConfig, HistoryConfig, Icons
+from ..constants import ButtonConfig, HistoryConfig, Icons
 from ...models.task import TaskHistory, TaskStatus
 from ...services.task_database import get_task_database
 from ...utils import get_logger

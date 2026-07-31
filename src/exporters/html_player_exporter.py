@@ -56,7 +56,6 @@ class HTMLPlayerExporter(BaseExporter):
             )
 
         # 生成文件名
-        safe_title = self._sanitize_filename(context.video_metadata.title)
         player_path = output_dir / "player.html"
 
         # 准备数据
@@ -139,13 +138,21 @@ class HTMLPlayerExporter(BaseExporter):
     ) -> str:
         """生成完整的 HTML 播放器页面"""
 
-        # 准备 JSON 数据
-        highlights_json = json.dumps([
+        # 准备 JSON 数据 (转义 < > & 防止 </script> 逃逸 XSS)
+        def _safe_json(obj) -> str:
+            return (
+                json.dumps(obj, ensure_ascii=False)
+                .replace("<", "\\u003c")
+                .replace(">", "\\u003e")
+                .replace("&", "\\u0026")
+            )
+
+        highlights_json = _safe_json([
             {"time": h.time, "seconds": h.seconds, "content": h.content}
             for h in highlights
-        ], ensure_ascii=False)
+        ])
 
-        subtitles_json = json.dumps(subtitles, ensure_ascii=False)
+        subtitles_json = _safe_json(subtitles)
 
         # 对 HTML 中的动态内容进行转义，防止 XSS
         safe_title = html.escape(metadata.title)
@@ -394,7 +401,7 @@ class HTMLPlayerExporter(BaseExporter):
         <div class="video-section">
             <div class="video-container">
                 <video id="videoPlayer" controls>
-                    <source src="{video_filename}" type="video/mp4">
+                    <source src="{html.escape(video_filename)}" type="video/mp4">
                     您的浏览器不支持视频播放。
                 </video>
             </div>

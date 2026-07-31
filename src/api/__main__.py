@@ -2,7 +2,11 @@
 
 用法:
     python -m src.api
-    python -m src.api --host 0.0.0.0 --port 8080
+    python -m src.api --host 127.0.0.1 --port 8080
+
+安全提示:
+    默认仅监听 127.0.0.1 (本地回环), 不要在生产/公网环境绑定 0.0.0.0。
+    如需远程访问, 请先设置环境变量 VIDEOMIND_API_TOKEN 开启鉴权。
 """
 
 import argparse
@@ -23,10 +27,15 @@ def main():
   python -m src.api
 
   # 指定主机和端口
-  python -m src.api --host 0.0.0.0 --port 8080
+  python -m src.api --host 127.0.0.1 --port 8080
 
   # 查看帮助
   python -m src.api --help
+
+安全提示:
+  默认绑定 127.0.0.1 (仅本机访问)。
+  切勿在公网绑定 0.0.0.0; 若确有远程访问需求,
+  请先设置环境变量 VIDEOMIND_API_TOKEN 开启 Bearer 鉴权。
         """
     )
 

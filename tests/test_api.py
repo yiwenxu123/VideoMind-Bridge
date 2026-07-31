@@ -360,3 +360,81 @@ class TestConfig:
         assert isinstance(data["supported_export_targets"], list)
         assert "ai_enabled" in data
         assert isinstance(data["ai_enabled"], bool)
+
+
+# ── 安全防护 ─────────────────────────────────────────────────
+
+
+class TestSecurity:
+    """CORS CSRF 防护与可选 token 鉴权"""
+
+    def test_rejects_foreign_origin(self, server):
+        """非白名单 Origin 的请求应被 403 拒绝 (防 CSRF)"""
+        with TestClient(server.app) as c:
+            resp = c.post(
+                "/api/v1/tasks",
+                json={"url": "https://bilibili.com/video/BV1xx411c7mD", "mode": "transcribe", "targets": ["local"]},
+                headers={"Origin": "https://evil.example.com"},
+            )
+            assert resp.status_code == 403
+
+    def test_allows_local_origin(self, server):
+        """白名单 Origin (localhost) 正常放行"""
+        with TestClient(server.app) as c:
+            resp = c.get(
+                "/api/v1/status",
+                headers={"Origin": "http://localhost:5173"},
+            )
+            assert resp.status_code == 200
+
+    def test_allows_no_origin_clients(self, server):
+        """非浏览器客户端 (无 Origin) 正常放行"""
+        with TestClient(server.app) as c:
+            resp = c.get("/api/v1/status")
+            assert resp.status_code == 200
+
+    def test_token_required_when_configured(self, server):
+        """配置 token 后, /api/v1 未携带 token 应 401"""
+        server._api_token = "test-secret-token"
+        with TestClient(server.app) as c:
+            resp = c.get("/api/v1/status")
+            assert resp.status_code == 401
+
+    def test_token_authorized_when_configured(self, server):
+        """配置 token 后, 携带正确 Bearer token 应通过"""
+        server._api_token = "test-secret-token"
+        with TestClient(server.app) as c:
+            resp = c.get(
+                "/api/v1/status",
+                headers={"Authorization": "Bearer test-secret-token"},
+            )
+            assert resp.status_code == 200
+
+    def test_token_wrong_token_rejected(self, server):
+        """配置 token 后, 错误 token 应 401"""
+        server._api_token = "test-secret-token"
+        with TestClient(server.app) as c:
+            resp = c.get(
+                "/api/v1/status",
+                headers={"Authorization": "Bearer wrong"},
+            )
+            assert resp.status_code == 401
+
+    def test_health_endpoint_no_auth_required(self, server):
+        """配置 token 后, /health 仍应免鉴权"""
+        server._api_token = "test-secret-token"
+        with TestClient(server.app) as c:
+            resp = c.get("/health")
+            assert resp.status_code == 200
+
+    def test_list_tasks_limit_zero_rejected(self, server):
+        """limit=0 应被参数校验拒绝 (422), 而非 500 ZeroDivisionError"""
+        with TestClient(server.app) as c:
+            resp = c.get("/api/v1/tasks?limit=0")
+            assert resp.status_code == 422
+
+    def test_list_tasks_limit_overflow_rejected(self, server):
+        """limit 过大应被参数校验拒绝 (422)"""
+        with TestClient(server.app) as c:
+            resp = c.get("/api/v1/tasks?limit=1000")
+            assert resp.status_code == 422

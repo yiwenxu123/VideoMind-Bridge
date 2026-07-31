@@ -84,6 +84,7 @@ class XiaohongshuExtractor(ContentExtractor):
                 url=url,
                 cost_tier=CostTier.FREE,
                 language="zh",
+                is_placeholder=not bool(content),
                 metadata={
                     "note_id": note_id,
                     "images": images,
