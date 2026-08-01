@@ -116,7 +116,7 @@ def _parse_sse_response(raw_data: str, response_format: str, platform: str) -> d
                         if isinstance(output1, dict):
                             text = output1.get("text", "") or data.get("output", "")
                             desc = output1.get("desc", "") or data.get("desc", "")
-                            if not _content_is_error(text):
+                            if text and not _content_is_error(text):
                                 return {
                                     "success": True,
                                     "title": desc,
@@ -131,6 +131,8 @@ def _parse_sse_response(raw_data: str, response_format: str, platform: str) -> d
                                 "content": text,
                                 "source": f"coze_{platform}",
                             }
+                        # JSON 对象存在但内容为空 → 工作流未提取到内容
+                        return None
 
                 if response_format == "text":
                     title = ""

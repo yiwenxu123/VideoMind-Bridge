@@ -89,6 +89,7 @@ class BilibiliExtractor(ContentExtractor):
                     duration_seconds=float(duration),
                     language="zh",
                     metadata={"bvid": bvid, "video_info": info},
+                    error="无可用字幕 (视频可能无 CC 字幕, 或需要登录 Cookie 才能访问字幕接口)",
                 )
 
             return ExtractResult(
@@ -212,7 +213,9 @@ class BilibiliExtractor(ContentExtractor):
         data = resp.json()
 
         if data.get("code") != 0:
-            return "", [], None
+            raise RuntimeError(
+                f"Bilibili 字幕 API 返回错误: {data.get('message', 'unknown')} (code={data.get('code')})"
+            )
 
         player_info = data.get("data", {})
         subtitle_list = player_info.get("subtitle", {}).get("subtitles", [])
