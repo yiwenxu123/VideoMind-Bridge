@@ -653,17 +653,32 @@ class MCPServer:
 
         from pathlib import Path
 
-        from src.core import ContentRouter, HermesFormatter
+        from src.core import ContentRouter, HermesFormatter, Prescreener
         from src.core.archiver import ArchiverConfig, archive_extract_result
         from src.core.models import CostTier
 
         router = ContentRouter()
-        result = router.extract(url, max_cost=CostTier.FREE)
+        prescreener = Prescreener(router)
 
-        if not result.success or not result.content.strip():
+        # 先 FREE 取元信息做成本预筛, 再按推荐成本提取完整内容
+        quick_result = router.extract(url, max_cost=CostTier.FREE)
+        max_cost = CostTier.FREE
+        if quick_result.success and quick_result.title:
+            ps_result = prescreener.prescreen(
+                url,
+                title=quick_result.title,
+                duration_seconds=quick_result.duration_seconds,
+            )
+            if ps_result.recommended_cost_tier:
+                max_cost = ps_result.recommended_cost_tier
+
+        result = router.extract(url, max_cost=max_cost)
+
+        if not result.success or not result.content.strip() or result.is_placeholder:
             return {
                 "success": False,
                 "url": url,
+                "max_cost_used": max_cost.value,
                 "error": result.error or "提取失败, 无真实内容",
             }
 
@@ -678,6 +693,7 @@ class MCPServer:
         return {
             "success": True,
             "url": url,
+            "max_cost_used": max_cost.value,
             "extract": HermesFormatter.format_extract_result_full(result),
             "archive": [
                 {

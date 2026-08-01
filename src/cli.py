@@ -632,8 +632,22 @@ def main() -> int:
     if args.config_set:
         return _run_config_set(*args.config_set, json_output=args.json_output)
 
-    # v2 模式: prescreen / smart / prescreen-only / cost-tier / list-extractors
-    if args.prescreen or args.smart or args.prescreen_only or args.cost_tier or args.list_extractors:
+    # v2 提取引擎为默认路径 (成本感知路由, 无需下载/转录, Agent 友好):
+    # 仅当显式请求 v1 专属参数时才走旧版 下载→转录→摘要 流程
+    v1_requested = (
+        args.mode != "full"
+        or args.model != "small"
+        or args.targets != "local"
+        or args.output_dir != str(Path.home() / "Downloads" / "VideoMind")
+        or not args.keep_video
+        or args.video_quality != "best"
+        or args.mock
+    )
+    if (
+        args.prescreen or args.smart or args.prescreen_only
+        or args.cost_tier or args.list_extractors
+        or not v1_requested
+    ):
         return run_v2_extraction(args)
 
     # stdin 模式：每行一个 URL，JSONL 批量输出

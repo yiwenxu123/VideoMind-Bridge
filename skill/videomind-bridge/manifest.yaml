@@ -1,9 +1,9 @@
 name: videomind-bridge
-version: 1.0.0
-description: 视频知识提取工具 - 下载、转录、AI摘要、多格式导出
+version: 3.0.0
+description: 视频知识提取工具 - v2 提取引擎 (成本感知路由) + v1 下载/转录/摘要
 author: VideoMind
 license: MIT
-homepage: https://github.com/your-org/VideoMind-Bridge
+homepage: https://github.com/yiwenxu123/VideoMind-Bridge
 
 categories:
   - productivity
@@ -21,7 +21,7 @@ requirements:
     - ffmpeg
   env: []
 
-primaryEnv: DEEPSEEK_API_KEY
+primaryEnv: COZE_API_KEY
 
 platforms:
   - darwin
@@ -38,9 +38,13 @@ inputs:
   - name: mode
     type: string
     required: false
-    default: full
-    description: 处理模式 (full/download/transcribe)
+    default: extract
+    description: 处理模式
     enum:
+      - extract
+      - smart
+      - prescreen
+      - archive
       - full
       - download
       - transcribe
@@ -49,7 +53,7 @@ inputs:
     type: string
     required: false
     default: small
-    description: Whisper 模型大小
+    description: Whisper 模型大小 (仅 v1 模式)
     enum:
       - tiny
       - base
@@ -60,18 +64,34 @@ inputs:
     type: string
     required: false
     default: local
-    description: 导出目标，逗号分隔
+    description: 导出目标，逗号分隔 (v1 full 模式 / v2 archive 模式)
 
   - name: keep_video
     type: boolean
     required: false
     default: true
-    description: 是否保留视频文件
+    description: 是否保留视频文件 (仅 v1 模式)
 
 outputs:
   - name: success
     type: boolean
     description: 是否处理成功
+
+  - name: title
+    type: string
+    description: 视频标题
+
+  - name: content
+    type: string
+    description: 提取的文字内容 (v2)
+
+  - name: source
+    type: string
+    description: 使用的提取器 (v2)
+
+  - name: cost_tier
+    type: string
+    description: 提取成本等级 (v2)
 
   - name: metadata
     type: object
@@ -79,8 +99,8 @@ outputs:
 
   - name: transcript
     type: object
-    description: 转录结果
+    description: 转录结果 (v1)
 
   - name: summary
     type: object
-    description: AI 摘要结果
+    description: AI 摘要结果 (v1)

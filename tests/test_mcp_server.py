@@ -652,7 +652,12 @@ class TestCallArchiveExtract:
             })
 
         from src.core.models import CostTier
-        mock_router.extract.assert_called_once_with(_MOCK_URL, max_cost=CostTier.FREE)
+        # archive_extract 现在会先 FREE 预筛, 再按推荐成本提取 (可能两次调用)
+        calls = mock_router.extract.call_args_list
+        assert len(calls) >= 1
+        assert calls[0].args == (_MOCK_URL,)
+        assert calls[0].kwargs.get("max_cost") == CostTier.FREE
+        assert all(c.args == (_MOCK_URL,) for c in calls)
         mock_archive.assert_called_once()
         result = captured_send[0]["result"]
         assert result["success"] is True

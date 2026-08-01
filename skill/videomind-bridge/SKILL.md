@@ -40,7 +40,7 @@ which ffmpeg && echo "ffmpeg已安装" || echo "ffmpeg未安装"
 # 安装项目
 PROJECT_DIR="$HOME/.local/share/videomind-bridge"
 if [ ! -d "$PROJECT_DIR" ]; then
-  git clone https://github.com/your-org/VideoMind-Bridge.git "$PROJECT_DIR"
+  git clone https://github.com/yiwenxu123/VideoMind-Bridge.git "$PROJECT_DIR"
 fi
 cd "$PROJECT_DIR" && uv sync
 ```

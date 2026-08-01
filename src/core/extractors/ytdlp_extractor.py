@@ -89,11 +89,26 @@ class YtDlpExtractor(ContentExtractor):
         duration = metadata.get("duration", 0)
 
         if not content:
-            # 降级到纯元信息
+            # 降级到纯元信息 (标记占位: 非完整内容, 路由层据此继续降级)
             content = (
                 f"[{metadata.get('platform', '视频')}] {title}\n"
                 f"时长: {duration}秒\n"
                 f"描述: {metadata.get('description', '无')}\n"
+            )
+            return ExtractResult(
+                success=True,
+                platform=metadata.get("platform", "video"),
+                title=title,
+                content=content,
+                source="ytdlp",
+                url=url,
+                cost_tier=CostTier.FREE,
+                duration_seconds=float(duration),
+                language=language,
+                segments=segments,
+                metadata=metadata,
+                is_placeholder=True,
+                error="yt-dlp 未找到字幕, 仅返回元信息 (标题/描述), 内容不完整",
             )
 
         return ExtractResult(

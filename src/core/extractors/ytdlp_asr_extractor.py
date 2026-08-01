@@ -14,16 +14,21 @@
 
 from __future__ import annotations
 
+import logging
+import re
 import subprocess
 import tempfile
-import re
 from pathlib import Path
 from typing import Any
 
+import httpx
+
 from ..models import CostTier, ExtractResult
 from . import register_extractor
-from .base import ContentExtractor
 from .aliyun_asr_extractor import AliyunASRExtractor
+from .base import ContentExtractor
+
+logger = logging.getLogger(__name__)
 
 _YTDLP_CMD = "yt-dlp"
 
@@ -80,21 +85,38 @@ class YtDlpASRExtractor(ContentExtractor):
 
             metadata = self._get_metadata(url)
 
+            # 优先阿里云 NLS ASR, 未配置时回退 DashScope (复用 coze_ali_key)
             if self._asr.is_available():
                 result = self._asr.transcribe_audio(audio_path)
+            else:
+                dashscope_key = self._resolve_api_key("coze_ali_key")
+                if dashscope_key:
+                    result = self._transcribe_dashscope(
+                        audio_path, dashscope_key, url,
+                        metadata.get("platform", "video"),
+                        metadata.get("title", ""),
+                        float(metadata.get("duration", 0)),
+                    )
+                else:
+                    result = None
+
+            if result and result.success:
                 result.url = url
-                result.platform = metadata.get("platform", "video")
                 if not result.title or result.title == audio_path.stem:
                     result.title = metadata.get("title", audio_path.stem)
                 return result
+
+            if result and result.error:
+                logger.warning(f"ytdlp_asr 转写失败: {result.error}")
 
             return ExtractResult(
                 success=True,
                 platform=metadata.get("platform", "video"),
                 title=metadata.get("title", audio_path.stem),
                 content=(
-                    f"[yt-dlp+ASR] 已下载音频但未配置阿里云 ASR\n"
-                    f"请配置 ALIYUN_ACCESS_KEY_ID / ACCESS_KEY_SECRET / APPKEY\n"
+                    "[yt-dlp+ASR] 已下载音频但 ASR 不可用\n"
+                    "请配置 ALIYUN_ACCESS_KEY_ID / ACCESS_KEY_SECRET / APPKEY, "
+                    "或 coze_ali_key (DashScope)\n"
                 ),
                 source="ytdlp_asr",
                 url=url,
@@ -106,6 +128,70 @@ class YtDlpASRExtractor(ContentExtractor):
                     "asr_available": False,
                     "platform_meta": metadata,
                 },
+            )
+
+    def _transcribe_dashscope(
+        self, audio_path: Path, api_key: str, url: str,
+        platform: str, title: str, duration: float,
+    ) -> ExtractResult:
+        """DashScope paraformer-v2 转写 (复用 coze_ali_key, 免额外配置)"""
+        import base64
+
+        audio_data = audio_path.read_bytes()
+        audio_b64 = base64.b64encode(audio_data).decode()
+
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": "paraformer-v2",
+            "input": {"audio_data": audio_b64},
+        }
+
+        try:
+            resp = httpx.post(
+                "https://dashscope.aliyuncs.com/api/v1/services/audio/transcription/asr",
+                headers=headers, json=payload, timeout=180.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+
+            output = data.get("output", {})
+            text = output.get("text", "") or output.get("transcript", "") or ""
+            segments_raw = output.get("sentences", output.get("segments", []))
+
+            segments = [
+                {"start": s.get("begin_time", s.get("start", 0)) / 1000,
+                 "end": s.get("end_time", s.get("end", 0)) / 1000,
+                 "text": s.get("text", "")}
+                for s in segments_raw if s.get("text")
+            ] if isinstance(segments_raw, list) else None
+
+            return ExtractResult(
+                success=bool(text),
+                platform=platform,
+                title=title or audio_path.stem,
+                content=text or "DashScope ASR 返回了空转录",
+                source="ytdlp_asr",
+                url=url,
+                cost_tier=self._cost_tier,
+                duration_seconds=duration,
+                language="zh",
+                segments=segments,
+                metadata={"api_provider": "dashscope_asr", "model": "paraformer-v2"},
+            )
+        except Exception as e:
+            return ExtractResult(
+                success=False,
+                platform=platform,
+                title=title or audio_path.stem,
+                content="",
+                source="ytdlp_asr",
+                url=url,
+                cost_tier=self._cost_tier,
+                duration_seconds=duration,
+                error=f"DashScope ASR 调用失败: {e}",
             )
 
     def _download_audio(self, url: str, tmp_dir: Path) -> Path | None:

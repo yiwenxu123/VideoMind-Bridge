@@ -5,7 +5,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${1:-$HOME/.local/share/videomind-bridge}"
-REPO_URL="https://github.com/your-org/VideoMind-Bridge.git"
+REPO_URL="https://github.com/yiwenxu123/VideoMind-Bridge.git"
 
 echo "=== VideoMind Bridge 安装脚本 ==="
 

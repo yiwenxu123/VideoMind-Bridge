@@ -20,15 +20,11 @@ class HermesFormatter:
     """
 
     @staticmethod
-    def format_extract_result(
-        result: ExtractResult,
-        include_segments: bool = False,
-    ) -> dict[str, Any]:
+    def format_extract_result(result: ExtractResult) -> dict[str, Any]:
         """格式化为 Hermes 兼容的输出
 
         Args:
             result: 提取结果
-            include_segments: 是否包含字幕片段详情
 
         Returns:
             Hermes 兼容的 JSON 字典
@@ -76,6 +72,12 @@ class HermesFormatter:
         output["source_type"] = "video_content"
         output["extracted_at"] = datetime.now().isoformat()
         output["version"] = "2.0"
+        # 内容完整性标记: 供 Agent 判断是否拿到了完整正文 (非仅元信息)
+        output["content_complete"] = (
+            bool(result.success)
+            and bool(result.content and result.content.strip())
+            and not result.is_placeholder
+        )
 
         if prescreen:
             output["prescreen"] = HermesFormatter.format_prescreen_result(prescreen)
