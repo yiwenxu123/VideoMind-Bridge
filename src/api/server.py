@@ -9,7 +9,7 @@ from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -206,6 +206,12 @@ class APIServer:
         if web_dir.is_dir():
             app.mount("/static", StaticFiles(directory=str(web_dir)), name="static")
 
+        # 挂载音频中转目录 (供 DashScope/coze 工作流拉取)
+        from .parse_service import get_media_dir
+        media_dir = get_media_dir()
+        media_dir.mkdir(parents=True, exist_ok=True)
+        app.mount("/media", StaticFiles(directory=str(media_dir)), name="media")
+
         return app
 
     def _register_routes(self, app: FastAPI):
@@ -348,6 +354,44 @@ class APIServer:
             except Exception as e:
                 logger.error(f"v2 提取归档失败: {e}")
                 return {"success": False, "url": url, "error": str(e)}
+
+        # 视频源地址解析 (替代 coze 第三方解析插件)
+        @app.post("/api/v1/parse")
+        async def parse_video(request: Request, body: dict):
+            """解析视频 URL → 下载音频 → 中转目录, 返回公网可访问的 voice_url
+
+            供 coze 工作流中的自研解析插件调用, 下游接 DashScope ASR。
+            """
+            url = body.get("url")
+            if not url:
+                raise HTTPException(status_code=400, detail="url 不能为空")
+
+            from .parse_service import parse_audio_source
+
+            result = parse_audio_source(
+                url,
+                cookie_browser=body.get("cookie_browser"),
+                cookies_file=body.get("cookies_file") or os.environ.get("VMB_COOKIES_FILE"),
+            )
+
+            if not result.get("success"):
+                return {"success": False, "url": url, "error": result.get("error")}
+
+            base_url = os.environ.get(
+                "VMB_PUBLIC_BASE_URL",
+                f"{request.url.scheme}://{request.url.netloc}",
+            )
+            return {
+                "success": True,
+                "url": url,
+                "voice_url": f"{base_url}{result['path']}",
+                "title": result.get("title", ""),
+                "duration": result.get("duration", 0),
+                "platform": result.get("platform", ""),
+                "ext": result.get("ext", ""),
+                "size_bytes": result.get("size_bytes", 0),
+                "source": "yt-dlp",
+            }
 
         # 提取器 API Key 管理
         @app.get("/api/v1/keys", response_model=KeysListResponse)

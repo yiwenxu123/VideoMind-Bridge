@@ -1,0 +1,69 @@
+openapi: 3.0.0
+info:
+  title: VideoMind 视频解析插件
+  description: |
+    解析视频 URL 并返回可公网访问的音频直链 (voice_url)。
+    服务端基于 yt-dlp + B站官方 API, 由自建服务器中转音频,
+    无第三方依赖, 平台改版仅需升级 yt-dlp。
+  version: 1.0.0
+servers:
+  - url: http://124.222.71.123/vmb
+paths:
+  /api/v1/parse:
+    post:
+      operationId: parse_video
+      summary: 解析视频 → 返回音频直链
+      description: |
+        输入视频链接 (B站/抖音/小红书), 返回可公网访问的音频 URL (voice_url)。
+        下游可接 DashScope ASR (paraformer-v2) 等语音识别服务。
+        单次调用约 5-30 秒 (含下载), 音频文件保留 24 小时后自动清理。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - url
+              properties:
+                url:
+                  type: string
+                  description: 视频链接, 支持 bilibili.com / douyin.com / xiaohongshu.com 等
+                cookies_file:
+                  type: string
+                  description: 服务端 cookies.txt 路径 (可选, 抖音/小红书需要时配置)
+      responses:
+        '200':
+          description: 解析结果
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    description: 是否成功
+                  voice_url:
+                    type: string
+                    description: 可公网访问的音频直链, 供 ASR 拉取
+                  title:
+                    type: string
+                    description: 视频标题
+                  duration:
+                    type: number
+                    description: 视频时长 (秒)
+                  platform:
+                    type: string
+                    description: 平台标识 (bilibili/douyin/xiaohongshu/...)
+                  ext:
+                    type: string
+                    description: 音频扩展名
+                  size_bytes:
+                    type: number
+                    description: 音频大小 (字节)
+                  source:
+                    type: string
+                    description: 解析来源 (yt-dlp / bilibili-api)
+                  error:
+                    type: string
+                    description: 失败原因 (success=false 时)
