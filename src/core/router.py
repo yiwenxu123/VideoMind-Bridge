@@ -8,10 +8,22 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from typing import Any
 
 from .extractors import create_all_extractors
 from .extractors.base import ContentExtractor
 from .models import _COST_TIER_PRIORITY, CostTier, ExtractResult
+
+
+def _best_metadata(meta_list: list[dict[str, Any]]) -> dict[str, Any]:
+    """从失败尝试的元信息中挑选最完整的一条（有标题优先，其次时长/平台）。"""
+    best: dict[str, Any] = {}
+    for meta in meta_list:
+        if not meta.get("title"):
+            continue
+        if not best or len(best.get("title", "")) < len(meta.get("title", "")):
+            best = meta
+    return best
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +102,7 @@ class ContentRouter:
         priority = self.config.priority or _DEFAULT_PRIORITY
 
         failures: list[str] = []
+        failures_meta: list[dict[str, Any]] = []
         last_result: ExtractResult | None = None
 
         for name in priority:
@@ -116,6 +129,12 @@ class ContentRouter:
                 logger.info(f"尝试提取器: {name}")
                 result = extractor.extract(url)
                 last_result = result
+                if result.title:
+                    failures_meta.append({
+                        "platform": result.platform,
+                        "title": result.title,
+                        "duration_seconds": result.duration_seconds,
+                    })
 
                 if result.success and result.content.strip() and not result.is_placeholder:
                     # 真成功 (非占位): 缓存并返回
@@ -140,18 +159,29 @@ class ContentRouter:
 
         # 所有提取器均失败
         if last_result:
-            # 返回最后一个失败结果, 但包含所有失败原因
+            # 返回最后一个失败结果, 但包含所有失败原因; 补充沿途最佳元信息
+            best_meta = _best_metadata(failures_meta)
+            if best_meta.get("title") and not last_result.title:
+                last_result.title = best_meta.get("title", "")
+            if best_meta.get("platform") and last_result.platform == "unknown":
+                last_result.platform = best_meta.get("platform", "")
+            if best_meta.get("duration_seconds"):
+                last_result.duration_seconds = best_meta.get("duration_seconds", 0.0)
             last_result.success = False
             last_result.error = "; ".join(failures)
             return last_result
 
+        # 全部失败且无结果对象时, 保留沿途拿到的最佳元信息 (标题/时长)
+        best_meta = _best_metadata(failures_meta)
         return ExtractResult(
             success=False,
-            platform="unknown",
-            title="",
+            platform=best_meta.get("platform", "unknown"),
+            title=best_meta.get("title", ""),
             content="",
             source="router",
             url=url,
             cost_tier=CostTier.FREE,
+            duration_seconds=best_meta.get("duration_seconds", 0.0),
+            metadata={"attempted": failures},
             error=f"无可用提取器: {'; '.join(failures) if failures else '所有提取器均不支持此 URL'}",
         )

@@ -179,3 +179,33 @@ def test_get_extractor(mock_extractors):
     assert ext is not None
     ext2 = router.get_extractor("nonexistent")
     assert ext2 is None
+
+
+def test_router_preserves_best_metadata_on_total_failure(mock_extractors):
+    """全部提取器失败时, 应保留沿途最佳标题/平台/时长"""
+    from src.core.router import ContentRouter, RouterConfig
+
+    free_ext, cheap_ext = mock_extractors
+
+    def fail_with_title(url):
+        return ExtractResult(
+            success=False, platform="bilibili", title="有标题的视频",
+            content="", source="mock_free", url=url, cost_tier=CostTier.FREE,
+            duration_seconds=120.0, error="无字幕",
+        )
+    free_ext.extract.side_effect = fail_with_title
+
+    def fail_no_title(url):
+        return ExtractResult(
+            success=False, platform="ytdlp_asr", title="", content="",
+            source="mock_cheap", url=url, cost_tier=CostTier.CHEAP, error="下载失败",
+        )
+    cheap_ext.extract.side_effect = fail_no_title
+
+    router = ContentRouter(RouterConfig(priority=["mock_free", "mock_cheap"]))
+    result = router.extract("https://example.com/video")
+    assert result.success is False
+    assert result.title == "有标题的视频"
+    assert result.duration_seconds == 120.0
+    assert "无字幕" in result.error
+    assert "下载失败" in result.error

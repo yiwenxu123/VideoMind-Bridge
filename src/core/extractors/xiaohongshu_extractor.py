@@ -29,13 +29,14 @@ class XiaohongshuExtractor(ContentExtractor):
     url_pattern = re.compile(r"(xiaohongshu\.com|xhslink\.com)")
 
     def __init__(self) -> None:
+        # 手机 UA: 小红书桌面 UA 的 SSR 不返回笔记内容, 仅移动端页面含 noteData
         self._client = httpx.Client(
             timeout=30.0,
             headers={
                 "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
+                    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                    "Version/16.0 Mobile/15E148 Safari/604.1"
                 ),
             },
             follow_redirects=True,
@@ -62,7 +63,7 @@ class XiaohongshuExtractor(ContentExtractor):
                 )
 
             # 获取笔记内容
-            title, content, images = self._fetch_note(note_id)
+            title, content, images = self._fetch_note(note_id, url)
 
             if not content and not title:
                 return ExtractResult(
@@ -105,9 +106,21 @@ class XiaohongshuExtractor(ContentExtractor):
             return m.group(1)
         return None
 
-    def _fetch_note(self, note_id: str) -> tuple[str, str, list[str]]:
-        """获取笔记内容"""
+    def _fetch_note(self, note_id: str, original_url: str = "") -> tuple[str, str, list[str]]:
+        """获取笔记内容
+
+        保留原始 URL 中的 xsec_token/xsec_source 参数（未登录访问必需），
+        其余追踪参数丢弃。
+        """
         note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
+        if original_url:
+            xsec_params = [
+                f"{k}={v}" for _, k, v in re.findall(
+                    r"([?&])(xsec_token|xsec_source)=([^&]+)", original_url
+                )
+            ]
+            if xsec_params:
+                note_url += "?" + "&".join(xsec_params)
 
         try:
             resp = self._client.get(note_url, timeout=15.0)
@@ -117,8 +130,8 @@ class XiaohongshuExtractor(ContentExtractor):
             content = self._extract_content(html)
             images = self._extract_images(html)
 
-            # 如果页面提取失败, 尝试 SSR 数据
-            if not content and not title:
+            # 页面提取不完整时, 尝试 SSR 数据补充
+            if not content or not title:
                 ssr_title, ssr_content = self._extract_from_ssr(html)
                 if ssr_content:
                     content = ssr_content
@@ -169,6 +182,7 @@ class XiaohongshuExtractor(ContentExtractor):
         images = []
         patterns = [
             r'"image_list"\s*:\s*\[(.*?)\]',
+            r'"imageList"\s*:\s*\[(.*?)\]',
             r'"images"\s*:\s*\[(.*?)\]',
         ]
         for p in patterns:
@@ -191,6 +205,14 @@ class XiaohongshuExtractor(ContentExtractor):
                 or data.get("currentNote", {})
                 or {}
             )
+            # 新版结构: noteData.data.noteData (笔记详情在 data 首键下)
+            if not note:
+                nd = data.get("noteData", {}).get("data", {})
+                if nd:
+                    first_key = next(iter(nd))
+                    first = nd[first_key]
+                    if isinstance(first, dict):
+                        note = first.get("note") or first
             title = note.get("title", "") or note.get("displayTitle", "") or ""
             desc = note.get("desc", "") or note.get("description", "") or ""
 

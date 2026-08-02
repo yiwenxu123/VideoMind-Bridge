@@ -947,3 +947,69 @@ def test_url_with_encoded_characters():
     ext = BilibiliExtractor()
     url = "https://www.bilibili.com/video/BV1xx?p=1&name=%E6%B5%8B%E8%AF%95"
     assert ext.supports(url)
+
+
+# =============================================================================
+# SSR 解析健壮性测试 (raw_decode + JS 字面量清洗)
+# =============================================================================
+
+def test_find_ssr_payload_with_undefined_literals():
+    """SSR 含 undefined 等 JS 字面量时应清洗后解析"""
+    from src.core.extractors._ssr import find_ssr_payload
+    html = (
+        '<script>window.__INITIAL_STATE__={"note":{"title":"测试","setsList":undefined,'
+        '"emptyList":[]}}</script>'
+    )
+    data = find_ssr_payload(html)
+    assert data is not None
+    assert data["note"]["title"] == "测试"
+    assert data["note"]["setsList"] is None
+
+
+def test_find_ssr_payload_nested_json():
+    """深层嵌套 JSON 不应被非贪婪截断"""
+    from src.core.extractors._ssr import find_ssr_payload
+    inner = '{"a":{"b":{"c":[1,2,{"d":"x"}]}}}'
+    html = f'<script>window.__INITIAL_STATE__={inner}</script>'
+    data = find_ssr_payload(html)
+    assert data is not None
+    assert data["a"]["b"]["c"][2]["d"] == "x"
+
+
+def test_find_ssr_payload_no_match():
+    """无 SSR 数据时返回 None"""
+    from src.core.extractors._ssr import find_ssr_payload
+    assert find_ssr_payload("<html><body>plain</body></html>") is None
+
+
+def test_xhs_ssr_note_data_structure():
+    """新版小红书结构 noteData.data.noteData 应能提取标题/正文"""
+    from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
+    html = (
+        '<script>window.__INITIAL_STATE__={"noteData":{"data":{"noteData":{'
+        '"type":"normal","title":"焚决测试","desc":"正文内容","imageList":[{"urlDefault":"a.jpg"}]'
+        '}},"config":{}}}</script>'
+    )
+    title, desc = XiaohongshuExtractor._extract_from_ssr(html)
+    assert title == "焚决测试"
+    assert desc == "正文内容"
+
+
+def test_xhs_ssr_old_structure():
+    """旧结构 note/noteDetail 仍兼容"""
+    from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
+    html = '<script>window.__INITIAL_STATE__={"note":{"title":"旧标题","desc":"旧正文"}}</script>'
+    title, desc = XiaohongshuExtractor._extract_from_ssr(html)
+    assert title == "旧标题"
+    assert desc == "旧正文"
+
+
+def test_xhs_ssr_text_list_concat():
+    """textList 应拼接为正文"""
+    from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
+    html = (
+        '<script>window.__INITIAL_STATE__={"noteDetail":{"title":"T",'
+        '"textList":[{"text":"第一段"},{"text":"第二段"}]}}</script>'
+    )
+    title, desc = XiaohongshuExtractor._extract_from_ssr(html)
+    assert desc == "第一段\n第二段"
