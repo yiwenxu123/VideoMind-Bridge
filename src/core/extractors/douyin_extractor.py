@@ -171,6 +171,12 @@ class DouyinExtractor(ContentExtractor):
                 # 尝试从 SSR 数据提取
                 description = self._extract_from_ssr(html)
 
+            # 页面文案提取失败 (验证码壳页等) 时, 主动走 detail API
+            if not description:
+                api_title, api_desc, _ = self._fetch_via_share_api(video_id)
+                if api_desc:
+                    return api_title or title, api_desc, None
+
             return title, description, None
 
         except httpx.HTTPError:
@@ -180,15 +186,28 @@ class DouyinExtractor(ContentExtractor):
     def _fetch_via_share_api(
         self, video_id: str,
     ) -> tuple[str, str, list[dict[str, Any]] | None]:
-        """通过抖音分享 API 二次尝试"""
+        """通过抖音 Web detail API 二次尝试
+
+        使用 www.douyin.com 域名 + Cookie (ttwid/__ac_signature 匿名风控签名),
+        iesdouyin 域名在云 IP 下返回 403。
+        """
         try:
-            api_url = f"https://www.iesdouyin.com/aweme/v1/web/aweme/detail/?aweme_id={video_id}"
+            api_url = (
+                "https://www.douyin.com/aweme/v1/web/aweme/detail/"
+                f"?aweme_id={video_id}&device_platform=webapp&aid=6383"
+            )
             resp = self._client.get(api_url, timeout=10.0,
-                headers={"Accept": "application/json"})
+                headers={
+                    "Accept": "application/json",
+                    "Referer": "https://www.douyin.com/",
+                })
+            resp.raise_for_status()
             data = resp.json()
             aweme = data.get("aweme_detail", {})
-            title = aweme.get("desc", "") or aweme.get("share_info", {}).get("share_title", "")
-            desc = aweme.get("desc", "")
+            if not isinstance(aweme, dict):
+                return "", "", None
+            desc = aweme.get("desc", "") or ""
+            title = desc or aweme.get("share_info", {}).get("share_title", "")
             return title, desc, None
         except Exception:
             return "", "", None
