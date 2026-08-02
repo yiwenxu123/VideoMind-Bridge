@@ -7,13 +7,13 @@
 
 from __future__ import annotations
 
-import json
 import re
 
 import httpx
 
 from ..models import CostTier, ExtractResult
 from . import register_extractor
+from ._ssr import find_ssr_payload
 from .base import ContentExtractor
 
 # 小红书 URL 模式
@@ -190,37 +190,30 @@ class XiaohongshuExtractor(ContentExtractor):
     @staticmethod
     def _extract_from_ssr(html: str) -> tuple[str, str]:
         """从 SSR 数据提取"""
-        patterns = [
-            r'<script>window\.__INITIAL_STATE__\s*=\s*({.*?});</script>',
-            r'<script id="__NEXT_DATA__"\s*type="application/json">({.*?})</script>',
-        ]
-        for p in patterns:
-            m = re.search(p, html, re.DOTALL)
-            if m:
-                try:
-                    data = json.loads(m.group(1))
-                    if isinstance(data, dict):
-                        note = (
-                            data.get("note", {})
-                            or data.get("noteDetail", {})
-                            or data.get("currentNote", {})
-                            or {}
-                        )
-                        title = note.get("title", "") or note.get("displayTitle", "") or ""
-                        desc = note.get("desc", "") or note.get("description", "") or ""
+        data = find_ssr_payload(html)
+        if data is None:
+            return "", ""
+        try:
+            note = (
+                data.get("note", {})
+                or data.get("noteDetail", {})
+                or data.get("currentNote", {})
+                or {}
+            )
+            title = note.get("title", "") or note.get("displayTitle", "") or ""
+            desc = note.get("desc", "") or note.get("description", "") or ""
 
-                        # 拼接正文
-                        text_list = note.get("textList", []) or note.get("contentList", []) or []
-                        if text_list:
-                            desc = "\n".join(
-                                t.get("text", "") if isinstance(t, dict) else str(t)
-                                for t in text_list
-                            )
+            # 拼接正文
+            text_list = note.get("textList", []) or note.get("contentList", []) or []
+            if text_list:
+                desc = "\n".join(
+                    t.get("text", "") if isinstance(t, dict) else str(t)
+                    for t in text_list
+                )
 
-                        return title, desc
-                except (json.JSONDecodeError, AttributeError):
-                    continue
-        return "", ""
+            return title, desc
+        except (AttributeError):
+            return "", ""
 
 
 register_extractor("xiaohongshu", XiaohongshuExtractor)

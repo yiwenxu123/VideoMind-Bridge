@@ -21,10 +21,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import httpx
-
 from ..models import CostTier, ExtractResult
 from . import register_extractor
+from ._dashscope_asr import transcribe_audio_data
 from .aliyun_asr_extractor import AliyunASRExtractor
 from .base import ContentExtractor
 
@@ -135,38 +134,8 @@ class YtDlpASRExtractor(ContentExtractor):
         platform: str, title: str, duration: float,
     ) -> ExtractResult:
         """DashScope paraformer-v2 转写 (复用 coze_ali_key, 免额外配置)"""
-        import base64
-
-        audio_data = audio_path.read_bytes()
-        audio_b64 = base64.b64encode(audio_data).decode()
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "paraformer-v2",
-            "input": {"audio_data": audio_b64},
-        }
-
         try:
-            resp = httpx.post(
-                "https://dashscope.aliyuncs.com/api/v1/services/audio/transcription/asr",
-                headers=headers, json=payload, timeout=180.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-            output = data.get("output", {})
-            text = output.get("text", "") or output.get("transcript", "") or ""
-            segments_raw = output.get("sentences", output.get("segments", []))
-
-            segments = [
-                {"start": s.get("begin_time", s.get("start", 0)) / 1000,
-                 "end": s.get("end_time", s.get("end", 0)) / 1000,
-                 "text": s.get("text", "")}
-                for s in segments_raw if s.get("text")
-            ] if isinstance(segments_raw, list) else None
+            text, segments = transcribe_audio_data(audio_path, api_key)
 
             return ExtractResult(
                 success=bool(text),

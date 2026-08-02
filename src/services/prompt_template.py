@@ -11,6 +11,36 @@ from jinja2 import BaseLoader, Environment
 
 logger = logging.getLogger(__name__)
 
+# 内置默认 Prompt 模板（ai_service 默认回退时复用，单一来源）
+DEFAULT_PROMPT_TEMPLATE = """请分析以下视频转录内容，生成结构化摘要和时间轴。
+
+视频标题: {{title}}
+
+转录内容:
+{{transcript}}
+
+请按以下格式输出：
+
+# {{title}}
+
+## 一句话总结
+[用一句话概括视频核心内容]
+
+## 关键时间轴
+从转录文本中提取 5-8 个关键时间点，格式如下：
+
+- [00:05:23] 要点1内容
+- [00:08:15] 要点2内容
+- [00:12:30] 要点3内容
+...
+
+要求：
+1. 每个要点必须包含具体时间戳 [HH:MM:SS] 格式
+2. 时间戳要精确到秒
+3. 要点要覆盖视频的核心内容
+4. 语言简洁明了
+"""
+
 
 class TemplateStyle(StrEnum):
     """模板风格类型"""
@@ -392,34 +422,7 @@ class PromptTemplateManager:
 
     def _default_template(self) -> str:
         """默认模板"""
-        return """请分析以下视频转录内容，生成结构化摘要和时间轴。
-
-视频标题: {{title}}
-
-转录内容:
-{{transcript}}
-
-请按以下格式输出：
-
-# {{title}}
-
-## 一句话总结
-[用一句话概括视频核心内容]
-
-## 关键时间轴
-从转录文本中提取 5-8 个关键时间点，格式如下：
-
-- [00:05:23] 要点1内容
-- [00:08:15] 要点2内容
-- [00:12:30] 要点3内容
-...
-
-要求：
-1. 每个要点必须包含具体时间戳 [HH:MM:SS] 格式
-2. 时间戳要精确到秒
-3. 要点要覆盖视频的核心内容
-4. 语言简洁明了
-"""
+        return DEFAULT_PROMPT_TEMPLATE
 
     def _academic_template(self) -> str:
         """学术风格模板"""

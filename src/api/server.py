@@ -255,7 +255,7 @@ class APIServer:
             return ConfigResponse(
                 default_output_dir=str(self.task_manager.output_dir),
                 supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu"],
-                supported_ai_providers=["deepseek", "openai", "anthropic"],
+                supported_ai_providers=["deepseek", "zhipu", "moonshot", "minimax", "doubao", "ollama"],
                 supported_export_targets=["local", "obsidian", "notion"],
                 ai_enabled=ai_enabled,
             )

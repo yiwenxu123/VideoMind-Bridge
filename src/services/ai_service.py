@@ -11,7 +11,7 @@ from jinja2 import Template
 from ..models.task import Highlight
 from ..utils import get_logger
 from ..utils.exceptions import AIError
-from .prompt_template import get_prompt_template_manager
+from .prompt_template import DEFAULT_PROMPT_TEMPLATE, get_prompt_template_manager
 
 logger = get_logger(__name__)
 
@@ -32,6 +32,8 @@ class AIService:
     DEFAULT_TEMPERATURE = 0.7
     DEFAULT_MAX_TOKENS = 2000
     DEFAULT_TIMEOUT = 120.0
+    # 输入转录预算（字符），约为 4000 token；API 输出上限见 DEFAULT_MAX_TOKENS
+    _TRANSCRIPT_BUDGET_CHARS = 16000
 
     # 重试配置
     MAX_RETRIES = 3
@@ -93,7 +95,7 @@ class AIService:
         self._client: httpx.Client | None = None
 
     def is_available(self) -> bool:
-        """AI 服务是否可用 (模拟模式始终可用, 真实模式需要有效 Key)"""
+        """AI 服务是否可用（真实模式返回 True；mock 模式无真实 Key，视为不可用）"""
         return not self.mock
 
     def _mask_api_key(self, api_key: str | None) -> str:
@@ -180,7 +182,6 @@ class AIService:
         prompt_template: str | None = None,
         template_id: str | None = None,
         title: str = "",
-        max_tokens: int = 4000
     ) -> SummaryResult:
         """
         生成视频摘要（包含结构化时间轴）
@@ -190,7 +191,6 @@ class AIService:
             prompt_template: Prompt 模板字符串（Jinja2 语法，优先级高于 template_id）
             template_id: Prompt 模板 ID，从模板管理器获取
             title: 视频标题
-            max_tokens: 最大 token 数
 
         Returns:
             SummaryResult: 结构化摘要结果，包含时间轴要点
@@ -214,8 +214,9 @@ class AIService:
         # 渲染模板
         template = Template(template_content)
 
-        # 截断文本（粗略估计：1 token ≈ 4 字符）
-        max_chars = max_tokens * 4
+        # 截断输入转录（粗略估计：1 token ≈ 4 字符）
+        # 注: API 输出长度上限由 self.max_tokens 控制（构造参数），与输入预算无关
+        max_chars = self._TRANSCRIPT_BUDGET_CHARS
         truncated_transcript = transcript[:max_chars]
         if len(transcript) > max_chars:
             truncated_transcript += "\n\n[内容已截断...]"
@@ -509,34 +510,7 @@ class AIService:
         )
 
     def _default_prompt(self) -> str:
-        """默认 Prompt 模板"""
-        return """请分析以下视频转录内容，生成结构化摘要和时间轴。
-
-视频标题: {{title}}
-
-转录内容:
-{{transcript}}
-
-请按以下格式输出：
-
-# {{title}}
-
-## 一句话总结
-[用一句话概括视频核心内容]
-
-## 关键时间轴
-从转录文本中提取 5-8 个关键时间点，格式如下：
-
-- [00:05:23] 要点1内容
-- [00:08:15] 要点2内容
-- [00:12:30] 要点3内容
-...
-
-要求：
-1. 每个要点必须包含具体时间戳 [HH:MM:SS] 格式
-2. 时间戳要精确到秒
-3. 要点要覆盖视频的核心内容
-4. 语言简洁明了
-"""
+        """默认 Prompt 模板（复用 PromptTemplateManager 内置模板）"""
+        return DEFAULT_PROMPT_TEMPLATE
 
 

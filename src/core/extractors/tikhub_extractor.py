@@ -13,7 +13,6 @@ ASR 不可用时返回元数据+下载链接。
 
 from __future__ import annotations
 
-import base64
 import re
 import subprocess
 import tempfile
@@ -23,6 +22,7 @@ import httpx
 
 from ..models import CostTier, ExtractResult
 from . import register_extractor
+from ._dashscope_asr import transcribe_audio_data
 from .base import ContentExtractor
 
 TIKHUB_API_BASE = "https://api.tikhub.io"
@@ -299,7 +299,7 @@ class TikhubExtractor(ContentExtractor):
                 duration_seconds=duration or (segment_list[-1]["end"] if segment_list else 0),
                 language=info.language if info else "zh",
                 segments=segment_list,
-                metadata={"api_provider": "faster_whisper", "model": "small", "segments": seg_count},
+                metadata={"api_provider": "faster_whisper", "model": "base", "segments": seg_count},
             )
         except ImportError:
             return ExtractResult(
@@ -318,36 +318,8 @@ class TikhubExtractor(ContentExtractor):
         self, audio_path: Path, api_key: str, url: str,
         platform: str, title: str, duration: float,
     ) -> ExtractResult:
-        audio_data = audio_path.read_bytes()
-        audio_b64 = base64.b64encode(audio_data).decode()
-
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": "paraformer-v2",
-            "input": {"audio_data": audio_b64},
-        }
-
         try:
-            resp = httpx.post(
-                "https://dashscope.aliyuncs.com/api/v1/services/audio/transcription/asr",
-                headers=headers, json=payload, timeout=180.0,
-            )
-            resp.raise_for_status()
-            data = resp.json()
-
-            output = data.get("output", {})
-            text = output.get("text", "") or output.get("transcript", "") or ""
-            segments_raw = output.get("sentences", output.get("segments", []))
-
-            segments = [
-                {"start": s.get("begin_time", s.get("start", 0)) / 1000,
-                 "end": s.get("end_time", s.get("end", 0)) / 1000,
-                 "text": s.get("text", "")}
-                for s in segments_raw if s.get("text")
-            ] if isinstance(segments_raw, list) else None
+            text, segments = transcribe_audio_data(audio_path, api_key)
 
             return ExtractResult(
                 success=bool(text),

@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Any
 
@@ -14,6 +13,7 @@ import httpx
 
 from ..models import CostTier, ExtractResult
 from . import register_extractor
+from ._ssr import find_ssr_payload
 from .base import ContentExtractor
 
 # 抖音 URL 模式
@@ -195,26 +195,19 @@ class DouyinExtractor(ContentExtractor):
     @staticmethod
     def _extract_from_ssr(html: str) -> str:
         """从 SSR 数据提取文案"""
-        # 查找 __INITIAL_STATE__ 或 __NEXT_DATA__
-        patterns = [
-            r'<script>window\.__INITIAL_STATE__\s*=\s*({.*?});</script>',
-            r'<script id="__NEXT_DATA__"\s*type="application/json">({.*?})</script>',
-        ]
-        for p in patterns:
-            m = re.search(p, html, re.DOTALL)
-            if m:
-                try:
-                    data = json.loads(m.group(1))
-                    # 不同结构遍历
-                    if isinstance(data, dict):
-                        desc = data.get("videoInfoRes", {}).get("item_list", [{}])[0].get("desc", "")
-                        if desc:
-                            return str(desc)
-                        desc = data.get("aweme_detail", {}).get("desc", "")
-                        if desc:
-                            return str(desc)
-                except (json.JSONDecodeError, IndexError, KeyError):
-                    continue
+        data = find_ssr_payload(html)
+        if data is None:
+            return ""
+        try:
+            # 不同结构遍历
+            desc = data.get("videoInfoRes", {}).get("item_list", [{}])[0].get("desc", "")
+            if desc:
+                return str(desc)
+            desc = data.get("aweme_detail", {}).get("desc", "")
+            if desc:
+                return str(desc)
+        except (IndexError, KeyError):
+            return ""
         return ""
 
 
