@@ -92,71 +92,12 @@ def _parse_bilibili_playurl(url: str) -> dict[str, Any] | None:
     绕开云服务器 IP 在 yt-dlp 场景下的 412 风控 (api.bilibili.com 不受影响)。
     返回 {audio_urls, title, duration} 或 None。audio_urls 为所有候选 CDN URL
     (baseUrl + backupUrl, 去重), 由调用方逐个尝试下载。
+    实现复用 BilibiliExtractor.get_playurl_audio_urls() (WBI 签名 + playurl)。
     """
 
     from ..core.extractors.bilibili_extractor import BilibiliExtractor
 
-    ex = BilibiliExtractor()
-    bvid = ex._resolve_video_id(url)
-    if not bvid:
-        return None
-
-    try:
-        params = {"bvid": bvid}
-        signed = ex._wbi_sign(params, ex._get_wbi_key())
-        resp = ex._client.get(
-            "https://api.bilibili.com/x/web-interface/view", params=signed
-        )
-        data = resp.json()
-        if data.get("code") != 0:
-            return None
-        vdata = data.get("data", {})
-        cid = vdata.get("cid")
-        if not cid:
-            pages = vdata.get("pages") or []
-            cid = pages[0].get("cid") if pages else None
-        if not cid:
-            return None
-
-        play_params = {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 1}
-        signed = ex._wbi_sign(play_params, ex._get_wbi_key())
-        resp2 = ex._client.get(
-            "https://api.bilibili.com/x/player/playurl", params=signed
-        )
-        pdata = resp2.json()
-        if pdata.get("code") != 0:
-            return None
-        dash = pdata.get("data", {}).get("dash") or {}
-        audios = dash.get("audio") or []
-        if not audios:
-            return None
-
-        audios.sort(key=lambda a: a.get("bandwidth", 0), reverse=True)
-        candidates: list[str] = []
-        for a in audios:
-            for k in ("baseUrl", "base_url", "url"):
-                if a.get(k):
-                    candidates.append(a[k])
-            for b in (a.get("backupUrl") or a.get("backup_url") or []):
-                candidates.append(b)
-        seen: set[str] = set()
-        audio_urls = []
-        for u in candidates:
-            if u not in seen:
-                seen.add(u)
-                audio_urls.append(u)
-        if not audio_urls:
-            return None
-        return {
-            "audio_urls": audio_urls,
-            "title": vdata.get("title", ""),
-            "duration": vdata.get("duration", 0),
-            "platform": "bilibili",
-            "ext": ".m4s",
-        }
-    except Exception as e:
-        logger.warning(f"B站 playurl 解析失败: {e}")
-        return None
+    return BilibiliExtractor().get_playurl_audio_urls(url)
 
 
 def _download_to_media(url: str, media_dir: Path, name_prefix: str,

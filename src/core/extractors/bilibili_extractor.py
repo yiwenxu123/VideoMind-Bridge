@@ -7,15 +7,20 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import re
+import shutil
 import time
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 import httpx
 
 from ..models import CostTier, ExtractResult
 from . import register_extractor
+from ._dashscope_asr import transcribe_audio_url
+from ._whisper_asr import transcribe_local
 from .base import ContentExtractor
 
 # Bilibili WBI 签名常量和密钥池
@@ -77,6 +82,11 @@ class BilibiliExtractor(ContentExtractor):
             subtitle_content, segments, language = self._get_subtitle(bvid)
 
             if not subtitle_content:
+                # 无字幕: 尝试 playurl 音频直链 + DashScope ASR (绕 yt-dlp 网页 412 风控)
+                asr_result = self._try_audio_asr_fallback(url, bvid, title, duration)
+                if asr_result is not None:
+                    return asr_result
+
                 return ExtractResult(
                     success=False,
                     platform="bilibili",
@@ -118,6 +128,207 @@ class BilibiliExtractor(ContentExtractor):
                 source="bilibili", url=url, cost_tier=CostTier.FREE,
                 error=f"Bilibili 提取失败: {e}",
             )
+
+    def get_playurl_audio_urls(self, url: str) -> dict[str, Any] | None:
+        """B站官方 playurl API 解析音频直链。
+
+        绕开云服务器 IP 在 yt-dlp 场景下的 412 风控 (api.bilibili.com 不受影响)。
+        返回 {audio_urls, title, duration} 或 None。audio_urls 为所有候选 CDN URL
+        (baseUrl + backupUrl, 去重), 由调用方逐个尝试下载。
+        """
+        bvid = self._resolve_video_id(url)
+        if not bvid:
+            return None
+
+        try:
+            params = {"bvid": bvid}
+            signed = self._wbi_sign(params, self._get_wbi_key())
+            resp = self._client.get(
+                "https://api.bilibili.com/x/web-interface/view", params=signed
+            )
+            data = resp.json()
+            if data.get("code") != 0:
+                return None
+            vdata = data.get("data", {})
+            cid = vdata.get("cid")
+            if not cid:
+                pages = vdata.get("pages") or []
+                cid = pages[0].get("cid") if pages else None
+            if not cid:
+                return None
+
+            play_params = {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 1}
+            signed = self._wbi_sign(play_params, self._get_wbi_key())
+            resp2 = self._client.get(
+                "https://api.bilibili.com/x/player/playurl", params=signed
+            )
+            pdata = resp2.json()
+            if pdata.get("code") != 0:
+                return None
+            dash = pdata.get("data", {}).get("dash") or {}
+            audios = dash.get("audio") or []
+            if not audios:
+                return None
+
+            audios.sort(key=lambda a: a.get("bandwidth", 0), reverse=True)
+            candidates: list[str] = []
+            for a in audios:
+                for k in ("baseUrl", "base_url", "url"):
+                    if a.get(k):
+                        candidates.append(a[k])
+                for b in (a.get("backupUrl") or a.get("backup_url") or []):
+                    candidates.append(b)
+            seen: set[str] = set()
+            audio_urls = []
+            for u in candidates:
+                if u not in seen:
+                    seen.add(u)
+                    audio_urls.append(u)
+            if not audio_urls:
+                return None
+            return {
+                "audio_urls": audio_urls,
+                "title": vdata.get("title", ""),
+                "duration": vdata.get("duration", 0),
+                "platform": "bilibili",
+                "ext": ".m4s",
+            }
+        except Exception:
+            return None
+
+    def _try_audio_asr_fallback(
+        self, url: str, bvid: str, title: str, duration: float,
+    ) -> ExtractResult | None:
+        """无字幕时: playurl 音频直链下载 + 转码 + ASR 转写。
+
+        ASR 优先级: 本地 faster-whisper (稳定免费) → DashScope 异步 (公网 URL)。
+        返回成功结果; 任一步失败返回 None (交由上层走原无字幕分支/降级链)。
+        """
+        playurl = self.get_playurl_audio_urls(url)
+        if not playurl or not playurl.get("audio_urls"):
+            return None
+
+        audio_urls = playurl["audio_urls"]
+        for audio_url in audio_urls:
+            audio_path = self._download_audio(audio_url)
+            if audio_path is None:
+                continue
+            try:
+                mp3_path = self._transcode_to_mp3(audio_path)
+                audio_path.unlink(missing_ok=True)
+                if mp3_path is None:
+                    continue
+                try:
+                    text, segments = transcribe_local(mp3_path, language="zh")
+                    provider = "faster_whisper"
+                except ImportError:
+                    # 本地 whisper 未安装 → DashScope 异步 (需公网 URL)
+                    text, segments = self._transcribe_via_dashscope(mp3_path)
+                    provider = "dashscope_asr"
+                mp3_path.unlink(missing_ok=True)
+                if not text:
+                    continue
+                return ExtractResult(
+                    success=True,
+                    platform="bilibili",
+                    title=title or playurl.get("title", ""),
+                    content=text,
+                    source="bilibili_asr",
+                    url=url,
+                    cost_tier=CostTier.FREE,
+                    duration_seconds=float(duration or playurl.get("duration", 0)),
+                    language="zh",
+                    segments=segments,
+                    metadata={
+                        "bvid": bvid,
+                        "api_provider": provider,
+                        "model": "base" if provider == "faster_whisper" else "paraformer-v2",
+                    },
+                )
+            except Exception:
+                audio_path.unlink(missing_ok=True)
+                continue
+        return None
+
+    def _transcribe_via_dashscope(
+        self, mp3_path: Path,
+    ) -> tuple[str, list[dict] | None]:
+        """DashScope 异步转写: 拷贝到媒体目录 → 公网 URL → 异步任务轮询。"""
+        dashscope_key = self._resolve_api_key("dashscope_key")
+        if not dashscope_key:
+            raise RuntimeError("dashscope_key 未配置")
+
+        media_dir = os.getenv("VMB_MEDIA_DIR", "")
+        public_url = os.getenv("VMB_PUBLIC_URL", "")
+        if not media_dir or not public_url:
+            raise RuntimeError("VMB_MEDIA_DIR/VMB_PUBLIC_URL 未配置")
+
+        dst = Path(media_dir) / f"bili_asr_{int(time.time() * 1000)}.mp3"
+        try:
+            shutil.copy2(mp3_path, dst)
+            return transcribe_audio_url(
+                f"{public_url.rstrip('/')}/media/{dst.name}", dashscope_key
+            )
+        finally:
+            dst.unlink(missing_ok=True)
+
+    @staticmethod
+    def _transcode_to_mp3(src: Path, timeout: float = 180.0) -> Path | None:
+        """ffmpeg 转码为 mp3 (DashScope 同步 ASR 不识别 .m4s 容器)"""
+        import shutil
+        import subprocess
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            return None
+        dst = src.with_suffix(".mp3")
+        try:
+            proc = subprocess.run(
+                [ffmpeg, "-y", "-i", str(src), "-vn", "-acodec", "libmp3lame",
+                 "-b:a", "128k", str(dst)],
+                capture_output=True, text=True, timeout=timeout,
+            )
+            if proc.returncode != 0 or not dst.exists() or dst.stat().st_size < 1000:
+                dst.unlink(missing_ok=True)
+                return None
+            return dst
+        except Exception:
+            dst.unlink(missing_ok=True)
+            return None
+
+    def _download_audio(self, audio_url: str, timeout: float = 300.0) -> Path | None:
+        """下载音频直链到临时文件 (限 150MB 防御)。
+
+        B 站 CDN 防盗链: 需携带 Referer/UA, 否则返回 403。
+        """
+        try:
+            import tempfile
+
+            tmp = Path(tempfile.gettempdir()) / f"vmb_bili_{int(time.time() * 1000)}.m4s"
+            headers = {
+                "Referer": "https://www.bilibili.com/",
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+            }
+            with self._client.stream("GET", audio_url, timeout=timeout, headers=headers) as resp:
+                resp.raise_for_status()
+                total = 0
+                with open(tmp, "wb") as f:
+                    for chunk in resp.iter_bytes(chunk_size=65536):
+                        total += len(chunk)
+                        if total > 150 * 1024 * 1024:
+                            tmp.unlink(missing_ok=True)
+                            return None
+                        f.write(chunk)
+            if total < 1000:
+                tmp.unlink(missing_ok=True)
+                return None
+            return tmp
+        except Exception:
+            return None
 
     def _get_wbi_key(self) -> str:
         """获取 WBI 签名密钥"""

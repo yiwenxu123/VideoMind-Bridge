@@ -47,37 +47,20 @@ def test_cleanup_stale_files(monkeypatch, tmp_path):
 def test_parse_bilibili_playurl_success(monkeypatch):
     """B站 playurl 路径: 官方 API 解析 + 下载中转"""
 
-    import httpx
+    from unittest.mock import MagicMock, patch
 
     from src.api import parse_service
 
-    # mock BilibiliExtractor 的 API 调用
-    def fake_get(url, params=None, **kw):
-        if "web-interface/nav" in url:
-            return httpx.Response(200, json={"code": 0, "data": {"isLogin": False,
-                                                                 "wbi_img": {"img_url": "https://i0.hdslb.com/bfs/wbi/a.png",
-                                                                             "sub_url": "https://i0.hdslb.com/bfs/wbi/b.png"}}})
-        if "web-interface/view" in url:
-            return httpx.Response(200, json={"code": 0, "data": {
-                "title": "测试视频", "duration": 120, "cid": 12345,
-                "pages": [{"cid": 12345}],
-            }})
-        if "player/playurl" in url:
-            return httpx.Response(200, json={"code": 0, "data": {"dash": {"audio": [
-                {"bandwidth": 100000, "baseUrl": "https://bad-cdn.example.com/audio.m4s"},
-                {"bandwidth": 90000, "baseUrl": "https://good-cdn.example.com/audio.m4s",
-                 "backupUrl": ["https://backup-cdn.example.com/audio.m4s",
-                               "https://bad-cdn.example.com/audio.m4s"]},
-            ]}}})
-        raise AssertionError(f"unexpected url: {url}")
-
-    from unittest.mock import MagicMock, patch
-
     fake_extractor = MagicMock()
-    fake_extractor._resolve_video_id.return_value = "BV1test1234"
-    fake_extractor._wbi_sign.side_effect = lambda p, _k: {**p, "wts": "1", "w_rid": "x"}
-    fake_extractor._get_wbi_key.return_value = "k"
-    fake_extractor._client.get = fake_get
+    fake_extractor.get_playurl_audio_urls.return_value = {
+        "audio_urls": [
+            "https://bad-cdn.example.com/audio.m4s",
+            "https://good-cdn.example.com/audio.m4s",
+            "https://backup-cdn.example.com/audio.m4s",
+        ],
+        "title": "测试视频",
+        "duration": 120,
+    }
 
     with patch("src.core.extractors.bilibili_extractor.BilibiliExtractor", return_value=fake_extractor), \
          patch("src.api.parse_service._download_to_media") as mock_download, \
@@ -121,8 +104,7 @@ def test_parse_bilibili_playurl_fallback_to_ytdlp(monkeypatch):
     from src.api.parse_service import _parse_bilibili_playurl
 
     fake_extractor = MagicMock()
-    fake_extractor._resolve_video_id.return_value = "BV1test1234"
-    fake_extractor._client.get.side_effect = RuntimeError("api down")
+    fake_extractor.get_playurl_audio_urls.return_value = None
 
     with patch("src.core.extractors.bilibili_extractor.BilibiliExtractor", return_value=fake_extractor):
         result = _parse_bilibili_playurl("https://www.bilibili.com/video/BV1test1234")
