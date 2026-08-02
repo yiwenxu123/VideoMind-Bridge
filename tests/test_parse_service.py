@@ -64,7 +64,10 @@ def test_parse_bilibili_playurl_success(monkeypatch):
             }})
         if "player/playurl" in url:
             return httpx.Response(200, json={"code": 0, "data": {"dash": {"audio": [
-                {"bandwidth": 100000, "baseUrl": "https://fake-cdn.example.com/audio.m4s"},
+                {"bandwidth": 100000, "baseUrl": "https://bad-cdn.example.com/audio.m4s"},
+                {"bandwidth": 90000, "baseUrl": "https://good-cdn.example.com/audio.m4s",
+                 "backupUrl": ["https://backup-cdn.example.com/audio.m4s",
+                               "https://bad-cdn.example.com/audio.m4s"]},
             ]}}})
         raise AssertionError(f"unexpected url: {url}")
 
@@ -87,6 +90,9 @@ def test_parse_bilibili_playurl_success(monkeypatch):
         mock_dir.return_value = tmp
 
         def fake_download(url, media_dir, prefix, headers=None):
+            if url.startswith("https://bad-cdn.example.com/"):
+                return None
+            assert url.startswith("https://good-cdn.example.com/")
             f = media_dir / f"{prefix}-{int(__import__('time').time())}.m4a"
             f.write_bytes(b"\x00" * 1024)
             return f
@@ -98,7 +104,11 @@ def test_parse_bilibili_playurl_success(monkeypatch):
         assert result["platform"] == "bilibili"
         assert result["path"].startswith("/media/")
         assert result["duration"] == 120
-        mock_download.assert_called_once()
+        assert mock_download.call_count == 2
+        first_url = mock_download.call_args_list[0].args[0]
+        second_url = mock_download.call_args_list[1].args[0]
+        assert first_url.startswith("https://bad-cdn.example.com/")
+        assert second_url.startswith("https://good-cdn.example.com/")
         # 清理测试文件
         for f in tmp.iterdir():
             f.unlink()

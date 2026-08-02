@@ -90,7 +90,8 @@ def _parse_bilibili_playurl(url: str) -> dict[str, Any] | None:
     """B站官方 playurl API 解析音频直链
 
     绕开云服务器 IP 在 yt-dlp 场景下的 412 风控 (api.bilibili.com 不受影响)。
-    返回 {audio_url, title, duration} 或 None。
+    返回 {audio_urls, title, duration} 或 None。audio_urls 为所有候选 CDN URL
+    (baseUrl + backupUrl, 去重), 由调用方逐个尝试下载。
     """
 
     from ..core.extractors.bilibili_extractor import BilibiliExtractor
@@ -131,12 +132,19 @@ def _parse_bilibili_playurl(url: str) -> dict[str, Any] | None:
             return None
 
         audios.sort(key=lambda a: a.get("bandwidth", 0), reverse=True)
-        best = audios[0]
-        audio_url = best.get("baseUrl") or best.get("base_url") or best.get("url")
-        if not audio_url:
+        candidates: list[str] = []
+        for a in audios:
+            for k in ("baseUrl", "base_url", "url"):
+                if a.get(k):
+                    candidates.append(a[k])
+            for b in (a.get("backupUrl") or a.get("backup_url") or []):
+                candidates.append(b)
+        seen: set[str] = set()
+        audio_urls = [u for u in candidates if not (u in seen or seen.add(u))]
+        if not audio_urls:
             return None
         return {
-            "audio_url": audio_url,
+            "audio_urls": audio_urls,
             "title": vdata.get("title", ""),
             "duration": vdata.get("duration", 0),
             "platform": "bilibili",
@@ -213,12 +221,16 @@ def parse_audio_source(url: str, cookie_browser: str | None = None,
     # B站专用: 官方 playurl API (绕开云 IP 412 风控)
     if "bilibili.com" in url or "b23.tv" in url:
         bili = _parse_bilibili_playurl(url)
-        if bili and bili.get("audio_url"):
+        if bili and bili.get("audio_urls"):
             media_dir = get_media_dir()
             prefix = hashlib.sha1(url.encode()).hexdigest()[:10]
-            final_path = _download_to_media(
-                bili["audio_url"], media_dir, prefix, headers=_BILI_HEADERS
-            )
+            final_path = None
+            for audio_url in bili["audio_urls"]:
+                final_path = _download_to_media(
+                    audio_url, media_dir, prefix, headers=_BILI_HEADERS
+                )
+                if final_path:
+                    break
             if final_path:
                 logger.info(
                     f"B站 playurl 中转完成: {final_path} ({final_path.stat().st_size} bytes)"
@@ -231,6 +243,7 @@ def parse_audio_source(url: str, cookie_browser: str | None = None,
                     "platform": "bilibili",
                     "ext": final_path.suffix,
                     "size_bytes": final_path.stat().st_size,
+                    "source": "bilibili_playurl",
                 }
         logger.warning("B站 playurl 失败, 回退 yt-dlp")
 
@@ -296,6 +309,7 @@ def parse_audio_source(url: str, cookie_browser: str | None = None,
                 "platform": platform,
                 "ext": ext,
                 "size_bytes": final_path.stat().st_size,
+                "source": "yt-dlp",
             }
 
     except Exception as e:

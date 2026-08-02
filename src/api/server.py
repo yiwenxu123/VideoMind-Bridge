@@ -390,7 +390,7 @@ class APIServer:
                 "platform": result.get("platform", ""),
                 "ext": result.get("ext", ""),
                 "size_bytes": result.get("size_bytes", 0),
-                "source": "yt-dlp",
+                "source": result.get("source", "unknown"),
             }
 
         # 提取器 API Key 管理
