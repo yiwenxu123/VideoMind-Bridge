@@ -31,3 +31,15 @@ def find_ssr_payload(html: str) -> dict[str, Any] | None:
         if isinstance(data, dict):
             return data
     return None
+
+
+def find_first_meta(html: str, patterns: list[str]) -> str:
+    """按顺序在 HTML 中匹配正则，返回第一个捕获组（去首尾空白）。
+
+    常用于提取 og:title / og:description 等 meta 字段。
+    """
+    for p in patterns:
+        m = re.search(p, html)
+        if m:
+            return m.group(1).strip()
+    return ""

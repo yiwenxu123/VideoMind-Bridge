@@ -98,15 +98,6 @@ class XiaohongshuExtractor(ContentExtractor):
                 error=f"小红书提取失败: {e}",
             )
 
-    def _resolve_short_url(self, url: str) -> str | None:
-        """解析 xhslink.com 短链接"""
-        try:
-            resp = self._client.get(url, timeout=10.0)
-            # 获取最终的 URL (重定向后)
-            return str(resp.url)
-        except Exception:
-            return None
-
     def _extract_note_id(self, url: str) -> str | None:
         """从 URL 提取笔记 ID"""
         m = _XHS_RE.search(url)

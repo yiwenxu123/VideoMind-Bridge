@@ -13,7 +13,7 @@ import httpx
 
 from ..models import CostTier, ExtractResult
 from . import register_extractor
-from ._ssr import find_ssr_payload
+from ._ssr import find_first_meta, find_ssr_payload
 from .base import ContentExtractor
 
 # 抖音 URL 模式
@@ -98,14 +98,6 @@ class DouyinExtractor(ContentExtractor):
                 error=f"抖音提取失败: {e}",
             )
 
-    def _resolve_short_url(self, url: str) -> str | None:
-        """解析 v.douyin.com 短链接"""
-        try:
-            resp = self._client.get(url, follow_redirects=True, timeout=10.0)
-            return str(resp.url)
-        except Exception:
-            return None
-
     def _extract_video_id(self, url: str) -> str | None:
         """从 URL 提取视频 ID"""
         m = _DOUYIN_RE.search(url)
@@ -140,7 +132,7 @@ class DouyinExtractor(ContentExtractor):
             description = self._extract_description(html)
 
             if not description:
-                # 尝试从 JSON-LD / 数据脚本提取
+                # 尝试从 SSR 数据提取
                 description = self._extract_from_ssr(html)
 
             return title, description, None
@@ -168,29 +160,19 @@ class DouyinExtractor(ContentExtractor):
     @staticmethod
     def _extract_title(html: str) -> str:
         """从 HTML 提取标题"""
-        patterns = [
+        return find_first_meta(html, [
             r'<meta\s+property="og:title"\s+content="([^"]*)"',
             r'<title>([^<]*)</title>',
             r'"desc"\s*:\s*"([^"]*)"',
-        ]
-        for p in patterns:
-            m = re.search(p, html)
-            if m:
-                return m.group(1).strip()
-        return ""
+        ])
 
     @staticmethod
     def _extract_description(html: str) -> str:
         """从 HTML 提取描述/文案"""
-        patterns = [
+        return find_first_meta(html, [
             r'<meta\s+property="og:description"\s+content="([^"]*)"',
             r'"description"\s*:\s*"([^"]*)"',
-        ]
-        for p in patterns:
-            m = re.search(p, html)
-            if m:
-                return m.group(1).strip()
-        return ""
+        ])
 
     @staticmethod
     def _extract_from_ssr(html: str) -> str:

@@ -5,7 +5,7 @@ from typing import cast
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenuBar, QMessageBox, QWidget
+from PySide6.QtWidgets import QMenuBar, QWidget
 
 from ...utils import get_logger
 
@@ -78,14 +78,3 @@ class MenuManager(QObject):
     def _on_quit(self) -> None:
         """退出应用"""
         self.quit_requested.emit()
-
-    def show_about_dialog(self, parent=None) -> None:
-        """显示关于对话框"""
-        QMessageBox.about(
-            cast(QWidget | None, parent if parent is not None else self._parent),
-            "关于 VideoMind Bridge",
-            "<h2>VideoMind Bridge</h2>"
-            "<p>版本: 0.1.0</p>"
-            "<p>一个智能视频处理工具，支持下载、转录、AI 摘要和导出。</p>"
-            "<p>支持平台: Bilibili, YouTube, 抖音, 小红书等</p>"
-        )

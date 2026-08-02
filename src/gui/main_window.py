@@ -27,7 +27,9 @@ from ..models.task import TaskStatus as ModelTaskStatus
 from ..services.config_manager import get_config_manager
 
 # 导入服务
+from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
 from ..services.task_database import get_task_database
+from ..services.time_estimator import get_time_estimator
 from ..utils import get_logger
 
 # 导入组件
@@ -411,7 +413,6 @@ class MainWindow(QMainWindow):
     def _process_single_url(self, url: str, mode: ProcessingMode, targets: list):
         """处理单个 URL"""
         # 检查是否重复处理
-        from ..services.duplicate_detector import get_duplicate_detector
         detector = get_duplicate_detector()
         existing_record = detector.check_duplicate(url)
 
@@ -467,7 +468,6 @@ class MainWindow(QMainWindow):
         total = len(urls)
 
         # 检查重复处理的数量
-        from ..services.duplicate_detector import get_duplicate_detector
         detector = get_duplicate_detector()
 
         duplicate_count = 0
@@ -621,7 +621,6 @@ class MainWindow(QMainWindow):
         )
 
         # 添加处理记录（状态为 pending）
-        from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
         detector.add_record(
             url=url,
@@ -662,7 +661,6 @@ class MainWindow(QMainWindow):
             # 尝试从任务队列获取任务信息
             task_info = self.task_queue.get_task_info(task_id)
             if task_info and task_info.video_duration > 0:
-                from ..services.time_estimator import get_time_estimator
                 estimator = get_time_estimator()
                 estimate = estimator.estimate_remaining_time(
                     task_id=task_id,
@@ -697,7 +695,6 @@ class MainWindow(QMainWindow):
 
     def _on_task_completed(self, task_id: str, url: str, _mode: ProcessingMode, success: bool, result: dict):
         """任务完成"""
-        from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
 
         if success:
@@ -761,7 +758,6 @@ class MainWindow(QMainWindow):
         self.status_bar.showMessage(f"任务失败: {error_message}")
 
         # 更新处理记录为失败状态
-        from ..services.duplicate_detector import ProcessingStatus, get_duplicate_detector
         detector = get_duplicate_detector()
         detector.update_status(
             url=url,
@@ -785,7 +781,6 @@ class MainWindow(QMainWindow):
             task_info.platform = platform
 
             # 显示预估时间
-            from ..services.time_estimator import get_time_estimator
             estimator = get_time_estimator()
             estimate = estimator.estimate_processing_time(
                 mode=task_info.mode.value if hasattr(task_info.mode, 'value') else str(task_info.mode),

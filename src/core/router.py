@@ -23,14 +23,8 @@ class RouterConfig:
     # 最大可接受成本等级 (None = 不限制)
     max_cost_tier: CostTier | None = None
 
-    # 是否启用所有提取器
-    all_extractors: bool = False
-
     # 自定义提取器优先级列表 (名称列表)
     priority: list[str] | None = None
-
-    # 尝试的超时时间 (秒)
-    timeout: int = 300
 
     # 结果缓存 (Dict[url, ExtractResult])
     cache: dict[str, ExtractResult] = field(default_factory=dict)

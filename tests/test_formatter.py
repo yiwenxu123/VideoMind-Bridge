@@ -15,13 +15,6 @@ def make_extract_result(**overrides) -> ExtractResult:
     return ExtractResult(**defaults)
 
 
-def test_format_extract_result():
-    result = make_extract_result()
-    d = HermesFormatter.format_extract_result(result)
-    assert d["success"] is True
-    assert d["platform"] == "bilibili"
-
-
 def test_format_extract_result_full_adds_fields():
     result = make_extract_result()
     d = HermesFormatter.format_extract_result_full(result)

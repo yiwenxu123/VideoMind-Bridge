@@ -1,7 +1,7 @@
 """YouTube 内容提取器
 
 使用 youtube-transcript-api 直接提取字幕, 零 Cookie。
-降级: oembed 元信息 → yt-dlp 字幕。
+标题经 oembed 获取; 无字幕时返回占位结果, 由 router 降级到 yt-dlp/Whisper 兜底。
 """
 
 from __future__ import annotations

@@ -20,9 +20,7 @@ from .formatter import HermesFormatter
 from .models import (
     ContentGrade,
     CostTier,
-    ExtractorMetadata,
     ExtractResult,
-    PlatformInfo,
     PrescreenResult,
 )
 from .prescreener import Prescreener
@@ -31,10 +29,8 @@ from .router import ContentRouter
 __all__ = [
     "ContentGrade",
     "CostTier",
-    "PlatformInfo",
     "PrescreenResult",
     "ExtractResult",
-    "ExtractorMetadata",
     "ContentRouter",
     "HermesFormatter",
     "Prescreener",

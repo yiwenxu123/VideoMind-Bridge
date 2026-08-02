@@ -17,34 +17,7 @@ class HermesFormatter:
     """Hermes 兼容格式化器
 
     将 VMB 提取结果格式化为 Hermes skill 可直接消费的 JSON 格式。
-    """
-
-    @staticmethod
-    def format_extract_result(result: ExtractResult) -> dict[str, Any]:
-        """格式化为 Hermes 兼容的输出
-
-        Args:
-            result: 提取结果
-
-        Returns:
-            Hermes 兼容的 JSON 字典
-
-        输出格式:
-        {
-            "success": bool,
-            "platform": "bilibili|youtube|douyin|...",
-            "title": "视频标题",
-            "content": "完整文本内容",
-            "source": "使用的提取器",
-            "url": "原始URL",
-            "cost_tier": "free|cheap|paid|expensive|premium",
-            "duration_seconds": float,
-            "language": "zh|en|...",
-            "error": "错误信息(仅失败时)",
-            "metadata": { ... }
-        }
-        """
-        return result.to_dict()
+     """
 
     @staticmethod
     def format_prescreen_result(result: PrescreenResult) -> dict[str, Any]:

@@ -46,16 +46,6 @@ _COST_TIER_PRIORITY = {
 
 
 @dataclass
-class PlatformInfo:
-    """平台检测结果"""
-
-    platform: str  # bilibili / youtube / douyin / xiaohongshu / unknown
-    url: str       # 标准化后的 URL
-    video_id: str  # 提取的视频 ID
-    raw_url: str = ""  # 原始 URL
-
-
-@dataclass
 class PrescreenResult:
     """内容预筛结果
 
@@ -80,17 +70,6 @@ class PrescreenResult:
     def effective_cost_grade(self) -> ContentGrade:
         """获取成本分级 (未设置时回退到基本面分级)"""
         return self.cost_grade or self.grade
-
-
-@dataclass
-class ExtractorMetadata:
-    """提取器元信息"""
-
-    name: str
-    platform: str
-    cost_tier: CostTier
-    available: bool
-    supported: bool = False
 
 
 @dataclass

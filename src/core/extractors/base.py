@@ -90,5 +90,16 @@ class ContentExtractor(ABC):
         from ...services.config_manager import get_config_manager
         return get_config_manager().get_extractor_key(key_name)
 
-    def _resolve_short_url(self, _url: str) -> str | None:
-        return None
+    def _resolve_short_url(self, url: str, timeout: float = 10.0) -> str | None:
+        """解析短链接为最终 URL（跟随重定向）
+
+        使用子类构造的 self._client（httpx.Client）；无客户端时返回 None。
+        """
+        client = getattr(self, "_client", None)
+        if client is None:
+            return None
+        try:
+            resp = client.get(url, follow_redirects=True, timeout=timeout)
+            return str(resp.url)
+        except Exception:
+            return None

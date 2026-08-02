@@ -6,6 +6,7 @@ from pathlib import Path
 
 from ..models.task import ExportContext, ExportResult, ExportTarget
 from ..services.ai_service import Highlight
+from ..utils.media_utils import extract_highlights_from_context
 from .base import BaseExporter
 
 
@@ -96,17 +97,8 @@ class HTMLPlayerExporter(BaseExporter):
         return title[:100] if title else "untitled"
 
     def _extract_highlights_from_context(self, context: ExportContext) -> list[Highlight]:
-        """从 ExportContext 提取时间轴数据"""
-        highlights_data = context.config.get("highlights", [])
-        highlights = []
-        for h in highlights_data:
-            if isinstance(h, dict):
-                highlights.append(Highlight(
-                    time=h.get("time", "00:00:00"),
-                    seconds=h.get("seconds", 0),
-                    content=h.get("content", "")
-                ))
-        return highlights
+        """从 ExportContext 提取时间轴数据（使用共享工具）"""
+        return extract_highlights_from_context(context.config)
 
     def _extract_subtitles_from_context(self, context: ExportContext) -> list[dict]:
         """从 ExportContext 提取字幕数据"""
