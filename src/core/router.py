@@ -1,7 +1,7 @@
 """成本感知内容路由
 
 遍历优先级列表自动选择提取器, 失败自动跳过。
-优先级: coze(CHEAP) → 平台原生(FREE) → yt-dlp(FREE) → yt-dlp+ASR(CHEAP) → 商业API(PREMIUM)
+优先级: 平台原生(FREE) → yt-dlp(FREE) → yt-dlp+ASR(CHEAP) → 商业API(PREMIUM)
 """
 
 from __future__ import annotations
@@ -46,13 +46,12 @@ class RouterConfig:
 # Coze 优先 — 使用免费每日积分，覆盖全平台提取+转写
 # Coze 失败后按平台走各自的免费链路，最后用付费 API 兜底
 _DEFAULT_PRIORITY = [
-    "coze",        # CHEAP   - 免费每日积分，全平台通用
-    "bilibili",    # FREE    - B站字幕API，Coze 失败时兜底
+    "bilibili",    # FREE    - B站字幕API (官方 WBI 签名)
     "youtube",     # FREE    - YouTube字幕API
     "douyin",      # FREE    - 抖音页面解析
     "xiaohongshu", # FREE    - 小红书页面解析
     "ytdlp",       # FREE    - yt-dlp 字幕兜底
-    "ytdlp_asr",   # CHEAP   - yt-dlp下载+阿里云ASR (无字幕视频转写)
+    "ytdlp_asr",   # CHEAP   - yt-dlp下载+DashScope ASR (无字幕视频转写)
     "tikhub",      # PREMIUM - TikHub商业API (付费兜底)
     "apify",       # PREMIUM - Apify商业爬虫
 ]

@@ -8,7 +8,7 @@
 ## 功能特性
 
 ### v2 Engine（主链，推荐）
-- **多引擎提取**：9 个提取器自动降级（B站/YouTube/抖音/小红书/Coze/yt-dlp/tikhub/Apify/阿里云ASR）
+- **多引擎提取**：9 个提取器自动降级（B站/YouTube/抖音/小红书/yt-dlp/tikhub/Apify/阿里云ASR）
 - **零Cookie提取**：B站 WBI 签名、抖音 iesdouyin、小红书页面解析，无需浏览器 Cookie
 - **提取成本决策**：预筛回答"提取这个链接要花多少钱"（cost_grade + recommended_cost_tier），S/A 免费、B 便宜、C 需付费、D 建议跳过
 - **成本感知路由**: 免费 > 付费自动选择，失败自动降级下一级
@@ -196,7 +196,6 @@ src/
 │       ├── youtube_extractor.py
 │       ├── douyin_extractor.py
 │       ├── xiaohongshu_extractor.py
-│       ├── coze_extractor.py
 │       ├── ytdlp_extractor.py
 │       ├── ytdlp_asr_extractor.py   # yt-dlp + 阿里云 ASR
 │       ├── tikhub_extractor.py      # 商业API

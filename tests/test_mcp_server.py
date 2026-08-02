@@ -770,10 +770,10 @@ class TestCallConfigure:
     def test_get_mode(self, MockConfigManager, server, captured_send):
         mock_config = MockConfigManager.return_value
         mock_config.list_extractor_key_status.return_value = {
-            "coze": {"label": "Coze", "all_configured": True, "keys": []},
-            "tikhub": {"label": "Tikhub", "all_configured": False, "keys": []},
+            "tikhub": {"label": "Tikhub", "all_configured": True, "keys": []},
+            "apify": {"label": "Tikhub", "all_configured": False, "keys": []},
         }
-        mock_config.EXTRACTOR_GROUPS = {"coze": {}, "tikhub": {}}
+        mock_config.EXTRACTOR_GROUPS = {"tikhub": {}, "apify": {}}
 
         server.handle_message({
             "jsonrpc": "2.0", "id": 60, "method": "tools/call",
@@ -793,7 +793,7 @@ class TestCallConfigure:
     def test_set_mode_success(self, MockConfigManager, server, captured_send):
         mock_config = MockConfigManager.return_value
         type(mock_config).EXTRACTOR_PROVIDERS = PropertyMock(
-            return_value={"coze": {"env": "COZE_API_KEY", "label": "Coze API Token"}},
+            return_value={"dashscope_key": {"env": "ALI_API_KEY", "label": "DashScope ASR 阿里云 Key"}},
         )
         mock_config.set_extractor_key.return_value = True
 
@@ -801,20 +801,20 @@ class TestCallConfigure:
             "jsonrpc": "2.0", "id": 60, "method": "tools/call",
             "params": {
                 "name": "configure",
-                "arguments": {"action": "set", "key": "coze", "value": "sk-xxx"},
+                "arguments": {"action": "set", "key": "dashscope_key", "value": "sk-xxx"},
             },
         })
 
-        mock_config.set_extractor_key.assert_called_once_with("coze", "sk-xxx")
+        mock_config.set_extractor_key.assert_called_once_with("dashscope_key", "sk-xxx")
         result = captured_send[0]["result"]
         assert result["success"] is True
         assert result["action"] == "set"
-        assert result["key"] == "coze"
+        assert result["key"] == "dashscope_key"
 
     @patch(f"{CONFIG_PATCH}.ConfigManager")
     def test_set_mode_missing_args(self, MockConfigManager, server, captured_send):
         mock_config = MockConfigManager.return_value
-        type(mock_config).EXTRACTOR_PROVIDERS = PropertyMock(return_value={"coze": {}})
+        type(mock_config).EXTRACTOR_PROVIDERS = PropertyMock(return_value={"dashscope_key": {}})
 
         server.handle_message({
             "jsonrpc": "2.0", "id": 60, "method": "tools/call",
@@ -833,7 +833,7 @@ class TestCallConfigure:
     def test_set_mode_unknown_key(self, MockConfigManager, server, captured_send):
         mock_config = MockConfigManager.return_value
         type(mock_config).EXTRACTOR_PROVIDERS = PropertyMock(
-            return_value={"coze": {"env": "COZE_API_KEY", "label": "Coze"}},
+            return_value={"dashscope_key": {"env": "ALI_API_KEY", "label": "DashScope"}},
         )
 
         server.handle_message({
@@ -852,7 +852,7 @@ class TestCallConfigure:
     def test_set_mode_failure(self, MockConfigManager, server, captured_send):
         mock_config = MockConfigManager.return_value
         type(mock_config).EXTRACTOR_PROVIDERS = PropertyMock(
-            return_value={"coze": {"env": "COZE_API_KEY", "label": "Coze"}},
+            return_value={"dashscope_key": {"env": "ALI_API_KEY", "label": "DashScope"}},
         )
         mock_config.set_extractor_key.return_value = False
 
@@ -860,7 +860,7 @@ class TestCallConfigure:
             "jsonrpc": "2.0", "id": 60, "method": "tools/call",
             "params": {
                 "name": "configure",
-                "arguments": {"action": "set", "key": "coze", "value": "sk-xxx"},
+                "arguments": {"action": "set", "key": "dashscope_key", "value": "sk-xxx"},
             },
         })
 
@@ -989,7 +989,7 @@ class TestErrorHandling:
                         ("videomind_supported", {"url": _MOCK_URL}),
                         ("videomind_config", {}),
                         ("configure", {"action": "get"}),
-                        ("configure", {"action": "set", "key": "coze", "value": "sk-xxx"}),
+                        ("configure", {"action": "set", "key": "dashscope_key", "value": "sk-xxx"}),
                     ]
 
                     for name, args in handlers:

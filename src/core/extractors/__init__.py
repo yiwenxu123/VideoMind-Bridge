@@ -34,7 +34,6 @@ from . import (
     aliyun_asr_extractor,  # noqa: E402, F811
     apify_extractor,  # noqa: E402, F811
     bilibili_extractor,  # noqa: E402, F811
-    coze_extractor,  # noqa: E402, F811
     douyin_extractor,  # noqa: E402, F811
     tikhub_extractor,  # noqa: E402, F811
     xiaohongshu_extractor,  # noqa: E402, F811

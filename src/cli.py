@@ -202,7 +202,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         nargs=2,
         metavar=("KEY", "VALUE"),
         default=None,
-        help="设置提取器 API Key (KEY: coze / tikhub / apify / aliyun_access_key_id / aliyun_access_key_secret / aliyun_appkey)"
+        help="设置提取器 API Key (KEY: tikhub / apify / aliyun_access_key_id / aliyun_access_key_secret / aliyun_appkey)"
     )
 
     return parser.parse_args(argv)

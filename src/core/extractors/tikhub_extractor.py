@@ -227,7 +227,7 @@ class TikhubExtractor(ContentExtractor):
             if result.success and result.content:
                 return result
 
-            dashscope_key = self._resolve_api_key("coze_ali_key")
+            dashscope_key = self._resolve_api_key("dashscope_key")
             if dashscope_key:
                 result = self._transcribe_with_dashscope(audio_path, dashscope_key, url, platform, title, duration)
                 if result.success and result.content:

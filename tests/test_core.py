@@ -393,7 +393,7 @@ def test_router_list_extractors():
     assert "youtube" in extractors
     assert "douyin" in extractors
     assert "xiaohongshu" in extractors
-    assert "coze" in extractors
+    assert "douyin" in extractors
     assert "ytdlp" in extractors
 
 

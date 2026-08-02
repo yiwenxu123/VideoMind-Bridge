@@ -84,11 +84,11 @@ class YtDlpASRExtractor(ContentExtractor):
 
             metadata = self._get_metadata(url)
 
-            # 优先阿里云 NLS ASR, 未配置时回退 DashScope (复用 coze_ali_key)
+            # 优先阿里云 NLS ASR, 未配置时回退 DashScope (复用 dashscope_key)
             if self._asr.is_available():
                 result = self._asr.transcribe_audio(audio_path)
             else:
-                dashscope_key = self._resolve_api_key("coze_ali_key")
+                dashscope_key = self._resolve_api_key("dashscope_key")
                 if dashscope_key:
                     result = self._transcribe_dashscope(
                         audio_path, dashscope_key, url,
@@ -115,7 +115,7 @@ class YtDlpASRExtractor(ContentExtractor):
                 content=(
                     "[yt-dlp+ASR] 已下载音频但 ASR 不可用\n"
                     "请配置 ALIYUN_ACCESS_KEY_ID / ACCESS_KEY_SECRET / APPKEY, "
-                    "或 coze_ali_key (DashScope)\n"
+                    "或 dashscope_key (DashScope)\n"
                 ),
                 source="ytdlp_asr",
                 url=url,
@@ -133,7 +133,7 @@ class YtDlpASRExtractor(ContentExtractor):
         self, audio_path: Path, api_key: str, url: str,
         platform: str, title: str, duration: float,
     ) -> ExtractResult:
-        """DashScope paraformer-v2 转写 (复用 coze_ali_key, 免额外配置)"""
+        """DashScope paraformer-v2 转写 (复用 dashscope_key, 免额外配置)"""
         try:
             text, segments = transcribe_audio_data(audio_path, api_key)
 

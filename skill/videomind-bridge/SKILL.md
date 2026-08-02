@@ -52,15 +52,15 @@ v2 提取引擎**无需任何 API Key** (零Cookie直接提取)。以下 Key 用
 | 用途 | 环境变量 | 必需? |
 |------|----------|-------|
 | AI摘要 (v1) | `DEEPSEEK_API_KEY` | v1 必需, v2 可选 |
-| Coze加速 (v2) | `COZE_API_KEY` | 可选 |
+| DashScope ASR (无字幕兜底) | `ALI_API_KEY` | 可选 |
 | 商业API (v2) | `TIKHUB_API_KEY` / `APIFY_API_KEY` / `ALIYUN_ACCESS_KEY_ID` + `ALIYUN_ACCESS_KEY_SECRET` + `ALIYUN_APPKEY` | 可选 |
 
 ```bash
 # 最小配置（v2 零Cookie提取，不需要任何 Key）
 # 可选：AI 摘要
 export DEEPSEEK_API_KEY="sk-your-key-here"
-# 可选：Coze 加速
-export COZE_API_KEY="pat_your_coze_token"
+# 可选：DashScope ASR (无字幕视频转写)
+export ALI_API_KEY="sk-your_dashscope_key"
 ```
 
 ### 步骤 3: v2 提取模式 (推荐)
@@ -193,7 +193,7 @@ MCP Server 提供工具，Agent 可直接调用:
 - **grade** (内容基本面, 兼容保留): SEO/时长/营销规则评分
 - **cost_grade** (提取成本决策, v3 主用): 回答"提取要花多少钱"
   - **S/A**: 免费可及 (零 Cookie + 官方字幕) → 推荐 `free`
-  - **B**: 免费但内容有限 → 推荐 `cheap` (Coze 免费积分)
+  - **B**: 免费但内容有限 → 推荐 `cheap` (ASR 兜底)
   - **C**: 需付费通道 (无字幕需 ASR) → 推荐 `paid`
   - **D**: 提取性价比低 → `skip_reason` 说明, 建议跳过
 - **recommended_cost_tier**: 直接作为 router 的 `max_cost` 输入
@@ -253,7 +253,7 @@ MCP Server 提供工具，Agent 可直接调用:
 | youtube | 免费 | pip | youtube-transcript-api |
 | douyin | 免费 | 无 | iesdouyin 移动端API |
 | xiaohongshu | 免费 | 无 | 页面解析 |
-| coze | 便宜 | COZE_API_KEY | Coze工作流加速 |
+| dashscope_key | 便宜 | ALI_API_KEY | 无字幕视频 ASR 转写 |
 | ytdlp | 免费 | yt-dlp | 1800+ 平台兜底 |
 | tikhub | 商业 | TIKHUB_API_KEY | 1000+ API |
 | apify | 商业 | APIFY_API_KEY | 预构建爬虫 |
@@ -374,7 +374,7 @@ uv run python -m src.cli "URL" --cost-tier expensive --json
 |------|------|----------|
 | v2 提取失败 | 平台API变更 | 自动降级到 yt-dlp 兜底 |
 | 抖音/小红书失败 | 反爬升级 | 使用 `--cost-tier premium` 启用商业API |
-| Coze 不可用 | 401 Token 过期 | 自动跳过，不影响提取 |
+| 平台风控 (验证码/403) | 本地 IP 受限 | 配置 cookies.txt (DOUYIN_COOKIES_FILE) |
 | yt-dlp 下载失败 | 版本过旧 | `brew upgrade yt-dlp` |
 | Whisper 模型下载慢 | HuggingFace网络 | `HF_ENDPOINT=https://hf-mirror.com` |
 | AI摘要为空 | API Key 无效 | 检查 Key 和余额 |

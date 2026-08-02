@@ -206,7 +206,7 @@ class APIServer:
         if web_dir.is_dir():
             app.mount("/static", StaticFiles(directory=str(web_dir)), name="static")
 
-        # 挂载音频中转目录 (供 DashScope/coze 工作流拉取)
+        # 挂载音频中转目录 (供 DashScope ASR 拉取)
         from .parse_service import get_media_dir
         media_dir = get_media_dir()
         media_dir.mkdir(parents=True, exist_ok=True)
@@ -355,12 +355,12 @@ class APIServer:
                 logger.error(f"v2 提取归档失败: {e}")
                 return {"success": False, "url": url, "error": str(e)}
 
-        # 视频源地址解析 (替代 coze 第三方解析插件)
+        # 视频源地址解析 (B站官方 playurl, 绕云 IP 风控)
         @app.post("/api/v1/parse")
         async def parse_video(request: Request, body: dict):
             """解析视频 URL → 下载音频 → 中转目录, 返回公网可访问的 voice_url
 
-            供 coze 工作流中的自研解析插件调用, 下游接 DashScope ASR。
+            供外部工作流调用, 下游接 DashScope ASR。
             """
             url = body.get("url")
             if not url:

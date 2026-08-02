@@ -23,7 +23,6 @@ from src.core.extractors.aliyun_asr_extractor import AliyunASRExtractor
 from src.core.extractors.apify_extractor import ApifyExtractor, _detect_apify_platform
 from src.core.extractors.base import ContentExtractor
 from src.core.extractors.bilibili_extractor import BilibiliExtractor
-from src.core.extractors.coze_extractor import CozeExtractor
 from src.core.extractors.douyin_extractor import DouyinExtractor
 from src.core.extractors.tikhub_extractor import TikhubExtractor, _detect_commercial_platform
 from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
@@ -195,7 +194,7 @@ def test_get_nonexistent_extractor():
 def test_list_extractors_includes_all_platforms():
     names = list_extractors()
     for platform in ("bilibili", "youtube", "douyin", "xiaohongshu",
-                     "coze", "ytdlp", "ytdlp_asr", "tikhub", "apify", "aliyun_asr"):
+                     "ytdlp", "ytdlp_asr", "tikhub", "apify", "aliyun_asr"):
         assert platform in names, "Missing extractor: " + platform
 
 
@@ -203,7 +202,7 @@ def test_create_all_extractors_returns_instances():
     extractors = create_all_extractors()
     names = [e.platform_name for e in extractors]
     for platform in ("bilibili", "youtube", "douyin", "xiaohongshu",
-                     "coze", "ytdlp", "ytdlp_asr", "tikhub", "apify", "aliyun_asr"):
+                     "ytdlp", "ytdlp_asr", "tikhub", "apify", "aliyun_asr"):
         assert platform in names, "Missing extractor instance: " + platform
     assert len(extractors) >= 10
 
@@ -428,98 +427,6 @@ def test_xiaohongshu_cost_tier():
 def test_xiaohongshu_platform_name():
     ext = XiaohongshuExtractor()
     assert ext.platform_name == "xiaohongshu"
-
-
-# ============================================================
-# Coze Extractor
-# ============================================================
-
-def test_coze_supports_bilibili():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert ext.supports("https://www.bilibili.com/video/BV1xx")
-
-
-def test_coze_supports_youtube():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert ext.supports("https://www.youtube.com/watch?v=xxx")
-
-
-def test_coze_supports_douyin():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert ext.supports("https://www.douyin.com/video/123")
-
-
-def test_coze_supports_xiaohongshu():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert ext.supports("https://www.xiaohongshu.com/explore/123")
-
-
-def test_coze_supports_b23():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert ext.supports("https://b23.tv/xxxxx")
-
-
-def test_coze_supports_iesdouyin():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert ext.supports("https://www.iesdouyin.com/share/video/123")
-
-
-def test_coze_supports_invalid():
-    ext = CozeExtractor.__new__(CozeExtractor)
-    ext._api_key = ""
-    ext._workflow_id = ""
-    assert not ext.supports("https://www.google.com")
-    assert not ext.supports("https://www.github.com")
-
-
-def test_coze_is_available_with_key():
-    with mock.patch.object(CozeExtractor, "_resolve_api_key", return_value="test-key"):
-        ext = CozeExtractor()
-        assert ext.is_available() is True
-
-
-def test_coze_is_available_without_key():
-    with mock.patch.object(CozeExtractor, "_resolve_api_key", return_value=None):
-        ext = CozeExtractor()
-        assert ext.is_available() is False
-
-
-def test_coze_is_available_empty_key():
-    with mock.patch.object(CozeExtractor, "_resolve_api_key", return_value=""):
-        ext = CozeExtractor()
-        assert ext.is_available() is False
-
-
-def test_coze_cost_tier():
-    assert CozeExtractor._cost_tier == CostTier.CHEAP
-
-
-def test_coze_platform_name():
-    assert CozeExtractor.platform_name == "coze"
-
-
-def test_coze_url_pattern_combines_domains():
-    assert CozeExtractor.url_pattern.search("bilibili.com")
-    assert CozeExtractor.url_pattern.search("youtube.com")
-    assert CozeExtractor.url_pattern.search("douyin.com")
-    assert CozeExtractor.url_pattern.search("xiaohongshu.com")
-    assert CozeExtractor.url_pattern.search("xhslink.com")
-    assert CozeExtractor.url_pattern.search("b23.tv")
-    assert CozeExtractor.url_pattern.search("iesdouyin.com")
-    assert CozeExtractor.url_pattern.search("youtu.be")
-    assert not CozeExtractor.url_pattern.search("google.com")
 
 
 # ============================================================

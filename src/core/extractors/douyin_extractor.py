@@ -1,11 +1,13 @@
 """抖音 (Douyin) 内容提取器
 
-使用 iesdouyin 移动端 API, 零 Cookie 提取字幕/文案。
+使用 iesdouyin 移动端 API 提取字幕/文案。
+本地/云 IP 易被验证码风控, 可通过 DOUYIN_COOKIES_FILE 指定 cookies.txt (Netscape 格式) 绕过。
 参考: keepongo/video_subtitle.py 的 _douyin_share_api() 实现。
 """
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -23,6 +25,27 @@ _DOUYIN_RE = re.compile(
 _DOUYIN_SHORT_RE = re.compile(r"v\.douyin\.com/(\w+)")
 
 
+def _load_cookies_file(path: str) -> str:
+    """读取 Netscape cookies.txt, 拼装为 Cookie header。
+
+    文件格式 (yt-dlp/浏览器导出):
+        domain \t includeSubdomains \t path \t secure \t expiry \t name \t value
+    """
+    try:
+        with open(path, encoding="utf-8") as f:
+            parts = []
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                fields = line.split("\t")
+                if len(fields) >= 7:
+                    parts.append(f"{fields[5]}={fields[6]}")
+            return "; ".join(parts)
+    except (OSError, IndexError):
+        return ""
+
+
 class DouyinExtractor(ContentExtractor):
     """抖音内容提取器"""
 
@@ -31,20 +54,28 @@ class DouyinExtractor(ContentExtractor):
     url_pattern = re.compile(r"(douyin\.com|iesdouyin\.com)")
 
     def __init__(self) -> None:
+        # 手机 UA 更易通过风控; 可通过 DOUYIN_COOKIES_FILE 提供 cookies.txt 绕过验证码
+        cookies_file = os.getenv("DOUYIN_COOKIES_FILE", "")
+        cookie_header = _load_cookies_file(cookies_file) if cookies_file else ""
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+                "AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                "Version/16.0 Mobile/15E148 Safari/604.1"
+            ),
+        }
+        if cookie_header:
+            headers["Cookie"] = cookie_header
+
         self._client = httpx.Client(
             timeout=30.0,
             follow_redirects=True,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                ),
-            },
+            headers=headers,
         )
+        self._has_cookies = bool(cookie_header)
 
     def is_available(self) -> bool:
-        """无需 Cookie, 始终可用"""
+        """无 Cookie 也可用 (部分 IP 可直抓)"""
         return True
 
     def extract(self, url: str) -> ExtractResult:
@@ -75,7 +106,12 @@ class DouyinExtractor(ContentExtractor):
                     source="douyin",
                     url=url,
                     cost_tier=CostTier.FREE,
+                    is_placeholder=True,
                     metadata={"video_id": video_id},
+                    error=(
+                        "无可用字幕 (页面可能被验证码风控; "
+                        "可配置 DOUYIN_COOKIES_FILE 或由 yt-dlp ASR 兜底)"
+                    ),
                 )
 
             return ExtractResult(

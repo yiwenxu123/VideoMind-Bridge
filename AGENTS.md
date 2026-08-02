@@ -41,30 +41,19 @@ mypy src/ --ignore-missing-imports  # 类型检查
 
 默认优先级 (成本排序):
 ```
-coze → bilibili → youtube → douyin → xiaohongshu → ytdlp → ytdlp_asr → tikhub → apify
-CHEAP   FREE       FREE      FREE       FREE           FREE    CHEAP      PREMIUM   PREMIUM
+bilibili → youtube → douyin → xiaohongshu → ytdlp → ytdlp_asr → tikhub → apify
+FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREMIUM
 ```
 
-Coze 位于优先级首位，使用免费每日积分覆盖全平台。Coze 失败时自动降级到免费平台 API。
+抖音在本地/云 IP 常被验证码风控，可通过 `DOUYIN_COOKIES_FILE` 指定 cookies.txt (Netscape 格式) 绕过。
 
 提取器接口: `extract()`, `is_available()`, `supports()`, `should_try()`
 
-### Coze 提取器 (`coze_extractor.py`)
+### DashScope ASR (`_dashscope_asr.py` + `dashscope_key`)
 
-平台专用工作流 (stream_run SSE):
-
-| 平台 | Workflow ID | 参数 |
-|------|------------|------|
-| 抖音 | `7645116403896385562` | `input` + `ali_api` |
-| B站 | `7545785780040564799` | `url` + `ali_api_key` |
-| 小红书 | `7545776707971039241` | `url` + `ali_aip_key` |
-
-降级链: 平台工作流 → `COZE_BOT_ID` 自定义 → Chat API
-
-配置要求:
-- `COZE_API_KEY` 或 `COZE_API_TOKEN`: Coze API Token
-- `ALI_API_KEY`: 阿里云 DashScope Key (工作流内部 ASR 用)
-- `COZE_DAILY_LIMIT`: 每日调用上限 (默认 200)
+无字幕视频兜底转写:
+- `ytdlp_asr` 提取器: yt-dlp 下载音频 → DashScope paraformer-v2 转写
+- 配置 `dashscope_key` (env: `ALI_API_KEY`) 即可启用，无需 Coze
 
 所有 Key 通过 `ConfigManager` 统一管理: 系统密钥环(持久化) → 环境变量(兜底)。
 
@@ -114,7 +103,6 @@ Coze 位于优先级首位，使用免费每日积分覆盖全平台。Coze 失�
 - **sys.path 动态注入**: `main.py` 会将 `src/` 插入 sys.path。`cli.py` 使用 `from src.*` 导入，需以 `python -m src.cli`（项目根）方式运行
 - **Bilibili API**: URL 必须全小写 `/x/web-interface/view`，大写 `I` 会 404
 - **Extractor 注册**: 通过 import 时跑的模块级代码自动注册，无需手动配置
-- **Coze 提取器**: 401 时不阻塞，自动跳到下一个提取器；配额只在真实 API 调用成功后计数（`_count_call`），平台不支持/Key 失效不烧配额
 - **占位结果语义**: `ExtractResult.is_placeholder=True` 表示仅元信息/说明文本（无真实内容）。router 对占位结果不缓存、继续降级链；真正成功才缓存并返回
 - **`--smart`/MCP smart_extract**: FREE 提取到完整内容时直接复用（不二次提取）；仅当 FREE 失败/占位时才按推荐成本升级提取
 - **`--prescreen` 复用提取**: 仅真成功（有内容、非占位）结果被复用；失败/占位时允许二次高成本提取
@@ -170,4 +158,4 @@ Release workflow 自动构建 macOS DMG + Windows ZIP，标签推送 `v*` 触发
 - 修改提取器优先级列表时，同步更新 `src/core/router.py` 的 `_DEFAULT_PRIORITY`
 - 添加新提取器时: 继承 `ContentExtractor` → 调用 `register_extractor()` → 在 `__init__.py` 中 import
 - MCP 通过 stdio 通信，不支持 HTTP — 仅适用 MCP 兼容的 AI Agent
-- **钥匙串弹窗**: macOS keyring 弹窗「python 想要使用钥匙串中的机密信息」是因为 `CozeExtractor.__init__()` 访问了系统钥匙串。解决：(1) 设置环境变量（优先级高于钥匙串），无需钥匙串；或 (2) 在 `~/.zshrc` 添加 `export COZE_API_KEY=xxx` 等；测试已通过 `tests/conftest.py` 全局 mock keyring 避免弹窗
+- **钥匙串弹窗**: macOS keyring 弹窗「python 想要使用钥匙串中的机密信息」是因为 ConfigManager 访问了系统钥匙串。解决：(1) 设置环境变量（优先级高于钥匙串），无需钥匙串；或 (2) 在 `~/.zshrc` 添加 `export ALI_API_KEY=xxx` 等；测试已通过 `tests/conftest.py` 全局 mock keyring 避免弹窗

@@ -203,7 +203,7 @@ class KeysListResponse(BaseModel):
 
 class KeyUpdateRequest(BaseModel):
     """提取器 Key 更新请求"""
-    name: str = Field(..., description="Key 标识 (如 coze, tikhub)")
+    name: str = Field(..., description="Key 标识 (如 dashscope_key, tikhub)")
     value: str = Field(..., min_length=1, description="API Key 值")
 
 

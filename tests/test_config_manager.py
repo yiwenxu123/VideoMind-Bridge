@@ -352,9 +352,9 @@ class TestExtractorKeys:
 
     def test_set_and_get_extractor_key(self, cm, mock_credential_manager):
         """设置后再获取应返回相同值"""
-        assert cm.set_extractor_key("coze", "coze-token-123")
-        mock_credential_manager["extractor_coze"] = "coze-token-123"
-        assert cm.get_extractor_key("coze") == "coze-token-123"
+        assert cm.set_extractor_key("tikhub", "tikhub-token-123")
+        mock_credential_manager["extractor_tikhub"] = "tikhub-token-123"
+        assert cm.get_extractor_key("tikhub") == "tikhub-token-123"
 
     def test_get_nonexistent_key_returns_none(self, cm):
         """不存在的 key 返回 None"""
@@ -362,19 +362,19 @@ class TestExtractorKeys:
 
     def test_set_empty_key_returns_false(self, cm):
         """空值/空白值设置返回 False"""
-        assert cm.set_extractor_key("coze", "") is False
-        assert cm.set_extractor_key("coze", "   ") is False
+        assert cm.set_extractor_key("dashscope_key", "") is False
+        assert cm.set_extractor_key("dashscope_key", "   ") is False
 
     def test_env_var_fallback(self, cm):
         """未在密钥环中找到时，应回退到环境变量"""
-        with patch.dict(os.environ, {"COZE_API_KEY": "env-coze-key"}):
-            assert cm.get_extractor_key("coze") == "env-coze-key"
+        with patch.dict(os.environ, {"TIKHUB_API_KEY": "env-tikhub-key"}):
+            assert cm.get_extractor_key("tikhub") == "env-tikhub-key"
 
     def test_env_var_trumps_none_keyring(self, cm, mock_credential_manager):
         """密钥环返回 None 时使用环境变量"""
-        mock_credential_manager.pop("extractor_coze", None)  # ensure gone
-        with patch.dict(os.environ, {"COZE_API_KEY": "from-env"}):
-            assert cm.get_extractor_key("coze") == "from-env"
+        mock_credential_manager.pop("extractor_tikhub", None)  # ensure gone
+        with patch.dict(os.environ, {"TIKHUB_API_KEY": "from-env"}):
+            assert cm.get_extractor_key("tikhub") == "from-env"
 
     def test_extractor_key_env_var_whitespace_returns_none(self, cm):
         """环境变量值为空白时返回 None"""
@@ -383,9 +383,9 @@ class TestExtractorKeys:
 
     def test_delete_extractor_key(self, cm, mock_credential_manager):
         """删除提取器 Key"""
-        mock_credential_manager["extractor_coze"] = "coze-token"
-        assert cm.delete_extractor_key("coze") is True
-        assert cm.get_extractor_key("coze") is None
+        mock_credential_manager["extractor_tikhub"] = "tikhub-token"
+        assert cm.delete_extractor_key("tikhub") is True
+        assert cm.get_extractor_key("tikhub") is None
 
     def test_delete_nonexistent_key(self, cm):
         """删除不存在的 key 应返回 True（幂等）"""
@@ -395,19 +395,19 @@ class TestExtractorKeys:
         """list_extractor_key_status() 返回结构正确"""
         status = cm.list_extractor_key_status()
         # 检查所有分组
-        assert "coze" in status
+        assert "dashscope_asr" in status
         assert "tikhub" in status
         assert "apify" in status
         assert "aliyun_asr" in status
 
         # 分组字段
-        coze_group = status["coze"]
-        assert "label" in coze_group
-        assert "all_configured" in coze_group
-        assert "keys" in coze_group
+        ds_group = status["dashscope_asr"]
+        assert "label" in ds_group
+        assert "all_configured" in ds_group
+        assert "keys" in ds_group
 
         # key 详情
-        first_key = coze_group["keys"][0]
+        first_key = ds_group["keys"][0]
         assert "name" in first_key
         assert "label" in first_key
         assert "env" in first_key
@@ -415,17 +415,19 @@ class TestExtractorKeys:
 
     def test_list_extractor_key_status_none_configured(self, cm):
         """未配置任何 key 时, all_configured 应为 False"""
-        status = cm.list_extractor_key_status()
-        assert all(g["all_configured"] is False for g in status.values())
+        with patch.dict(os.environ, {
+            "ALI_API_KEY": "", "TIKHUB_API_KEY": "", "APIFY_API_KEY": "",
+            "ALIYUN_ACCESS_KEY_ID": "", "ALIYUN_ACCESS_KEY_SECRET": "", "ALIYUN_APPKEY": "",
+        }):
+            status = cm.list_extractor_key_status()
+            assert all(g["all_configured"] is False for g in status.values())
 
     def test_list_extractor_key_status_partial_configured(self, cm, mock_credential_manager):
         """部分配置时 all_configured 应为 False"""
-        mock_credential_manager["extractor_coze"] = "token"
-        mock_credential_manager["extractor_coze_token"] = "token"
-        mock_credential_manager["extractor_coze_ali_key"] = "key"
+        mock_credential_manager["extractor_dashscope_key"] = "key"
         mock_credential_manager["extractor_tikhub"] = "token"
         status = cm.list_extractor_key_status()
-        assert status["coze"]["all_configured"] is True
+        assert status["dashscope_asr"]["all_configured"] is True
         assert status["tikhub"]["all_configured"] is True
         # apify 未配置
         assert status["apify"]["all_configured"] is False
@@ -490,7 +492,7 @@ class TestExtractorStructure:
 
     def test_providers_count(self, cm):
         """验证 provider 数量"""
-        assert len(cm.EXTRACTOR_PROVIDERS) == 8
+        assert len(cm.EXTRACTOR_PROVIDERS) == 6
 
     def test_groups_count(self, cm):
         """验证 group 数量"""
@@ -901,8 +903,8 @@ ai:
 
     def test_keyring_name_format(self, cm):
         """_keyring_name() 格式正确"""
-        name = cm._keyring_name("coze")
-        assert name == "extractor_coze"
+        name = cm._keyring_name("dashscope_key")
+        assert name == "extractor_dashscope_key"
 
     def test_convenience_functions_exist(self):
         """便捷函数应可导入"""

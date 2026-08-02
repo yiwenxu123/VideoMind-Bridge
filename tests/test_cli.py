@@ -231,8 +231,8 @@ def test_parse_args_config_set():
     """测试 --config-set"""
     print("\n=== 测试 --config-set ===")
 
-    args = parse_args(["--config-set", "coze", "my_token"])
-    assert args.config_set == ["coze", "my_token"]
+    args = parse_args(["--config-set", "tikhub", "my_token"])
+    assert args.config_set == ["tikhub", "my_token"]
     print("  ✓ --config-set key value")
 
 

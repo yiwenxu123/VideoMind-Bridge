@@ -112,24 +112,22 @@ class ConfigManager:
     # ── 提取器 API Key 管理 ──────────────────────────────────────
 
     EXTRACTOR_PROVIDERS: dict[str, dict[str, str]] = {
-        "coze": {"env": "COZE_API_KEY", "label": "Coze API Token"},
-        "coze_token": {"env": "COZE_API_TOKEN", "label": "Coze API Token (别名)"},
         "tikhub": {"env": "TIKHUB_API_KEY", "label": "Tikhub.io API Key"},
         "apify": {"env": "APIFY_API_KEY", "label": "Apify API Token"},
         "aliyun_access_key_id": {"env": "ALIYUN_ACCESS_KEY_ID", "label": "阿里云 AccessKey ID"},
         "aliyun_access_key_secret": {"env": "ALIYUN_ACCESS_KEY_SECRET", "label": "阿里云 AccessKey Secret"},
         "aliyun_appkey": {"env": "ALIYUN_APPKEY", "label": "阿里云 AppKey"},
-        "coze_ali_key": {"env": "ALI_API_KEY", "label": "Coze ASR 阿里云 Key (DashScope)"},
+        "dashscope_key": {"env": "ALI_API_KEY", "label": "DashScope ASR 阿里云 Key"},
     }
 
     EXTRACTOR_GROUPS: dict[str, dict[str, Any]] = {
-        "coze": {"label": "Coze 提取加速", "keys": ["coze", "coze_token", "coze_ali_key"]},
         "tikhub": {"label": "Tikhub.io 商业 API", "keys": ["tikhub"]},
         "apify": {"label": "Apify 商业爬虫", "keys": ["apify"]},
         "aliyun_asr": {
             "label": "阿里云语音识别 (ASR)",
             "keys": ["aliyun_access_key_id", "aliyun_access_key_secret", "aliyun_appkey"],
         },
+        "dashscope_asr": {"label": "DashScope ASR (无字幕兜底)", "keys": ["dashscope_key"]},
     }
 
     def _keyring_name(self, name: str) -> str:

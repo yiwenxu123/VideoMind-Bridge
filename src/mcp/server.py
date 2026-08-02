@@ -255,7 +255,7 @@ class MCPServer:
                 },
                 {
                     "name": "configure",
-                    "description": "设置/查看 VideoMind API Keys。支持的 key: coze (Coze API Token), coze_ali_key (ASR用阿里云Key), tikhub, apify, aliyun_access_key_id/secret/appkey",
+                    "description": "设置/查看 VideoMind API Keys。支持的 key: dashscope_key (ASR用阿里云Key), tikhub, apify, aliyun_access_key_id/secret/appkey",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -266,7 +266,7 @@ class MCPServer:
                             },
                             "key": {
                                 "type": "string",
-                                "description": "set 时必填: coze / coze_ali_key / tikhub / apify / aliyun_access_key_id / secret / appkey",
+                                "description": "set 时必填: dashscope_key / tikhub / apify / aliyun_access_key_id / secret / appkey",
                             },
                             "value": {
                                 "type": "string",
