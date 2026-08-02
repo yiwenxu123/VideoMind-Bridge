@@ -124,7 +124,8 @@ class ApifyExtractor(ContentExtractor):
             headers=headers,
         )
         dataset_resp.raise_for_status()
-        return dataset_resp.json()
+        data = dataset_resp.json()
+        return data if isinstance(data, list) else []
 
     def _parse_result(self, data: list[dict], url: str, platform: str) -> ExtractResult:
         """解析 Apify 爬虫结果为 ExtractResult"""

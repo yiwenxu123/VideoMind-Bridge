@@ -256,7 +256,7 @@ class YtDlpExtractor(ContentExtractor):
             if result.returncode == 0:
                 line = result.stdout.strip().split("\n")[0]
                 if line.startswith("{"):
-                    return json.loads(line)
+                    return dict(json.loads(line))
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
 

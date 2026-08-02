@@ -140,7 +140,11 @@ def _parse_bilibili_playurl(url: str) -> dict[str, Any] | None:
             for b in (a.get("backupUrl") or a.get("backup_url") or []):
                 candidates.append(b)
         seen: set[str] = set()
-        audio_urls = [u for u in candidates if not (u in seen or seen.add(u))]
+        audio_urls = []
+        for u in candidates:
+            if u not in seen:
+                seen.add(u)
+                audio_urls.append(u)
         if not audio_urls:
             return None
         return {

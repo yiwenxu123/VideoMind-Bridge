@@ -266,7 +266,7 @@ class AIService:
                 response.raise_for_status()
 
                 result = response.json()
-                content = result["choices"][0]["message"]["content"]
+                content = str(result["choices"][0]["message"]["content"])
                 logger.debug(f"API 调用成功（第 {attempt + 1} 次尝试）")
                 return content
 

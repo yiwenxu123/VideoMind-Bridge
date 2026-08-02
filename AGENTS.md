@@ -8,7 +8,7 @@ Python 3.11+ monorepo。uv 驱动。
 ## Quick Start
 
 ```bash
-uv sync                         # 安装依赖
+uv sync --extra dev             # 安装依赖（含 dev: ruff/mypy/pytest）
 uv run python -m src.cli <url>  # CLI 模式
 python main.py                  # GUI 模式
 python main.py --api            # API 服务 (端口 8787)
@@ -21,13 +21,13 @@ mypy src/ --ignore-missing-imports  # 类型检查
 ## Architecture (Dual System)
 
 **v1 (Legacy):** Download → Transcribe (Whisper) → AI Summary → Export  
-**v2 (New Engine):** Extract ×6 → Cost-aware Route → Prescreen → Hermes Output
+**v2 (New Engine):** Extract ×10 → Cost-aware Route → Prescreen → Hermes Output
 
 | Layer | Path | Technology |
 |-------|------|-----------|
 | Entrypoint | `main.py` | argparse → GUI / API (FastAPI) / MCP |
 | CLI | `src/cli.py` | rich, argparse (v1+v2 dual mode) |
-| v2 Engine | `src/core/` | 6 extractors + router + prescreener + archiver + Hermes formatter |
+| v2 Engine | `src/core/` | 10 extractors + router + prescreener + archiver + Hermes formatter |
 | v1 Services | `src/services/` | download, transcribe (faster-whisper), AI, export |
 | API | `src/api/` | FastAPI + WebSocket |
 | MCP | `src/mcp/server.py` | stdio JSON-RPC (Model Context Protocol) |
@@ -37,7 +37,7 @@ mypy src/ --ignore-missing-imports  # 类型检查
 
 ### Extractors (`src/core/extractors/`)
 
-6 个提取器通过注册表模式自动注册 (`register_extractor()`)，在 `__init__.py` 中延迟导入触发。
+10 个提取器通过注册表模式自动注册 (`register_extractor()`)，在 `__init__.py` 中延迟导入触发。
 
 默认优先级 (成本排序):
 ```
@@ -112,7 +112,6 @@ Coze 位于优先级首位，使用免费每日积分覆盖全平台。Coze 失�
 ## Known Quirks & Gotchas
 
 - **sys.path 动态注入**: `main.py` 会将 `src/` 插入 sys.path。`cli.py` 使用 `from src.*` 导入，需以 `python -m src.cli`（项目根）方式运行
-- **两种 TranscriptSegment 类型**: `src.models.task.TranscriptSegment` vs `src.services.transcribe_service.TranscriptSegment` — 已有类型冲突（预存问题，不影响运行）
 - **Bilibili API**: URL 必须全小写 `/x/web-interface/view`，大写 `I` 会 404
 - **Extractor 注册**: 通过 import 时跑的模块级代码自动注册，无需手动配置
 - **Coze 提取器**: 401 时不阻塞，自动跳到下一个提取器；配额只在真实 API 调用成功后计数（`_count_call`），平台不支持/Key 失效不烧配额
@@ -140,13 +139,13 @@ pytest tests/ --cov=src --cov-report=term       # 覆盖率
 
 1. Lint (`ruff check .`)
 2. Test (pytest + coverage, `--cov-fail-under=40`)
-3. Type check (`mypy src/` — 允许失败)
+3. Type check (`mypy src/` — 全量 0 错误，失败即 CI 失败)
 4. Build (`python -m build`)
 
 ## Build & Release
 
 ```
-uv sync                         # 开发安装
+uv sync --extra dev             # 开发安装（含 dev 依赖）
 pip install -e ".[dev]"         # 含 dev 依赖
 pyinstaller videomind.spec      # macOS 应用打包
 ```
@@ -170,6 +169,5 @@ Release workflow 自动构建 macOS DMG + Windows ZIP，标签推送 `v*` 触发
 - 不要在 `prescreener.prescreen()` 内部调用提取器 — 该方法承诺纯规则
 - 修改提取器优先级列表时，同步更新 `src/core/router.py` 的 `_DEFAULT_PRIORITY`
 - 添加新提取器时: 继承 `ContentExtractor` → 调用 `register_extractor()` → 在 `__init__.py` 中 import
-- GUI 的 `main_window.py.bak` 文件需要手动删除（一次性遗留）
 - MCP 通过 stdio 通信，不支持 HTTP — 仅适用 MCP 兼容的 AI Agent
 - **钥匙串弹窗**: macOS keyring 弹窗「python 想要使用钥匙串中的机密信息」是因为 `CozeExtractor.__init__()` 访问了系统钥匙串。解决：(1) 设置环境变量（优先级高于钥匙串），无需钥匙串；或 (2) 在 `~/.zshrc` 添加 `export COZE_API_KEY=xxx` 等；测试已通过 `tests/conftest.py` 全局 mock keyring 避免弹窗

@@ -25,6 +25,7 @@ class ConfigManager:
 
     _instance: Optional["ConfigManager"] = None
     _lock = threading.Lock()
+    _initialized: bool = False
 
     def __new__(cls):
         with cls._lock:

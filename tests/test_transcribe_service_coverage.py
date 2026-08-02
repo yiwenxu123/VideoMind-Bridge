@@ -24,8 +24,8 @@ class TestModelCacheLRU:
         cache._cache["small"] = m3
         cache._cache.move_to_end = mock.MagicMock()
 
-        with mock.patch.object(cache, "_load_model") as mock_load:
-            result = cache.get("tiny")
+        with mock.patch.object(cache, "_load_model"):
+            cache.get("tiny")
 
         cache._cache.move_to_end.assert_called_once_with("tiny")
 
@@ -35,8 +35,8 @@ class TestModelCacheLRU:
         cache._cache["tiny"] = m1
         cache._cache["base"] = m2
 
-        with mock.patch.object(cache, "_load_model", return_value=mock.MagicMock()) as mock_load:
-            result = cache.get("small")
+        with mock.patch.object(cache, "_load_model", return_value=mock.MagicMock()):
+            cache.get("small")
 
         assert "tiny" not in cache._cache
         assert len(cache._cache) == 2
@@ -46,8 +46,8 @@ class TestModelCacheLRU:
         m1 = mock.MagicMock()
         cache._cache["tiny"] = m1
 
-        with mock.patch.object(cache, "_load_model", return_value=mock.MagicMock()) as mock_load:
-            result = cache.get("base")
+        with mock.patch.object(cache, "_load_model", return_value=mock.MagicMock()):
+            cache.get("base")
 
         assert "tiny" not in cache._cache
         assert "base" in cache._cache
@@ -209,7 +209,7 @@ class TestTranscribeServiceDoTranscribe:
         mock_info = mock.MagicMock(language="zh", language_probability=0.95)
         service._model.transcribe.return_value = ([], mock_info)
         callback = mock.MagicMock()
-        result = service._do_transcribe(audio_path, progress_callback=callback)
+        service._do_transcribe(audio_path, progress_callback=callback)
         assert callback.called
 
     def test_do_transcribe_index_error(self, audio_path):

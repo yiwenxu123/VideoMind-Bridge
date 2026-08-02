@@ -78,7 +78,7 @@ class ExportOrchestrator:
         Returns:
             List[ExportResult]: 各导出结果列表
         """
-        results = []
+        results: list[ExportResult] = []
 
         if not self.exporters:
             return results

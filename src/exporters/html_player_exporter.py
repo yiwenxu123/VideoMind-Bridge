@@ -131,7 +131,7 @@ class HTMLPlayerExporter(BaseExporter):
         self,
         metadata,
         video_filename: str,
-        audio_filename: str,
+        audio_filename: str,  # noqa: ARG002
         highlights: list[Highlight],
         subtitles: list[dict],
         summary: str

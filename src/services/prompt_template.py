@@ -356,7 +356,7 @@ class PromptTemplateManager:
 
         return template.render(**preview_data)
 
-    def export_template(self, template_id: str, output_path: Path) -> bool:
+    def export_template(self, template_id: str, output_path: str | Path) -> bool:
         """导出模板到文件"""
         template = self.get_template(template_id)
         if not template:
@@ -370,7 +370,7 @@ class PromptTemplateManager:
             logger.error(f"导出模板失败: {e}")
             return False
 
-    def import_template(self, file_path: Path) -> PromptTemplate | None:
+    def import_template(self, file_path: str | Path) -> PromptTemplate | None:
         """从文件导入模板"""
         try:
             with open(file_path, encoding="utf-8") as f:

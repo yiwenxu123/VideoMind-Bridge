@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 
 from .extractors import create_all_extractors
 from .extractors.base import ContentExtractor
-from .models import CostTier, ExtractResult, _COST_TIER_PRIORITY
+from .models import _COST_TIER_PRIORITY, CostTier, ExtractResult
 
 logger = logging.getLogger(__name__)
 
@@ -111,10 +111,12 @@ class ContentRouter:
                 continue
 
             effective_max = max_cost or self.config.max_cost_tier
-            if effective_max is not None:
-                if _COST_TIER_PRIORITY.get(extractor.cost_tier(), 99) > _COST_TIER_PRIORITY.get(effective_max, 99):
-                    logger.debug(f"提取器 {name} 成本超限 (跳过)")
-                    continue
+            if (
+                effective_max is not None
+                and _COST_TIER_PRIORITY.get(extractor.cost_tier(), 99) > _COST_TIER_PRIORITY.get(effective_max, 99)
+            ):
+                logger.debug(f"提取器 {name} 成本超限 (跳过)")
+                continue
 
             try:
                 logger.info(f"尝试提取器: {name}")

@@ -164,7 +164,7 @@ class ProcessingTimeEstimator:
             )
 
         # 基于实际进度重新估算
-        elapsed_time = 0
+        elapsed_time = 0.0
         if task_id in self._task_start_times:
             elapsed_time = (datetime.now() - self._task_start_times[task_id]).total_seconds()
 

@@ -16,7 +16,6 @@ def mock_keyring():
     test_credential_manager.py 的精确 mock 优先级更高，自动覆盖全局 mock。
     """
     store: dict[str, str] = {}
-    service_name = "VideoMindBridge"
 
     def fake_set_password(service: str, username: str, password: str) -> None:
         store[f"{service}:{username}"] = password

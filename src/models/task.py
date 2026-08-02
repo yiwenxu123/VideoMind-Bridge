@@ -252,9 +252,16 @@ class VideoTask:
     @staticmethod
     def _export_result_from_dict(data: dict[str, Any]) -> ExportResult:
         """从字典创建 ExportResult"""
+        target_value = data.get("target")
+        if isinstance(target_value, str):
+            target = ExportTarget(target_value)
+        elif isinstance(target_value, ExportTarget):
+            target = target_value
+        else:
+            target = ExportTarget.LOCAL
         return ExportResult(
             success=data.get("success", False),
-            target=ExportTarget(data["target"]) if isinstance(data.get("target"), str) else data.get("target"),
+            target=target,
             timestamp=datetime.fromisoformat(data["timestamp"]) if isinstance(data.get("timestamp"), str) else data.get("timestamp", datetime.now()),
             error_msg=data.get("error_msg"),
             output_path=Path(data["output_path"]) if data.get("output_path") else None,

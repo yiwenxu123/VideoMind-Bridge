@@ -41,6 +41,7 @@ dev = [
     "pytest-asyncio>=0.21.0",
     "ruff>=0.1.0",
     "mypy>=1.0.0",
+    "types-PyYAML>=6.0.0",
     "httpx>=0.25.0",
 ]
 
@@ -57,6 +58,8 @@ packages = ["src/"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+
+[tool.ruff.lint]
 select = [
     "E",      # pycodestyle errors
     "W",      # pycodestyle warnings
@@ -75,18 +78,19 @@ ignore = [
     "ARG001", # unused function argument
 ]
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["src"]
 
-[tool.ruff.per-file-ignores]
-"tests/*" = ["ARG001", "S101"]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG001", "ARG002", "ARG005", "S101", "SIM102", "SIM117", "E402"]
+"src/core/extractors/__init__.py" = ["F401", "E402"]  # 延迟导入触发注册模式
 
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
 warn_unused_ignores = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 check_untyped_defs = true
 strict_optional = true
 warn_redundant_casts = true

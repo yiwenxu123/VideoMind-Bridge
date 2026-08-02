@@ -7,26 +7,28 @@ supports(), is_available(), should_try(), cost_tier, URL 模式匹配,
 所有测试为纯逻辑无网络, 使用 unittest.mock 隔离外部依赖。
 """
 
-import re
 import subprocess
 import sys
 from unittest import mock
 
-import pytest
-
 sys.path.insert(0, "src")
 
-from src.core.extractors.base import ContentExtractor
-from src.core.extractors import register_extractor, get_extractor, list_extractors, create_all_extractors
-from src.core.extractors.bilibili_extractor import BilibiliExtractor
-from src.core.extractors.youtube_extractor import YouTubeExtractor
-from src.core.extractors.douyin_extractor import DouyinExtractor
-from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
-from src.core.extractors.coze_extractor import CozeExtractor
-from src.core.extractors.ytdlp_extractor import YtDlpExtractor
-from src.core.extractors.tikhub_extractor import TikhubExtractor, _detect_commercial_platform
-from src.core.extractors.apify_extractor import ApifyExtractor, _detect_apify_platform
+from src.core.extractors import (
+    create_all_extractors,
+    get_extractor,
+    list_extractors,
+    register_extractor,
+)
 from src.core.extractors.aliyun_asr_extractor import AliyunASRExtractor
+from src.core.extractors.apify_extractor import ApifyExtractor, _detect_apify_platform
+from src.core.extractors.base import ContentExtractor
+from src.core.extractors.bilibili_extractor import BilibiliExtractor
+from src.core.extractors.coze_extractor import CozeExtractor
+from src.core.extractors.douyin_extractor import DouyinExtractor
+from src.core.extractors.tikhub_extractor import TikhubExtractor, _detect_commercial_platform
+from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
+from src.core.extractors.youtube_extractor import YouTubeExtractor
+from src.core.extractors.ytdlp_extractor import YtDlpExtractor
 from src.core.models import CostTier, ExtractResult
 
 

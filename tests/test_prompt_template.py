@@ -120,7 +120,7 @@ class TestPromptTemplateManagerInit:
     def test_custom_storage_path(self, tmp_path):
         """自定义存储路径"""
         custom = tmp_path / "custom_prompts"
-        manager = PromptTemplateManager(storage_path=custom)
+        PromptTemplateManager(storage_path=custom)
         assert custom.exists()
 
     def test_loads_builtin_templates(self, tmp_path):

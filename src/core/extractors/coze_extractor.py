@@ -30,10 +30,10 @@ from typing import Any
 
 import httpx
 
+from ...utils import get_logger
 from ..models import CostTier, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
-from ...utils import get_logger
 
 logger = get_logger(__name__)
 
@@ -286,9 +286,7 @@ class CozeExtractor(ContentExtractor):
             if CozeExtractor._call_date != today:
                 CozeExtractor._call_date = today
                 CozeExtractor._call_count = 0
-            if CozeExtractor._call_count >= self._daily_limit:
-                return False
-            return True
+            return not CozeExtractor._call_count >= self._daily_limit
 
     def _count_call(self) -> None:
         """在真实 API 调用后计数 (线程安全)"""

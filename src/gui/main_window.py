@@ -22,8 +22,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..models.task import ExportTarget as ModelExportTarget
-from ..models.task import TaskHistory
+from ..models.task import ExportTarget, TaskHistory
+from ..models.task import TaskStatus as ModelTaskStatus
 from ..services.config_manager import get_config_manager
 
 # 导入服务
@@ -34,7 +34,6 @@ from ..utils import get_logger
 from .components import MenuManager, TrayManager
 from .widgets.mode_selector import ModeSelector, ProcessingMode
 from .widgets.prompt_template_selector import PromptTemplateSelector
-from .widgets.target_selector import ExportTarget
 from .widgets.task_history_sidebar import TaskHistorySidebar
 from .widgets.task_queue import TaskQueueWidget, TaskStatus
 
@@ -864,8 +863,8 @@ class MainWindow(QMainWindow):
             self.mode_selector.set_mode(task.mode)
 
             # 设置导出目标
-            self.local_export_check.setChecked(ModelExportTarget.LOCAL in task.targets)
-            self.obsidian_export_check.setChecked(ModelExportTarget.OBSIDIAN in task.targets)
+            self.local_export_check.setChecked(ExportTarget.LOCAL in task.targets)
+            self.obsidian_export_check.setChecked(ExportTarget.OBSIDIAN in task.targets)
 
             # 自动开始处理
             self._on_start_processing()
@@ -898,12 +897,12 @@ class MainWindow(QMainWindow):
             # 构建导出目标列表
             targets = []
             if self.local_export_check.isChecked():
-                targets.append(ModelExportTarget.LOCAL)
+                targets.append(ExportTarget.LOCAL)
             if self.obsidian_export_check.isChecked():
-                targets.append(ModelExportTarget.OBSIDIAN)
+                targets.append(ExportTarget.OBSIDIAN)
 
             # 确定状态
-            status = TaskStatus.FAILED if failed else TaskStatus.COMPLETED
+            status = ModelTaskStatus.FAILED if failed else ModelTaskStatus.COMPLETED
             error_msg = result.get("error", "") if failed else None
 
             # 创建历史记录
@@ -1073,7 +1072,9 @@ class MainWindow(QMainWindow):
         self.tray_manager.hide()
 
         # 关闭应用
-        QApplication.instance().quit()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
 
     def _cleanup_resources(self):
         """清理资源"""
@@ -1129,7 +1130,7 @@ class MainWindow(QMainWindow):
         from .widgets.settings_dialog import SettingsDialog
 
         # 创建对话框（保存为实例变量防止被垃圾回收）
-        self._settings_dialog = SettingsDialog(self)
+        self._settings_dialog: SettingsDialog | None = SettingsDialog(self)
 
         # 连接关闭信号
         self._settings_dialog.finished.connect(self._on_settings_finished)

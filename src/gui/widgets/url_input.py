@@ -287,13 +287,22 @@ class URLInputWidget(QWidget):
         text = clipboard.text()
 
         # 简单的 URL 检测
-        if text and ("http://" in text or "https://" in text):
-            # 如果输入框为空，自动填入
-            if not self.single_input.text() and not self.batch_button.isChecked():
-                # 提取第一个 URL
-                urls = self._extract_urls(text)
-                if urls:
-                    self.single_input.setText(urls[0])
+        if (
+            text
+            and ("http://" in text or "https://" in text)
+            and not self.single_input.text()
+            and not self.batch_button.isChecked()
+        ):
+            # 提取第一个 URL
+            urls = self._extract_urls(text)
+            if urls:
+                self.single_input.setText(urls[0])
+
+    def set_url(self, url: str) -> None:
+        """设置单个 URL（清除批量模式）"""
+        self.batch_button.setChecked(False)
+        self.single_input.show()
+        self.single_input.setText(url)
 
     def get_url(self) -> str:
         """获取单个 URL"""

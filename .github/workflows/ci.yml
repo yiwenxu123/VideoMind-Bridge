@@ -77,7 +77,7 @@ jobs:
           pip install -e ".[dev]"
       
       - name: 运行 mypy
-        run: mypy src/ --ignore-missing-imports || true
+        run: mypy src/ --ignore-missing-imports
 
   build:
     name: 构建检查

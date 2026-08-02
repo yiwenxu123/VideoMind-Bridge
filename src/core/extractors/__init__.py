@@ -1,7 +1,5 @@
 """内容提取器注册与工厂"""
 
-from typing import Dict, List, Optional, Type
-
 from .base import ContentExtractor
 
 # 提取器注册表
@@ -41,6 +39,6 @@ from . import (
     tikhub_extractor,  # noqa: E402, F811
     xiaohongshu_extractor,  # noqa: E402, F811
     youtube_extractor,  # noqa: E402, F811
-    ytdlp_extractor,  # noqa: E402, F811
     ytdlp_asr_extractor,  # noqa: E402, F811
+    ytdlp_extractor,  # noqa: E402, F811
 )

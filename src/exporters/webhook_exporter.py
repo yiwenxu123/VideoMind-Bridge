@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from ..models.task import ExportContext, ExportResult, ExportTarget, TranscriptSegment
+from ..models.task import ExportContext, ExportResult, ExportTarget
 from ..utils import get_logger
 from .base import BaseExporter
 

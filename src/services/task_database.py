@@ -1,6 +1,7 @@
 """任务历史数据库 - SQLite 持久化存储"""
 
 import sqlite3
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -34,7 +35,7 @@ class TaskDatabase:
         self._init_database()
 
     @contextmanager
-    def _get_connection(self):
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         """获取数据库连接的上下文管理器"""
         conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
@@ -204,7 +205,7 @@ class TaskDatabase:
                 cursor = conn.cursor()
 
                 query = "SELECT * FROM task_history WHERE 1=1"
-                params = []
+                params: list[str] = []
 
                 if status:
                     query += " AND status = ?"
@@ -215,7 +216,7 @@ class TaskDatabase:
                     params.append(platform)
 
                 query += " ORDER BY created_at DESC LIMIT ? OFFSET ?"
-                params.extend([limit, offset])
+                params.extend([str(limit), str(offset)])
 
                 cursor.execute(query, params)
 
@@ -446,7 +447,8 @@ class TaskDatabase:
                     "SELECT COUNT(*) FROM processing_stats WHERE mode = ?",
                     (mode,)
                 )
-                return cursor.fetchone()[0]
+                row = cursor.fetchone()
+                return int(row[0]) if row else 0
         except Exception as e:
             logger.error(f"获取统计记录数量失败: {e}")
             return 0

@@ -60,7 +60,7 @@ class YtdlpDownloader(DownloaderBase):
     @property
     def is_available(self) -> bool:
         try:
-            import yt_dlp
+            import yt_dlp  # noqa: F401
             return True
         except ImportError:
             return False
@@ -251,12 +251,10 @@ class YtdlpDownloader(DownloaderBase):
                 import shutil
                 shutil.move(str(file_path), str(target_path))
 
-                if file_path.suffix.lower() in [".m4a", ".mp3", ".opus", ".webm"]:
-                    if audio_path is None:
-                        audio_path = target_path
-                elif file_path.suffix.lower() in [".mp4", ".mkv", ".webm", ".avi"]:
-                    if video_path is None:
-                        video_path = target_path
+                if file_path.suffix.lower() in [".m4a", ".mp3", ".opus", ".webm"] and audio_path is None:
+                    audio_path = target_path
+                elif file_path.suffix.lower() in [".mp4", ".mkv", ".webm", ".avi"] and video_path is None:
+                    video_path = target_path
 
         metadata = VideoMetadata(
             title=title,

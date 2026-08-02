@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..constants import ButtonConfig, HistoryConfig, Icons
 from ...models.task import TaskHistory, TaskStatus
 from ...services.task_database import get_task_database
 from ...utils import get_logger
+from ..constants import ButtonConfig, HistoryConfig, Icons
 
 logger = get_logger(__name__)
 
@@ -412,7 +412,7 @@ class TaskHistorySidebar(QWidget):
         for i in range(self.history_list.count()):
             item = self.history_list.item(i)
             old_widget = self.history_list.itemWidget(item)
-            if old_widget:
+            if isinstance(old_widget, HistoryItemWidget):
                 try:
                     old_widget.clicked.disconnect()
                     old_widget.delete_clicked.disconnect()
@@ -562,7 +562,7 @@ class TaskHistorySidebar(QWidget):
                     "status": task.status.value if hasattr(task.status, 'value') else str(task.status),
                     "created_at": task.created_at.isoformat() if task.created_at else None,
                     "completed_at": task.completed_at.isoformat() if task.completed_at else None,
-                    "error_message": task.error_message
+                    "error_message": task.error_msg
                 })
 
             # 根据文件扩展名选择导出格式

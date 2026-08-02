@@ -64,6 +64,9 @@ class TrayManager(QObject):
         """加载托盘图标"""
         from pathlib import Path
 
+        if self._tray_icon is None:
+            return
+
         # 尝试加载自定义图标
         icon_path = Path(__file__).parent.parent.parent / "assets" / "icon.svg"
         if icon_path.exists():
@@ -88,6 +91,9 @@ class TrayManager(QObject):
 
     def _setup_menu(self) -> None:
         """设置托盘菜单"""
+        if self._tray_icon is None:
+            return
+
         tray_menu = QMenu()
 
         # 显示窗口动作

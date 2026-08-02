@@ -205,7 +205,7 @@ class RetryableOperation:
         self.config = config
         self.name = name or operation.__name__
         self.attempt_count = 0
-        self.last_exception = None
+        self.last_exception: Exception | None = None
         self.is_successful = False
 
     def execute(self, *args, **kwargs) -> Any:

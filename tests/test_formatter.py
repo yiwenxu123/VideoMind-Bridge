@@ -1,8 +1,7 @@
 """HermesFormatter 测试"""
-from unittest import mock
 
 from src.core.formatter import HermesFormatter
-from src.core.models import ExtractResult, PrescreenResult, ContentGrade, CostTier
+from src.core.models import ContentGrade, CostTier, ExtractResult, PrescreenResult
 
 
 def make_extract_result(**overrides) -> ExtractResult:

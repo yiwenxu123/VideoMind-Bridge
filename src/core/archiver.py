@@ -8,14 +8,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 from ..exporters.html_player_exporter import HTMLPlayerExporter
-from ..exporters.local_exporter import LocalExporter
-from ..exporters.obsidian_exporter import ObsidianExporter
 from ..models.task import (
     ExportContext,
     ExportResult,

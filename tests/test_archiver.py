@@ -4,11 +4,10 @@
 不依赖 v1 的下载/转录文件。
 """
 
-from pathlib import Path
 
 from src.core.archiver import (
-    ArchiverConfig,
     SUPPORTED_ARCHIVE_TARGETS,
+    ArchiverConfig,
     archive_extract_result,
     build_export_context,
 )

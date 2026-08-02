@@ -19,12 +19,12 @@ from ..models.task import (
     VideoMetadata,
     VideoTask,
 )
-from ..services.ai_service import AIService
+from ..services.ai_service import AIService, SummaryResult
 from ..services.config_manager import get_config_manager
-from ..services.download_service import DownloadService
+from ..services.download_service import DownloadResult, DownloadService
 from ..services.export_orchestrator import ExportOrchestrator
 from ..services.task_database import get_task_database
-from ..services.transcribe_service import TranscribeService
+from ..services.transcribe_service import TranscribeService, TranscriptResult
 from ..utils import get_logger
 
 logger = get_logger(__name__)
@@ -412,11 +412,11 @@ class TaskManager:
         """下载音频 (失败时抛出带真实原因的异常)"""
         loop = asyncio.get_event_loop()
 
-        def do_download():
+        def do_download() -> DownloadResult:
             return self._download_service.download(
                 task.url,
                 download_video=False,
-                progress_callback=lambda status, percent: self._update_download_progress(task, percent),
+                progress_callback=lambda _status, percent: self._update_download_progress(task, percent),
                 cookies_from_browser=getattr(task, 'cookies_from_browser', None),
             )
 
@@ -459,7 +459,7 @@ class TaskManager:
         try:
             loop = asyncio.get_event_loop()
 
-            def do_transcribe():
+            def do_transcribe() -> TranscriptResult:
                 return self._transcribe_service.transcribe(
                     audio_path,
                     language="zh",
@@ -483,7 +483,7 @@ class TaskManager:
 
             loop = asyncio.get_event_loop()
 
-            def do_summarize():
+            def do_summarize() -> SummaryResult:
                 result = self._ai_service.summarize(
                     transcript=transcript_text,
                     title=task.metadata.title if task.metadata else "",

@@ -630,7 +630,7 @@ def main() -> int:
     if args.config_list:
         return _run_config_list(args)
     if args.config_set:
-        return _run_config_set(*args.config_set, json_output=args.json_output)
+        return _run_config_set(args.config_set[0], args.config_set[1], json_output=args.json_output)
 
     # v2 提取引擎为默认路径 (成本感知路由, 无需下载/转录, Agent 友好):
     # 仅当显式请求 v1 专属参数时才走旧版 下载→转录→摘要 流程

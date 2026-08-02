@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from .models import ContentGrade, CostTier, PrescreenResult
+from .models import ContentGrade, PrescreenResult
 from .prescreen_rules import (
     apply_cost_rules,
     build_skip_reason,

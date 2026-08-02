@@ -1,9 +1,7 @@
 """服务模块测试 - AI Service + ConfigManager + PromptTemplate + CredentialManager"""
 
-import json
 import os
 import tempfile
-from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -1186,7 +1184,6 @@ class TestAIServiceClientConfig:
 
     def test_client_limits_config(self):
         """客户端连接池限制通过 init 参数设置"""
-        import httpx
         # Verify the defaults in AIService match standard httpx.Limits defaults
         assert AIService(mock=True)._get_client is not None
 

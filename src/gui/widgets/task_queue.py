@@ -276,7 +276,7 @@ class TaskQueueWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.tasks = {}  # task_id -> TaskItemWidget
+        self.tasks: dict[str, TaskItemWidget] = {}  # task_id -> TaskItemWidget
         self._setup_ui()
 
     def _setup_ui(self):
@@ -415,7 +415,7 @@ class TaskQueueWidget(QWidget):
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
                 widget = self.list_widget.itemWidget(item)
-                if widget and widget.task_id == task_id:
+                if isinstance(widget, TaskItemWidget) and widget.task_id == task_id:
                     self.list_widget.takeItem(i)
                     break
 

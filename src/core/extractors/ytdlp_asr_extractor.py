@@ -249,7 +249,7 @@ class YtDlpASRExtractor(ContentExtractor):
                 line = result.stdout.strip().split("\n")[0]
                 if line.startswith("{"):
                     import json
-                    return json.loads(line)
+                    return dict(json.loads(line))
         except (subprocess.TimeoutExpired, FileNotFoundError):
             pass
         return {}

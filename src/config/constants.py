@@ -116,7 +116,7 @@ class ExportConfig:
 class BidirectionalMap:
     """双向映射类，支持配置值和显示值互相转换"""
 
-    def __init__(self, mapping: dict):
+    def __init__(self, mapping: dict[str, str]):
         """
         初始化双向映射
 
@@ -124,7 +124,7 @@ class BidirectionalMap:
             mapping: 配置值到显示值的映射字典
         """
         self._config_to_display = mapping
-        self._display_to_config = {v: k for k, v in mapping.items()}
+        self._display_to_config: dict[str, str] = {v: k for k, v in mapping.items()}
 
     def to_display(self, config_value: str, default: str | None = None) -> str:
         return self._config_to_display.get(config_value, default or config_value)

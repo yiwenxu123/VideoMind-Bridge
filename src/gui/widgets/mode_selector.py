@@ -168,9 +168,9 @@ class ModeSelector(QWidget):
         self.button_group.buttonClicked.connect(self._on_mode_changed)
 
         # 卡片点击也触发切换
-        self.card_full.mousePressEvent = lambda e: self._select_card(self.card_full)
-        self.card_download.mousePressEvent = lambda e: self._select_card(self.card_download)
-        self.card_transcribe.mousePressEvent = lambda e: self._select_card(self.card_transcribe)
+        self.card_full.mousePressEvent = lambda _e: self._select_card(self.card_full)  # type: ignore[method-assign]
+        self.card_download.mousePressEvent = lambda _e: self._select_card(self.card_download)  # type: ignore[method-assign]
+        self.card_transcribe.mousePressEvent = lambda _e: self._select_card(self.card_transcribe)  # type: ignore[method-assign]
 
     def _select_card(self, card: ModeCard):
         """选中卡片"""

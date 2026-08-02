@@ -513,7 +513,7 @@ class APIServer:
                 changed.append("save_markdown")
 
             # Obsidian 导出设置
-            obsidian_updates = {}
+            obsidian_updates: dict[str, Any] = {}
             if request.obsidian_enabled is not None:
                 obsidian_updates["enabled"] = request.obsidian_enabled
                 changed.append("obsidian_enabled")
@@ -563,9 +563,12 @@ class APIServer:
             """创建新任务"""
             try:
                 # 检查 AI 配置
-                if request.mode == ProcessingMode.FULL and not self.task_manager.is_ai_available():
-                    if not request.allow_downgrade:
-                        raise HTTPException(
+                if (
+                    request.mode == ProcessingMode.FULL
+                    and not self.task_manager.is_ai_available()
+                    and not request.allow_downgrade
+                ):
+                    raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
                             detail=(
                                 "AI 服务未配置，无法进行完整处理。"

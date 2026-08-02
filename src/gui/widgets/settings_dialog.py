@@ -23,8 +23,8 @@ from PySide6.QtWidgets import (
 )
 
 from ...config.constants import ConfigMaps, Defaults
-from ..constants import DialogConfig, Icons, SliderConfig, SpinBoxConfig
 from ...services.config_manager import get_config_manager
+from ..constants import DialogConfig, Icons, SliderConfig, SpinBoxConfig
 
 
 class SettingsDialog(QDialog):
@@ -236,12 +236,13 @@ class SettingsDialog(QDialog):
                 background: #e0e0e0;
             }
         """)
-        show_btn.toggled.connect(lambda checked: (
+        def _toggle_secret_visibility(checked: bool) -> None:
             self.api_key_input.setEchoMode(
                 QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password
-            ),
+            )
             show_btn.setText("隐藏" if checked else "显示")
-        ))
+
+        show_btn.toggled.connect(_toggle_secret_visibility)
         api_key_row.addWidget(show_btn)
 
         api_key_layout.addRow("API Key:", api_key_row)
@@ -611,7 +612,7 @@ class SettingsDialog(QDialog):
                     }
                 """)
                 save_btn.clicked.connect(
-                    lambda checked, kn=key_name, inp=input_field: self._on_save_extractor_key(kn, inp)
+                    lambda _checked, kn=key_name, inp=input_field: self._on_save_extractor_key(kn, inp)
                 )
                 key_row.addWidget(save_btn)
 
@@ -631,7 +632,7 @@ class SettingsDialog(QDialog):
                     }
                 """)
                 delete_btn.clicked.connect(
-                    lambda checked, kn=key_name, inp=input_field: self._on_delete_extractor_key(kn, inp)
+                    lambda _checked, kn=key_name, inp=input_field: self._on_delete_extractor_key(kn, inp)
                 )
                 key_row.addWidget(delete_btn)
 

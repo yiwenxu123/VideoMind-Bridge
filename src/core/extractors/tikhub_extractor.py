@@ -35,7 +35,7 @@ PLATFORM_ENDPOINTS: dict[str, dict] = {
     },
     "bilibili": {
         "endpoint": "/api/v1/bilibili/web/fetch_one_video",
-        "params_fn": lambda url: {"bv_id": re.search(r"BV\w+", url).group(0) if re.search(r"BV\w+", url) else ""},
+        "params_fn": lambda url: {"bv_id": m.group(0) if (m := re.search(r"BV\w+", url)) else ""},
     },
     "xiaohongshu": {
         "endpoint": "/api/v1/xiaohongshu/web_v3/fetch_note_detail",
@@ -105,7 +105,7 @@ def _get_download_url(aweme: dict) -> str | None:
     for src in ("download_addr", "play_addr"):
         urls = video.get(src, {}).get("url_list", []) or []
         for u in urls:
-            if u and u.startswith("http"):
+            if isinstance(u, str) and u.startswith("http"):
                 return u
     return None
 
@@ -175,13 +175,16 @@ class TikhubExtractor(ContentExtractor):
             headers=headers,
         )
         resp.raise_for_status()
-        return resp.json()
+        return dict(resp.json())
 
     def _parse_response(self, data: dict, url: str, platform: str) -> ExtractResult:
-        raw_data = data.get("data") or {}
+        raw_data = data.get("data")
+        if not isinstance(raw_data, dict):
+            raw_data = {}
         aweme = raw_data.get("aweme_detail")
         if not isinstance(aweme, dict):
-            aweme = raw_data.get("data") if isinstance(raw_data.get("data"), dict) else raw_data
+            nested = raw_data.get("data")
+            aweme = nested if isinstance(nested, dict) else {}
         title = _extract_text(aweme, "title", "desc", "share_info.share_title", "description")
         desc_val = aweme.get("desc", "") or ""
         duration_val = aweme.get("duration", 0) or 0

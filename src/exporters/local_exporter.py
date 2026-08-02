@@ -5,7 +5,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from ..models.task import ExportContext, ExportResult, ExportTarget, TranscriptSegment
+from ..models.task import ExportContext, ExportResult, ExportTarget
 from ..utils import (
     Highlight,
     extract_highlights_from_context,

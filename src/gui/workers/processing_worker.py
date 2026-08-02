@@ -1,6 +1,7 @@
 """后台处理工作线程 - 执行视频处理任务"""
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -97,7 +98,10 @@ class ProcessingWorker(QThread):
 
         if config.api_key:
             try:
-                self.ai_service = AIService(api_key=config.api_key)
+                self.ai_service = AIService(
+                    api_key=config.api_key,
+                    model=config.ai_model,
+                )
             except Exception:
                 self.ai_service = AIService(mock=True)
         else:
@@ -211,7 +215,7 @@ class ProcessingWorker(QThread):
         task_id: str,
         base_progress: int,
         weight: float
-    ) -> callable:
+    ) -> Callable:
         """
         创建进度回调函数
 
@@ -337,7 +341,7 @@ class ProcessingWorker(QThread):
         self.progress_updated.emit(task_id, 100, "完成")
 
         # 构建导出结果信息
-        export_success = sum(1 for r in export_results if r and getattr(r, 'success', False))
+        export_success = sum(1 for r in export_results if r.success)
         export_total = len(export_results)
 
         self.task_completed.emit(task_id, True, {
@@ -507,7 +511,7 @@ class ProcessingWorker(QThread):
         task_id: str,
         transcript: str,
         title: str,
-        template_id: str
+        template_id: str | None
     ) -> Any | None:
         """
         带重试机制的 AI 摘要生成
@@ -522,13 +526,16 @@ class ProcessingWorker(QThread):
         """
         from ...utils.exceptions import AIError, NetworkError, ServiceUnavailableError, TimeoutError
 
+        if self.ai_service is None:
+            raise AIError("AI 服务未配置")
+
         max_retries = 3
         base_delay = 1.0
         last_error = None
 
         # 可用的备用模型（按优先级排序）- 使用项目支持的国内模型
         fallback_models = ["deepseek-chat", "glm-4", "moonshot-v1-8k"]
-        current_model = self.ai_service.model if self.ai_service else fallback_models[0]
+        current_model = self.ai_service.model
 
         for attempt in range(1, max_retries + 1):
             try:

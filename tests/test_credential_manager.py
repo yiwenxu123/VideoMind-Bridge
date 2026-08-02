@@ -2,8 +2,6 @@
 
 from unittest import mock
 
-import keyring
-import pytest
 from keyring.errors import PasswordDeleteError, PasswordSetError
 
 from src.utils.credential_manager import (

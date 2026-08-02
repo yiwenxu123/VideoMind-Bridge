@@ -209,10 +209,10 @@ class DouyinExtractor(ContentExtractor):
                     if isinstance(data, dict):
                         desc = data.get("videoInfoRes", {}).get("item_list", [{}])[0].get("desc", "")
                         if desc:
-                            return desc
+                            return str(desc)
                         desc = data.get("aweme_detail", {}).get("desc", "")
                         if desc:
-                            return desc
+                            return str(desc)
                 except (json.JSONDecodeError, IndexError, KeyError):
                     continue
         return ""

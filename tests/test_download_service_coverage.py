@@ -51,10 +51,9 @@ class TestDownloadRetryLogic:
         with mock.patch.object(service, "_do_download", side_effect=[
             DownloadError("transient", error_code="NETWORK_ERROR"),
             fake_result,
-        ]):
-            with mock.patch.object(service, "_detect_platform", return_value="youtube"):
-                result = service.download("https://example.com/video")
-                assert result.audio_path == Path("/tmp/audio.mp3")
+        ]), mock.patch.object(service, "_detect_platform", return_value="youtube"):
+            result = service.download("https://example.com/video")
+            assert result.audio_path == Path("/tmp/audio.mp3")
 
 
 class TestDoDownload:

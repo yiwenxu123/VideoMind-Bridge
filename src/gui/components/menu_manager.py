@@ -1,9 +1,11 @@
 """菜单栏管理组件"""
 
 
+from typing import cast
+
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenuBar, QMessageBox
+from PySide6.QtWidgets import QMenuBar, QMessageBox, QWidget
 
 from ...utils import get_logger
 
@@ -29,7 +31,7 @@ class MenuManager(QObject):
         Returns:
             QMenuBar: 配置好的菜单栏
         """
-        menubar = QMenuBar(self._parent)
+        menubar = QMenuBar(cast(QWidget | None, self._parent))
 
         # 文件菜单
         self._setup_file_menu(menubar)
@@ -80,7 +82,7 @@ class MenuManager(QObject):
     def show_about_dialog(self, parent=None) -> None:
         """显示关于对话框"""
         QMessageBox.about(
-            parent or self._parent,
+            cast(QWidget | None, parent if parent is not None else self._parent),
             "关于 VideoMind Bridge",
             "<h2>VideoMind Bridge</h2>"
             "<p>版本: 0.1.0</p>"

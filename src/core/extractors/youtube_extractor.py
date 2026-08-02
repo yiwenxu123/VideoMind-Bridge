@@ -95,10 +95,9 @@ class YouTubeExtractor(ContentExtractor):
 
         # 尝试不带协议的裸 ID
         parsed = urllib.parse.urlparse(url)
-        if not parsed.scheme:
+        if not parsed.scheme and re.match(r"^[\w-]{11}$", url):
             # 可能是裸 ID
-            if re.match(r"^[\w-]{11}$", url):
-                return url
+            return url
 
         return None
 
@@ -108,7 +107,7 @@ class YouTubeExtractor(ContentExtractor):
             oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
             resp = self._client.get(oembed_url, timeout=10.0)
             data = resp.json()
-            return data.get("title", "")
+            return str(data.get("title", ""))
         except Exception:
             return ""
 

@@ -48,7 +48,7 @@ def clear_extractor_env_vars():
         "APIFY_API_KEY", "ALIYUN_ACCESS_KEY_ID", "ALIYUN_ACCESS_KEY_SECRET",
         "ALIYUN_APPKEY", "AL_API_KEY",
     ]
-    with patch.dict(os.environ, {v: "" for v in extractor_vars}):
+    with patch.dict(os.environ, dict.fromkeys(extractor_vars, "")):
         yield
 
 

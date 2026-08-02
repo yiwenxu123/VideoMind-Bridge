@@ -19,8 +19,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..constants import DialogConfig, Icons
 from ...services.prompt_template import TemplateStyle, get_prompt_template_manager
+from ..constants import DialogConfig, Icons
 
 
 class PromptTemplateDialog(QDialog):
