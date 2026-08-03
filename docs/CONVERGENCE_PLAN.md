@@ -87,8 +87,8 @@ VMB 的"分级"只回答一个问题:**提取这个链接要花多少钱**（成
 ║  Layer 2  router（成本感知路由，保留）                           ║
 ║    └─ 遍历优先级 → 失败降级 → 缓存成功结果                       ║
 ║                                                                 ║
-║  Layer 3  extractors（9 提取器，保留 + 稳定性投入）              ║
-║    └─ coze/bilibili/youtube/douyin/xiaohongshu/ytdlp/ytdlp_asr/ ║
+║  Layer 3  extractors（8 提取器，保留 + 稳定性投入）              ║
+║    └─ bilibili/youtube/douyin/xiaohongshu/ytdlp/ytdlp_asr/      ║
 ║       tikhub/apify                                              ║
 ║                                                                 ║
 ║  Layer 4  archiver（新增: 提取即归档）                           ║
