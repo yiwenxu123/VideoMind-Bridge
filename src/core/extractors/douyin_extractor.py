@@ -114,6 +114,22 @@ class DouyinExtractor(ContentExtractor):
                     ),
                 )
 
+            # 文案过短 (< 120 字, 抖音 desc 通常=标题): 视为无实质内容,
+            # 返回占位触发降级, 由 yt-dlp+本地 whisper 转写真实讲话内容
+            if len(content) < 120:
+                return ExtractResult(
+                    success=False,
+                    platform="douyin",
+                    title=title or f"抖音视频 {video_id}",
+                    content=f"[抖音] {title or video_id}\n文案过短 (对话在画面中), 已降级 ASR 转写。",
+                    source="douyin",
+                    url=url,
+                    cost_tier=CostTier.FREE,
+                    is_placeholder=True,
+                    metadata={"video_id": video_id, "desc_short": True},
+                    error="抖音文案过短 (desc≈标题), 触发 yt-dlp+ASR 降级",
+                )
+
             return ExtractResult(
                 success=True,
                 platform="douyin",
