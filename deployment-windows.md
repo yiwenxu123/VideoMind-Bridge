@@ -150,3 +150,18 @@ curl -s -X POST http://10.207.251.86:8787/api/v1/extract \
 | 抖音报 Fresh cookies | 浏览器登录 → 重导 cookies.txt |
 | OpenClaw 恢复 | 见 5.2 |
 | 防火墙 | 内网走 ZeroTier 无需配置；公网暴露需先设 token+HTTPS，勿裸奔 0.0.0.0 |
+
+---
+
+## 8. DSH 插件 Token 安全化（2026-08-18）
+
+`extract_video`（@dsh-external/dsh-videomind-extractor）**不再硬编码 token**，
+改为从 DSH 启动环境读取。
+
+- 读取：`process.env.VIDEOMIND_API_TOKEN || process.env.VMB_API_TOKEN`
+- 已持久化配置（本机）：
+  - `/Users/yiwenxu123/.dsh/profiles/web/.env`（DSH boot 会加载）
+  - `~/.zshrc`（终端启动的 DSH 生效）
+- **生效方式**：重启 DSH 进程后自动可用（env 为进程级；改后需重启/重载插件）
+- 未配置时工具返回明确错误提示，不泄露任何凭据
+- 插件目录（`/Users/yiwenxu123/Projects/测试/dsh-videomind-extractor`）现已 **git clean、可安全同步/提交**，不含秘钥
