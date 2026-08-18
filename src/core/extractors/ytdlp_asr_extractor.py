@@ -16,6 +16,8 @@
   VMB_WHISPER_MODEL   本地 whisper 模型大小 (默认 base: tiny/base/small/medium)
   VMB_ASR_LANGUAGE    转写语言 (默认 None=自动检测, 如 zh/en)
   VMB_DOWNLOAD_TIMEOUT yt-dlp 下载超时秒数 (默认 300)
+  VMB_COOKIES_BROWSER  借本机浏览器真实登录态下载 (值: chrome/edge/firefox/browser);
+                       强风控平台 (抖音等) 无登录态会报 Fresh cookies needed, 设置后可解
 """
 
 from __future__ import annotations
@@ -100,6 +102,7 @@ class YtDlpASRExtractor(ContentExtractor):
         self._ytdlp: str | None = None
         self._ffmpeg: str | None = None
         self._available: bool | None = None
+        self._cookies_browser = os.getenv("VMB_COOKIES_BROWSER", "").strip()
 
     def is_available(self) -> bool:
         """yt-dlp 可执行即可用 (本地 whisper 免费零 key, 不依赖云凭证)"""
@@ -294,6 +297,12 @@ class YtDlpASRExtractor(ContentExtractor):
         )
         return None
 
+    def _cookies_args(self) -> list[str]:
+        """借本机浏览器真实登录态下载 (VMB_COOKIES_BROWSER, 强风控平台需要)。"""
+        if self._cookies_browser:
+            return ["--cookies-from-browser", self._cookies_browser]
+        return []
+
     def _download_raw_audio(self, url: str, tmp_dir: Path) -> Path | None:
         """原生 bestaudio 直下 (无后处理, 不依赖 ffmpeg)。"""
         output_template = str(tmp_dir / "%(id)s.%(ext)s")
@@ -302,7 +311,7 @@ class YtDlpASRExtractor(ContentExtractor):
             "-f", "bestaudio/best",
             "--no-playlist",
             "--output", output_template,
-            "--print", "filename",
+            *self._cookies_args(),
             url,
         ]
         try:
@@ -328,8 +337,8 @@ class YtDlpASRExtractor(ContentExtractor):
             "--audio-quality", "0",
             "--no-playlist",
             "--output", output_template,
-            "--print", "filename",
             "--ffmpeg-location", ffmpeg,
+            *self._cookies_args(),
             url,
         ]
         try:
@@ -347,24 +356,29 @@ class YtDlpASRExtractor(ContentExtractor):
 
     @staticmethod
     def _find_audio_file(result: subprocess.CompletedProcess, tmp_dir: Path) -> Path | None:
-        """从 yt-dlp 输出/目录中定位下载的音频文件。"""
+        """定位下载的音频/视频文件。
+
+        以目录真实落盘为准 (--print filename 对抖音等格式打印的推断路径不可靠),
+        后缀覆盖 faster-whisper/PyAV 可解码的常见容器。
+        """
+        suffixes = (".mp3", ".m4a", ".wav", ".aac", ".opus", ".webm", ".mp4", ".m4s", ".flac", ".ogg")
+
+        # 1) stdout 辅助 (存在且后缀合法时才采信)
         for line in result.stdout.strip().split("\n"):
             line = line.strip()
             if line:
                 candidate = Path(line)
-                if candidate.exists() and candidate.suffix in (".mp3", ".m4a", ".wav", ".aac", ".opus", ".webm"):
+                if candidate.exists() and candidate.suffix in suffixes:
                     return candidate
 
-        mp3_files = list(tmp_dir.glob("*.mp3"))
-        if mp3_files:
-            return mp3_files[0]
-
-        audio_files = [
+        # 2) 目录真实落盘: 取最新生成的可解码文件
+        files = [
             f for f in tmp_dir.iterdir()
-            if f.suffix in (".mp3", ".m4a", ".wav", ".aac", ".opus", ".webm")
+            if f.is_file() and f.suffix in suffixes
+            and f.stat().st_size > 1000
         ]
-        if audio_files:
-            return audio_files[0]
+        if files:
+            return max(files, key=lambda p: p.stat().st_mtime)
 
         return None
 
