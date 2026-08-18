@@ -273,7 +273,7 @@ class APIServer:
                 from src.core.models import CostTier
 
                 router = ContentRouter()
-                result = router.extract(url, max_cost=CostTier.FREE)
+                result = router.extract(url, max_cost=CostTier.CHEAP)
 
                 if result.success:
                     return {
@@ -321,7 +321,7 @@ class APIServer:
                 from src.core.models import CostTier
 
                 router = ContentRouter()
-                result = router.extract(url, max_cost=CostTier.FREE)
+                result = router.extract(url, max_cost=CostTier.CHEAP)
 
                 if not result.success or not result.content.strip():
                     return {
