@@ -46,7 +46,7 @@ class YtDlpExtractor(ContentExtractor):
     # 匹配常见的视频 URL
     url_pattern = re.compile(
         r"(youtube\.com|youtu\.be|bilibili\.com|b23\.tv|"
-        r"douyin\.com|iesdouyin\.com|xiaohongshu\.com|xhslink\.com|"
+        r"douyin\.com|iesdouyin\.com|xiaohongshu\.com|xhslink\.(?:com|cn)|"
         r"twitter\.com|x\.com|tiktok\.com|instagram\.com|ted\.com)"
     )
 

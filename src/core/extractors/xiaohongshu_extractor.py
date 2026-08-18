@@ -16,9 +16,9 @@ from . import register_extractor
 from ._ssr import find_ssr_payload
 from .base import ContentExtractor
 
-# 小红书 URL 模式
-_XHS_RE = re.compile(r"(?:xiaohongshu\.com/(?:explore|discovery/item)/|xhslink\.com/)(\w+)")
-_XHS_SHORT_RE = re.compile(r"xhslink\.com/(\w+)")
+# 小红书 URL 模式 (xhslink.cn 为 2025 启用的新短链域名, 兼容 .com)
+_XHS_RE = re.compile(r"(?:xiaohongshu\.com/(?:explore|discovery/item)/|xhslink\.(?:com|cn)/)(\w+)")
+_XHS_SHORT_RE = re.compile(r"xhslink\.(?:com|cn)/(\w+)")
 
 
 class XiaohongshuExtractor(ContentExtractor):
@@ -26,7 +26,7 @@ class XiaohongshuExtractor(ContentExtractor):
 
     platform_name = "xiaohongshu"
     _cost_tier = CostTier.FREE
-    url_pattern = re.compile(r"(xiaohongshu\.com|xhslink\.com)")
+    url_pattern = re.compile(r"(xiaohongshu\.com|xhslink\.(?:com|cn))")
 
     def __init__(self) -> None:
         # 手机 UA: 小红书桌面 UA 的 SSR 不返回笔记内容, 仅移动端页面含 noteData
@@ -48,8 +48,8 @@ class XiaohongshuExtractor(ContentExtractor):
 
     def extract(self, url: str) -> ExtractResult:
         try:
-            # 解析短链接
-            if "xhslink.com" in url:
+            # 解析短链接 (xhslink.com / xhslink.cn)
+            if "xhslink." in url:
                 resolved = self._resolve_short_url(url)
                 if resolved:
                     url = str(resolved)
