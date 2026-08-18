@@ -64,11 +64,13 @@ def _resolve_ytdlp() -> str | None:
     found = shutil.which(_YTDLP_CMD)
     if found:
         return found
-    # 项目 venv
-    venv_bin = Path(__file__).resolve().parents[3] / ".venv" / "bin"
-    candidate = venv_bin / _YTDLP_CMD
-    if candidate.exists():
-        return str(candidate)
+    # 项目 venv (跨平台: Unix bin / Windows Scripts)
+    venv_root = Path(__file__).resolve().parents[3] / ".venv"
+    for sub in ("Scripts", "bin"):
+        for name in (_YTDLP_CMD, _YTDLP_CMD + ".exe"):
+            candidate = venv_root / sub / name
+            if candidate.exists():
+                return str(candidate)
     candidate = Path.home() / ".local" / "bin" / _YTDLP_CMD
     if candidate.exists():
         return str(candidate)
