@@ -214,18 +214,22 @@ class BilibiliExtractor(ContentExtractor):
             if audio_path is None:
                 continue
             try:
-                mp3_path = self._transcode_to_mp3(audio_path)
-                audio_path.unlink(missing_ok=True)
-                if mp3_path is None:
-                    continue
+                # 本地 whisper (PyAV) 可直接解码 .m4s/.m4a, 免 ffmpeg 转码
                 try:
-                    text, segments = transcribe_local(mp3_path, language="zh")
+                    text, segments = transcribe_local(audio_path, language="zh")
                     provider = "faster_whisper"
+                    audio_path.unlink(missing_ok=True)
                 except ImportError:
-                    # 本地 whisper 未安装 → DashScope 异步 (需公网 URL)
-                    text, segments = self._transcribe_via_dashscope(mp3_path)
-                    provider = "dashscope_asr"
-                mp3_path.unlink(missing_ok=True)
+                    # 本地 whisper 未安装 → 转 mp3 走 DashScope 异步 (需公网 URL)
+                    mp3_path = self._transcode_to_mp3(audio_path)
+                    audio_path.unlink(missing_ok=True)
+                    if mp3_path is None:
+                        continue
+                    try:
+                        text, segments = self._transcribe_via_dashscope(mp3_path)
+                        provider = "dashscope_asr"
+                    finally:
+                        mp3_path.unlink(missing_ok=True)
                 if not text:
                     continue
                 return ExtractResult(
@@ -279,6 +283,16 @@ class BilibiliExtractor(ContentExtractor):
         import subprocess
 
         ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            # PATH 缺失时探测常见安装路径
+            for p in (
+                "/opt/homebrew/bin/ffmpeg",
+                "/usr/local/bin/ffmpeg",
+                "/usr/bin/ffmpeg",
+            ):
+                if Path(p).exists():
+                    ffmpeg = p
+                    break
         if ffmpeg is None:
             return None
         dst = src.with_suffix(".mp3")

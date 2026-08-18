@@ -167,7 +167,7 @@ class MCPServer:
                 },
                 {
                     "name": "extract_video",
-                    "description": "提取视频/内容的文字内容。智能路由: Coze(优先,免费积分)→平台API→yt-dlp+ASR, 自动降级。返回标题+正文+来源。",
+                    "description": "提取视频/内容的文字内容。智能路由: 平台字幕API→yt-dlp+本地Whisper(免费兜底)→云ASR→商业API, 自动降级。返回标题+正文+来源。",
                     "inputSchema": {
                         "type": "object",
                         "properties": {

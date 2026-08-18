@@ -4,32 +4,48 @@
 优先级在平台原生提取器之后，TikHub 付费 API 之前。
 
 工作流程:
-  1. yt-dlp 下载视频/音频
-  2. ffmpeg 提取音频 (如果下载的是视频)
-  3. 阿里云 ASR (paraformer-v2) 转写 (已配置时)
-  4. 未配置 ASR 时返回音频路径信息
+  1. yt-dlp 下载音频 (显式解析 yt-dlp/ffmpeg 路径, 不依赖 shell PATH)
+  2. ASR 链路 (按顺序降级):
+     a. 本地 faster-whisper (默认, 零 key 免费, 最可靠)  ← 主链路
+     b. 阿里云 NLS paraformer-v2 (已配置时)
+     c. DashScope paraformer-v2 (已配置时, 复用 dashscope_key)
+  3. 全部 ASR 不可用时返回占位结果 (音频路径+配置指引)
 
-成本: CHEAP (阿里云 ASR ~0.00008元/秒, 10分钟视频约0.048元)
+成本: CHEAP (本地 whisper 免费; 云 ASR ~0.00008元/秒, 10分钟视频约0.048元)
+环境变量:
+  VMB_WHISPER_MODEL   本地 whisper 模型大小 (默认 base: tiny/base/small/medium)
+  VMB_ASR_LANGUAGE    转写语言 (默认 None=自动检测, 如 zh/en)
+  VMB_DOWNLOAD_TIMEOUT yt-dlp 下载超时秒数 (默认 300)
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import re
+import shutil
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
 from ..models import CostTier, ExtractResult
 from . import register_extractor
 from ._dashscope_asr import transcribe_audio_data
+from ._whisper_asr import transcribe_local
 from .aliyun_asr_extractor import AliyunASRExtractor
 from .base import ContentExtractor
 
 logger = logging.getLogger(__name__)
 
 _YTDLP_CMD = "yt-dlp"
+_FFMPEG_KNOWN_PATHS = [
+    "/opt/homebrew/bin/ffmpeg",
+    "/usr/local/bin/ffmpeg",
+    "/usr/bin/ffmpeg",
+    "/usr/local/ffmpeg/bin/ffmpeg",
+]
 
 _SUPPORTED_PLATFORMS = [
     "bilibili", "douyin", "xiaohongshu", "youtube",
@@ -37,8 +53,39 @@ _SUPPORTED_PLATFORMS = [
 ]
 
 
+def _resolve_ytdlp() -> str | None:
+    """解析 yt-dlp 可执行文件: PATH → 项目 venv → 常见路径。
+
+    MCP 常以 `uv run` 启动, venv bin 在 PATH 中; 但独立进程/非登录 shell
+    下 PATH 可能缺失, 此处显式兜底, 避免静默判为"未安装"。
+    """
+    found = shutil.which(_YTDLP_CMD)
+    if found:
+        return found
+    # 项目 venv
+    venv_bin = Path(__file__).resolve().parents[3] / ".venv" / "bin"
+    candidate = venv_bin / _YTDLP_CMD
+    if candidate.exists():
+        return str(candidate)
+    candidate = Path.home() / ".local" / "bin" / _YTDLP_CMD
+    if candidate.exists():
+        return str(candidate)
+    return None
+
+
+def _resolve_ffmpeg() -> str | None:
+    """解析 ffmpeg 路径 (--extract-audio 依赖, 不在 PATH 时显式传入)。"""
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+    for p in _FFMPEG_KNOWN_PATHS:
+        if Path(p).exists():
+            return p
+    return None
+
+
 class YtDlpASRExtractor(ContentExtractor):
-    """yt-dlp + 阿里云 ASR 组合提取器 (无字幕视频通用兜底)"""
+    """yt-dlp + ASR 组合提取器 (无字幕视频通用兜底, 本地 whisper 优先)"""
 
     platform_name = "ytdlp_asr"
     _cost_tier = CostTier.CHEAP
@@ -50,19 +97,18 @@ class YtDlpASRExtractor(ContentExtractor):
 
     def __init__(self) -> None:
         self._asr = AliyunASRExtractor()
+        self._ytdlp: str | None = None
+        self._ffmpeg: str | None = None
         self._available: bool | None = None
 
     def is_available(self) -> bool:
+        """yt-dlp 可执行即可用 (本地 whisper 免费零 key, 不依赖云凭证)"""
         if self._available is not None:
             return self._available
-        try:
-            subprocess.run(
-                [_YTDLP_CMD, "--version"],
-                capture_output=True, text=True, timeout=10.0,
-            )
-            self._available = True
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            self._available = False
+        ytdlp = _resolve_ytdlp()
+        self._available = ytdlp is not None
+        if self._available:
+            self._ytdlp = ytdlp
         return self._available
 
     def extract(self, url: str) -> ExtractResult:
@@ -79,12 +125,22 @@ class YtDlpASRExtractor(ContentExtractor):
                 return ExtractResult(
                     success=False, platform="ytdlp_asr", title="", content="",
                     source="ytdlp_asr", url=url, cost_tier=CostTier.CHEAP,
-                    error="yt-dlp 下载音频失败",
+                    error="yt-dlp 下载音频失败 (网络/风控/ffmpeg 缺失)",
                 )
 
             metadata = self._get_metadata(url)
+            platform = metadata.get("platform", "video")
+            title = metadata.get("title", audio_path.stem)
+            duration = float(metadata.get("duration", 0))
 
-            # 优先阿里云 NLS ASR, 未配置时回退 DashScope (复用 dashscope_key)
+            result: ExtractResult | None = None
+
+            # ── ASR 链路 A: 本地 faster-whisper (默认, 零 key) ──────────────
+            result = self._transcribe_local(audio_path, url, platform, title, duration)
+            if result and result.success:
+                return result
+
+            # ── ASR 链路 B/C: 云 ASR 仅作可选增强 (已配置时) ───────────────
             if self._asr.is_available():
                 result = self._asr.transcribe_audio(audio_path)
             else:
@@ -92,9 +148,7 @@ class YtDlpASRExtractor(ContentExtractor):
                 if dashscope_key:
                     result = self._transcribe_dashscope(
                         audio_path, dashscope_key, url,
-                        metadata.get("platform", "video"),
-                        metadata.get("title", ""),
-                        float(metadata.get("duration", 0)),
+                        platform, title, duration,
                     )
                 else:
                     result = None
@@ -102,25 +156,27 @@ class YtDlpASRExtractor(ContentExtractor):
             if result and result.success:
                 result.url = url
                 if not result.title or result.title == audio_path.stem:
-                    result.title = metadata.get("title", audio_path.stem)
+                    result.title = title
                 return result
 
             if result and result.error:
-                logger.warning(f"ytdlp_asr 转写失败: {result.error}")
+                logger.warning(f"ytdlp_asr 云转写失败: {result.error}")
 
+            # ── 全部 ASR 不可用: 占位结果 ─────────────────────────────────
+            whisper_hint = "本地 faster-whisper 未安装" if not self._whisper_importable() else "本地转写返回空"
             return ExtractResult(
                 success=True,
-                platform=metadata.get("platform", "video"),
-                title=metadata.get("title", audio_path.stem),
+                platform=platform,
+                title=title,
                 content=(
-                    "[yt-dlp+ASR] 已下载音频但 ASR 不可用\n"
-                    "请配置 ALIYUN_ACCESS_KEY_ID / ACCESS_KEY_SECRET / APPKEY, "
-                    "或 dashscope_key (DashScope)\n"
+                    "[yt-dlp+ASR] 已下载音频但 ASR 全链路不可用\n"
+                    f"原因: {whisper_hint}; 可选: 安装 faster-whisper (pip install faster-whisper), "
+                    "或配置 ALIYUN_ACCESS_KEY_ID/SECRET/APPKEY 或 dashscope_key\n"
                 ),
                 source="ytdlp_asr",
                 url=url,
                 cost_tier=CostTier.CHEAP,
-                duration_seconds=float(metadata.get("duration", 0)),
+                duration_seconds=duration,
                 is_placeholder=True,
                 metadata={
                     "audio_path": str(audio_path),
@@ -128,6 +184,53 @@ class YtDlpASRExtractor(ContentExtractor):
                     "platform_meta": metadata,
                 },
             )
+
+    # ─────────────────────────── ASR 实现 ───────────────────────────
+
+    def _transcribe_local(
+        self, audio_path: Path, url: str, platform: str, title: str, duration: float,
+    ) -> ExtractResult | None:
+        """本地 faster-whisper 转写 (零成本, 主链路)。
+
+        失败/未安装时返回 None (不抛异常), 由调用方继续降级。
+        """
+        try:
+            model_size = os.getenv("VMB_WHISPER_MODEL", "base")
+            language = os.getenv("VMB_ASR_LANGUAGE", "") or None
+            started = time.time()
+            text, segments = transcribe_local(audio_path, language=language, model_size=model_size)
+            elapsed = round(time.time() - started, 1)
+            if not text:
+                logger.warning(f"本地 whisper 返回空转录: {audio_path.name}")
+                return None
+            logger.info(f"✓ 本地 faster-whisper 转写完成 ({elapsed}s, model={model_size})")
+            return ExtractResult(
+                success=True,
+                platform=platform,
+                title=title or audio_path.stem,
+                content=text,
+                source="ytdlp_asr_local",
+                url=url,
+                cost_tier=CostTier.CHEAP,
+                duration_seconds=duration,
+                language=language or "auto",
+                segments=segments,
+                metadata={"asr_provider": "faster-whisper", "model": model_size},
+            )
+        except ImportError:
+            logger.warning("faster-whisper 未安装, 跳过本地 ASR")
+            return None
+        except Exception as e:
+            logger.warning(f"本地 faster-whisper 转写失败: {e}")
+            return None
+
+    @staticmethod
+    def _whisper_importable() -> bool:
+        try:
+            import faster_whisper  # noqa: F401
+            return True
+        except ImportError:
+            return False
 
     def _transcribe_dashscope(
         self, audio_path: Path, api_key: str, url: str,
@@ -163,56 +266,115 @@ class YtDlpASRExtractor(ContentExtractor):
                 error=f"DashScope ASR 调用失败: {e}",
             )
 
-    def _download_audio(self, url: str, tmp_dir: Path) -> Path | None:
-        output_template = str(tmp_dir / "%(id)s.%(ext)s")
+    # ─────────────────────────── 下载/元信息 ───────────────────────────
 
+    def _download_audio(self, url: str, tmp_dir: Path) -> Path | None:
+        """下载音频。
+
+        优先原生音频直下 (-f bestaudio, 无需 ffmpeg, faster-whisper 可直接解码);
+        失败时兜底 --extract-audio 转码 (显式指定 ffmpeg 路径, 不依赖 PATH)。
+        """
+        ffmpeg = _resolve_ffmpeg()
+
+        # 尝试 1: 原生音频, 免 ffmpeg
+        audio = self._download_raw_audio(url, tmp_dir)
+        if audio:
+            return audio
+
+        # 尝试 2: --extract-audio 转码兜底
+        if ffmpeg:
+            audio = self._download_with_transcode(url, tmp_dir, ffmpeg)
+            if audio:
+                return audio
+
+        logger.warning(
+            "yt-dlp 下载失败 (原生直下不可用"
+            + ("" if ffmpeg else "; ffmpeg 未找到, 无法转码兜底")
+            + ")"
+        )
+        return None
+
+    def _download_raw_audio(self, url: str, tmp_dir: Path) -> Path | None:
+        """原生 bestaudio 直下 (无后处理, 不依赖 ffmpeg)。"""
+        output_template = str(tmp_dir / "%(id)s.%(ext)s")
         cmd = [
-            _YTDLP_CMD,
-            "--extract-audio",
-            "--audio-format", "mp3",
-            "--audio-quality", "0",
+            self._ytdlp or _YTDLP_CMD,
+            "-f", "bestaudio/best",
+            "--no-playlist",
             "--output", output_template,
             "--print", "filename",
             url,
         ]
-
         try:
+            timeout = float(os.getenv("VMB_DOWNLOAD_TIMEOUT", "300"))
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=300.0,
+                cmd, capture_output=True, text=True, timeout=timeout,
             )
-
             if result.returncode != 0:
+                logger.warning(f"yt-dlp 原生音频下载失败 rc={result.returncode}: {result.stderr.strip()[-200:]}")
                 return None
-
-            for line in result.stdout.strip().split("\n"):
-                line = line.strip()
-                if line:
-                    candidate = Path(line)
-                    if candidate.exists() and candidate.suffix in (".mp3", ".m4a", ".wav", ".aac"):
-                        return candidate
-
-            mp3_files = list(tmp_dir.glob("*.mp3"))
-            if mp3_files:
-                return mp3_files[0]
-
-            audio_files = list(tmp_dir.glob("*"))
-            audio_files = [f for f in audio_files if f.suffix in (".mp3", ".m4a", ".wav", ".aac", ".opus")]
-            if audio_files:
-                return audio_files[0]
-
+            return self._find_audio_file(result, tmp_dir)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.warning(f"yt-dlp 原生音频下载异常: {e}")
             return None
 
-        except (subprocess.TimeoutExpired, FileNotFoundError):
+    def _download_with_transcode(self, url: str, tmp_dir: Path, ffmpeg: str) -> Path | None:
+        """--extract-audio + --ffmpeg-location 转码下载 (兜底)。"""
+        output_template = str(tmp_dir / "%(id)s.%(ext)s")
+        cmd = [
+            self._ytdlp or _YTDLP_CMD,
+            "--extract-audio",
+            "--audio-format", "mp3",
+            "--audio-quality", "0",
+            "--no-playlist",
+            "--output", output_template,
+            "--print", "filename",
+            "--ffmpeg-location", ffmpeg,
+            url,
+        ]
+        try:
+            timeout = float(os.getenv("VMB_DOWNLOAD_TIMEOUT", "300"))
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout,
+            )
+            if result.returncode != 0:
+                logger.warning(f"yt-dlp 转码下载失败 rc={result.returncode}: {result.stderr.strip()[-200:]}")
+                return None
+            return self._find_audio_file(result, tmp_dir)
+        except (subprocess.TimeoutExpired, FileNotFoundError) as e:
+            logger.warning(f"yt-dlp 转码下载异常: {e}")
             return None
 
     @staticmethod
-    def _get_metadata(url: str) -> dict[str, Any]:
+    def _find_audio_file(result: subprocess.CompletedProcess, tmp_dir: Path) -> Path | None:
+        """从 yt-dlp 输出/目录中定位下载的音频文件。"""
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if line:
+                candidate = Path(line)
+                if candidate.exists() and candidate.suffix in (".mp3", ".m4a", ".wav", ".aac", ".opus", ".webm"):
+                    return candidate
+
+        mp3_files = list(tmp_dir.glob("*.mp3"))
+        if mp3_files:
+            return mp3_files[0]
+
+        audio_files = [
+            f for f in tmp_dir.iterdir()
+            if f.suffix in (".mp3", ".m4a", ".wav", ".aac", ".opus", ".webm")
+        ]
+        if audio_files:
+            return audio_files[0]
+
+        return None
+
+    def _get_metadata(self, url: str) -> dict[str, Any]:
         cmd = [
-            _YTDLP_CMD, "--dump-json", "--skip-download", url,
+            self._ytdlp or _YTDLP_CMD, "--dump-json", "--skip-download", url,
         ]
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30.0,
+                cmd, capture_output=True, text=True, timeout=60.0,
             )
             if result.returncode == 0:
                 line = result.stdout.strip().split("\n")[0]
