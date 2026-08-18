@@ -17,7 +17,7 @@
   VMB_ASR_LANGUAGE    转写语言 (默认 None=自动检测, 如 zh/en)
   VMB_DOWNLOAD_TIMEOUT yt-dlp 下载超时秒数 (默认 300)
   VMB_COOKIES_BROWSER  借本机浏览器真实登录态下载 (值: chrome/edge/firefox/browser);
-                       强风控平台 (抖音等) 无登录态会报 Fresh cookies needed, 设置后可解
+  VMB_COOKIES_FILE     使用 cookies.txt 文件登录态下载 (服务器/Windows 无浏览器场景权威)
 """
 
 from __future__ import annotations
@@ -298,7 +298,14 @@ class YtDlpASRExtractor(ContentExtractor):
         return None
 
     def _cookies_args(self) -> list[str]:
-        """借本机浏览器真实登录态下载 (VMB_COOKIES_BROWSER, 强风控平台需要)。"""
+        """下载所用登录态: 优先 cookies 文件 (VMB_COOKIES_FILE, 服务器场景),
+        其次借本机浏览器登录态 (VMB_COOKIES_BROWSER, 本机/桌面场景)。"""
+        cookies_file = os.getenv("VMB_COOKIES_FILE", "").strip()
+        if cookies_file:
+            if not Path(cookies_file).exists():
+                logger.warning(f"VMB_COOKIES_FILE 不存在: {cookies_file}, 忽略 cookies")
+            else:
+                return ["--cookies", cookies_file]
         if self._cookies_browser:
             return ["--cookies-from-browser", self._cookies_browser]
         return []
