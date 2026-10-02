@@ -28,7 +28,7 @@ Windows 10 长期挂机 (<LAN_IP>) — 执行工作站
 | 项 | 值 |
 |---|---|
 | OS | Windows 10 (19045) x64 |
-| Python | 3.12.9 (`C:\Users\yihong123\AppData\Local\Programs\Python\Python312`) |
+| Python | 3.12.9 (`C:\Users\<WIN_USER>\AppData\Local\Programs\Python\Python312`) |
 | uv | 0.11.3 |
 | ffmpeg | `C:\tools\ffmpeg\ffmpeg-master-latest-win64-gpl\bin`（未入系统 PATH，由启动脚本注入） |
 | 项目目录 | `C:\services\videomind`（venv: `.venv`, python3.12） |
