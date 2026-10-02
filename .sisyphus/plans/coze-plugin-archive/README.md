@@ -7,7 +7,7 @@ B站视频 → 解析/下载音频 → 中转 URL → DashScope paraformer-v2 �
 
 | 项 | 值 |
 |----|----|
-| 服务地址 | `http://124.222.71.123/vmb` (nginx 反代) |
+| 服务地址 | `http://<PUBLIC_IP>/vmb` (nginx 反代) |
 | 服务端口 | 8787 (systemd: `videomind-api`) |
 | 部署目录 | `/opt/videomind-bridge` (腾讯云) |
 | 媒体目录 | `/var/lib/videomind/media` (音频 24h 自动清理) |

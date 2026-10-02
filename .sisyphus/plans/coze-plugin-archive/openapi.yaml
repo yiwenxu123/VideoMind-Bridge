@@ -7,7 +7,7 @@ info:
     无第三方依赖, 平台改版仅需升级 yt-dlp。
   version: 1.0.0
 servers:
-  - url: http://124.222.71.123/vmb
+  - url: http://<PUBLIC_IP>/vmb
 paths:
   /api/v1/parse:
     post:

@@ -1,6 +1,6 @@
 # VideoMind Bridge — Windows 部署与架构收敛记录
 
-> 记录日期：2026-08-18 · 目标机：Windows 10 (DESKTOP-S4877G0) · ZeroTier: `10.207.251.86`
+> 记录日期：2026-08-18 · 目标机：Windows 10 (<HOSTNAME>) · ZeroTier: `<LAN_IP>`
 > 本文档是 Windows 服务器部署、本次修复、架构收敛的完整存档，含维护手册。
 
 ---
@@ -8,7 +8,7 @@
 ## 1. 当前架构总览
 
 ```
-Windows 10 长期挂机 (10.207.251.86) — 执行工作站
+Windows 10 长期挂机 (<LAN_IP>) — 执行工作站
 ├─ VideoMindAPI (8787, SYSTEM+onstart)  视频内容提取服务【本会话部署·核心】
 ├─ intel-pipeline 计划任务              银发产业情报 (0:00/0:30/1:00/12:00/12:30)
 ├─ PocketBase (8090)                    数据后端
@@ -67,7 +67,7 @@ for /f "tokens=5" %a in ('netstat -ano ^| findstr :8787 ^| findstr LISTENING') d
 
 ### 2.4 鉴权与入口
 - Token：保存在 `start_api.bat`（`VIDEOMIND_API_TOKEN`）
-- Swagger：`http://10.207.251.86:8787/docs`
+- Swagger：`http://<LAN_IP>:8787/docs`
 - 数据存储：keyring 在 SSH 会话不可用（CredRead 1312 无害报错）→ **云 key 一律用环境变量**；本地 whisper 免费链路无需任何 key
 
 ---
@@ -121,7 +121,7 @@ for /f "tokens=5" %a in ('netstat -ano ^| findstr :8787 ^| findstr LISTENING') d
 
 ```bash
 # 通用 REST 入口（任何 agent）
-curl -s -X POST http://10.207.251.86:8787/api/v1/extract \
+curl -s -X POST http://<LAN_IP>:8787/api/v1/extract \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer <VIDEOMIND_API_TOKEN>" \
   -d '{"url":"<B站/抖音/小红书/YouTube链接>"}'
