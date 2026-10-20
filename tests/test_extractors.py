@@ -1,6 +1,6 @@
 """提取器单元测试
 
-覆盖所有 9 个提取器的纯逻辑代码路径:
+覆盖所有 8 个提取器的纯逻辑代码路径:
 supports(), is_available(), should_try(), cost_tier, URL 模式匹配,
 以及基类 ContentExtractor 的工具方法和注册表模式。
 
@@ -194,17 +194,18 @@ def test_get_nonexistent_extractor():
 def test_list_extractors_includes_all_platforms():
     names = list_extractors()
     for platform in ("bilibili", "youtube", "douyin", "xiaohongshu",
-                     "ytdlp", "ytdlp_asr", "tikhub", "apify", "aliyun_asr"):
+                     "ytdlp", "ytdlp_asr", "tikhub", "apify"):
         assert platform in names, "Missing extractor: " + platform
+    assert "aliyun_asr" not in names
 
 
 def test_create_all_extractors_returns_instances():
     extractors = create_all_extractors()
     names = [e.platform_name for e in extractors]
     for platform in ("bilibili", "youtube", "douyin", "xiaohongshu",
-                     "ytdlp", "ytdlp_asr", "tikhub", "apify", "aliyun_asr"):
+                     "ytdlp", "ytdlp_asr", "tikhub", "apify"):
         assert platform in names, "Missing extractor instance: " + platform
-    assert len(extractors) >= 10
+    assert "aliyun_asr" not in names
 
 
 # ============================================================

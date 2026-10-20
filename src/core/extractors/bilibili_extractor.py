@@ -209,6 +209,7 @@ class BilibiliExtractor(ContentExtractor):
             return None
 
         audio_urls = playurl["audio_urls"]
+        model_size = os.getenv("VMB_WHISPER_MODEL", "base")
         for audio_url in audio_urls:
             audio_path = self._download_audio(audio_url)
             if audio_path is None:
@@ -216,7 +217,9 @@ class BilibiliExtractor(ContentExtractor):
             try:
                 # 本地 whisper (PyAV) 可直接解码 .m4s/.m4a, 免 ffmpeg 转码
                 try:
-                    text, segments = transcribe_local(audio_path, language="zh")
+                    text, segments = transcribe_local(
+                        audio_path, language="zh", model_size=model_size
+                    )
                     provider = "faster_whisper"
                     audio_path.unlink(missing_ok=True)
                 except ImportError:
@@ -246,7 +249,7 @@ class BilibiliExtractor(ContentExtractor):
                     metadata={
                         "bvid": bvid,
                         "api_provider": provider,
-                        "model": "base" if provider == "faster_whisper" else "paraformer-v2",
+                        "model": model_size if provider == "faster_whisper" else "paraformer-v2",
                     },
                 )
             except Exception:

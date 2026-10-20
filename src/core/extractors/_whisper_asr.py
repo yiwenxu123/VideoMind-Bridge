@@ -83,7 +83,7 @@ def _resolve_model_ref(model_size: str) -> str:
 
 def transcribe_local(
     audio_path: Path,
-    language: str = "zh",
+    language: str | None = "zh",
     model_size: str = "base",
 ) -> tuple[str, list[dict] | None]:
     """使用 faster-whisper 本地转写音频。

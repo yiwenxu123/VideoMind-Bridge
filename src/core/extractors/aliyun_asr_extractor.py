@@ -1,4 +1,4 @@
-"""阿里云 ASR 提取器
+"""阿里云 ASR 辅助类
 
 使用阿里云语音识别 (paraformer-v2) 为无字幕视频生成转录。
 需要配置阿里云 AccessKey:
@@ -7,6 +7,9 @@
   - ALIYUN_APPKEY (项目 AppKey)
 
 成本: 按量计费, paraformer-v2 约 0.5 元/小时
+
+不注册为路由提取器：它需要先由其他提取器下载音频，extract() 本身
+无法从 URL 产出内容；仅由 ytdlp_asr/tikhub 在云端降级时直接调用。
 """
 
 from __future__ import annotations
@@ -18,7 +21,6 @@ from pathlib import Path
 import httpx
 
 from ..models import CostTier, ExtractResult
-from . import register_extractor
 from .base import ContentExtractor
 
 # 阿里云语音识别 API
@@ -155,6 +157,3 @@ class AliyunASRExtractor(ContentExtractor):
             segments=segments if segments else None,
             metadata={"api_provider": "aliyun_asr", "model": "paraformer-v2"},
         )
-
-
-register_extractor("aliyun_asr", AliyunASRExtractor)

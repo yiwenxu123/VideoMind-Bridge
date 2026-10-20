@@ -100,11 +100,17 @@ class YtDlpASRExtractor(ContentExtractor):
     )
 
     def __init__(self) -> None:
-        self._asr = AliyunASRExtractor()
+        self._asr: AliyunASRExtractor | None = None
         self._ytdlp: str | None = None
         self._ffmpeg: str | None = None
         self._available: bool | None = None
         self._cookies_browser = os.getenv("VMB_COOKIES_BROWSER", "").strip()
+
+    def _get_aliyun_asr(self) -> AliyunASRExtractor:
+        """懒加载阿里云 ASR，避免每次构造提取器都访问密钥配置。"""
+        if self._asr is None:
+            self._asr = AliyunASRExtractor()
+        return self._asr
 
     def is_available(self) -> bool:
         """yt-dlp 可执行即可用 (本地 whisper 免费零 key, 不依赖云凭证)"""
@@ -146,8 +152,9 @@ class YtDlpASRExtractor(ContentExtractor):
                 return result
 
             # ── ASR 链路 B/C: 云 ASR 仅作可选增强 (已配置时) ───────────────
-            if self._asr.is_available():
-                result = self._asr.transcribe_audio(audio_path)
+            aliyun_asr = self._get_aliyun_asr()
+            if aliyun_asr.is_available():
+                result = aliyun_asr.transcribe_audio(audio_path)
             else:
                 dashscope_key = self._resolve_api_key("dashscope_key")
                 if dashscope_key:

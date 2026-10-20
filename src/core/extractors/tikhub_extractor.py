@@ -13,6 +13,7 @@ ASR 不可用时返回元数据+下载链接。
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import tempfile
@@ -23,6 +24,7 @@ import httpx
 from ..models import CostTier, ExtractResult
 from . import register_extractor
 from ._dashscope_asr import transcribe_audio_data
+from ._whisper_asr import transcribe_local as shared_transcribe_local
 from .base import ContentExtractor
 
 TIKHUB_API_BASE = "https://api.tikhub.io"
@@ -264,26 +266,13 @@ class TikhubExtractor(ContentExtractor):
 
     def _transcribe_local(self, audio_path: Path, url: str, platform: str, title: str, duration: float) -> ExtractResult:
         try:
-            import os as _os
-            _os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
-            from faster_whisper import WhisperModel
-            model = WhisperModel("base", device="cpu", compute_type="int8")
-            segments, info = model.transcribe(str(audio_path), language="zh")
+            model_size = os.getenv("VMB_WHISPER_MODEL", "base")
+            text, segments = shared_transcribe_local(
+                audio_path, language="zh", model_size=model_size
+            )
+            segment_list = segments or []
 
-            text_parts = []
-            segment_list = []
-            for seg in segments:
-                text_parts.append(seg.text)
-                segment_list.append({
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text,
-                })
-
-            full_text = " ".join(text_parts)
-            seg_count = len(segment_list)
-
-            if not full_text:
+            if not text:
                 return ExtractResult(
                     success=False, platform=platform, title=title, content="",
                     source="tikhub_asr", url=url, cost_tier=self._cost_tier,
@@ -293,13 +282,17 @@ class TikhubExtractor(ContentExtractor):
             return ExtractResult(
                 success=True, platform=platform,
                 title=title or audio_path.stem,
-                content=full_text,
+                content=text,
                 source="tikhub_asr", url=url,
                 cost_tier=self._cost_tier,
                 duration_seconds=duration or (segment_list[-1]["end"] if segment_list else 0),
-                language=info.language if info else "zh",
+                language="zh",
                 segments=segment_list,
-                metadata={"api_provider": "faster_whisper", "model": "base", "segments": seg_count},
+                metadata={
+                    "api_provider": "faster_whisper",
+                    "model": model_size,
+                    "segments": len(segment_list),
+                },
             )
         except ImportError:
             return ExtractResult(
