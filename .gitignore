@@ -39,6 +39,9 @@ test_output/
 htmlcov/
 coverage/
 
+# Local real-link regression manifest (contains expiring tokens)
+benchmarks/real-links.local.yaml
+
 # Build artifacts
 *.spec
 build/

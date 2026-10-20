@@ -1,0 +1,23 @@
+# 真实链接回归清单示例
+# 复制为 benchmarks/real-links.local.yaml（已被 gitignore）后填入真实链接。
+# 链接可能含 xsec_token 等时效凭证，不要提交到仓库。
+
+- name: bilibili-sample
+  url: https://www.bilibili.com/video/BVxxxxxxxxx/
+  min_completeness: full
+  asr: sensevoice
+
+- name: douyin-sample
+  url: https://v.douyin.com/xxxxxx/
+  min_completeness: full
+  asr: sensevoice
+
+- name: xhs-video-sample
+  url: https://www.xiaohongshu.com/discovery/item/xxxxxxxx?xsec_token=xxxx&xsec_source=pc_share
+  min_completeness: full
+  asr: sensevoice
+
+- name: xhs-image-sample
+  url: https://www.xiaohongshu.com/discovery/item/xxxxxxxx?xsec_token=xxxx&xsec_source=pc_share
+  min_completeness: full
+  asr: sensevoice
