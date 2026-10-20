@@ -7,18 +7,35 @@
 
 from __future__ import annotations
 
+import logging
 import re
+import tempfile
+from pathlib import Path
 
 import httpx
 
+from ..asr import (
+    AsrChainError,
+    MediaRef,
+    TranscribeOptions,
+    transcribe_with_chain,
+    transcript_to_extract_result,
+)
+from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from ._ssr import find_ssr_payload
 from .base import ContentExtractor
 
+logger = logging.getLogger(__name__)
+
 # 小红书 URL 模式 (xhslink.cn 为 2025 启用的新短链域名, 兼容 .com)
 _XHS_RE = re.compile(r"(?:xiaohongshu\.com/(?:explore|discovery/item)/|xhslink\.(?:com|cn)/)(\w+)")
 _XHS_SHORT_RE = re.compile(r"xhslink\.(?:com|cn)/(\w+)")
+MOBILE_UA = (
+    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
+    "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
+)
 
 
 class XiaohongshuExtractor(ContentExtractor):
@@ -33,11 +50,7 @@ class XiaohongshuExtractor(ContentExtractor):
         self._client = httpx.Client(
             timeout=30.0,
             headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
-                    "AppleWebKit/605.1.15 (KHTML, like Gecko) "
-                    "Version/16.0 Mobile/15E148 Safari/604.1"
-                ),
+                "User-Agent": MOBILE_UA,
             },
             follow_redirects=True,
         )
@@ -46,7 +59,7 @@ class XiaohongshuExtractor(ContentExtractor):
         """无需 Cookie, 始终可用"""
         return True
 
-    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
+    def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         try:
             # 解析短链接 (xhslink.com / xhslink.cn)
             if "xhslink." in url:
@@ -63,7 +76,15 @@ class XiaohongshuExtractor(ContentExtractor):
                 )
 
             # 获取笔记内容
-            title, content, images, is_video = self._fetch_note(note_id, url)
+            title, content, images, is_video, html = self._fetch_note(note_id, url)
+
+            # 视频笔记优先口播 ASR（成功=full；失败落回 desc/meta）
+            if is_video:
+                video_result = self._try_video_asr(
+                    html, url, note_id, title, content, options
+                )
+                if video_result is not None:
+                    return video_result
 
             if not content and not title:
                 return ExtractResult(
@@ -110,7 +131,7 @@ class XiaohongshuExtractor(ContentExtractor):
 
     def _fetch_note(
         self, note_id: str, original_url: str = ""
-    ) -> tuple[str, str, list[str], bool]:
+    ) -> tuple[str, str, list[str], bool, str]:
         """获取笔记内容
 
         保留原始 URL 中的 xsec_token/xsec_source 参数（未登录访问必需），
@@ -142,10 +163,133 @@ class XiaohongshuExtractor(ContentExtractor):
                 if ssr_title and not title:
                     title = ssr_title
 
-            return title, content, images, self._is_video_html(html)
+            return title, content, images, self._is_video_html(html), html
 
         except httpx.HTTPError:
-            return "", "", [], False
+            return "", "", [], False, ""
+
+    @staticmethod
+    def _find_note_payload(data: dict) -> dict:
+        """兼容新版 note.noteDetailMap 与旧版 noteData.data.noteData。"""
+        if not isinstance(data, dict):
+            return {}
+        container = data.get("note")
+        if isinstance(container, dict):
+            detail_map = container.get("noteDetailMap")
+            if isinstance(detail_map, dict):
+                for entry in detail_map.values():
+                    if not isinstance(entry, dict):
+                        continue
+                    candidate = entry.get("note")
+                    if isinstance(candidate, dict):
+                        return candidate
+            if container.get("video") or container.get("desc") or container.get("title"):
+                return container
+        for key in ("noteDetail", "currentNote"):
+            candidate = data.get(key)
+            if isinstance(candidate, dict):
+                return candidate
+        nd = data.get("noteData", {}).get("data", {})
+        if isinstance(nd, dict):
+            for entry in nd.values():
+                if isinstance(entry, dict):
+                    candidate = entry.get("note") or entry
+                    if isinstance(candidate, dict):
+                        return candidate
+        return {}
+
+    @staticmethod
+    def _extract_video_urls(note: dict) -> list[str]:
+        stream = ((note.get("video") or {}).get("media") or {}).get("stream") or {}
+        items = stream.get("h264") or stream.get("h265") or []
+        if not isinstance(items, list):
+            return []
+        items = [item for item in items if isinstance(item, dict)]
+        if not items:
+            return []
+        best = max(
+            items,
+            key=lambda item: int(
+                item.get("videoBitrate") or item.get("video_bitrate") or 0
+            ),
+        )
+        candidates = [
+            best.get("masterUrl"),
+            best.get("master_url"),
+            *(best.get("backupUrls") or []),
+            *(best.get("backup_urls") or []),
+        ]
+        seen: set[str] = set()
+        urls: list[str] = []
+        for candidate in candidates:
+            if isinstance(candidate, str) and candidate and candidate not in seen:
+                seen.add(candidate)
+                urls.append(candidate)
+        return urls
+
+    def _try_video_asr(
+        self, html: str, url: str, note_id: str, title: str,
+        desc: str, options: ExtractOptions | None = None,
+    ) -> ExtractResult | None:
+        data = find_ssr_payload(html)
+        if data is None:
+            return None
+        note = self._find_note_payload(data)
+        video_urls = self._extract_video_urls(note)
+        if not video_urls:
+            logger.warning("[XiaohongshuExtractor] 视频笔记无 h264/h265 直链，落回 desc")
+            return None
+
+        duration_ms = (note.get("video") or {}).get("duration") or 0
+        author = (note.get("user") or {}).get("nickname", "")
+        for video_url in video_urls:
+            try:
+                with tempfile.TemporaryDirectory(prefix="vmb_xhs_") as tmp:
+                    dest = Path(tmp) / "video.mp4"
+                    HttpMediaFetcher().fetch(
+                        MediaFetchRequest(
+                            url=video_url,
+                            dest=dest,
+                            headers={
+                                "User-Agent": MOBILE_UA,
+                                "Referer": "https://www.xiaohongshu.com/",
+                            },
+                            timeout=120.0,
+                            max_bytes=300 * 1024 * 1024,
+                        )
+                    )
+                    transcript = transcribe_with_chain(
+                        MediaRef(path=dest),
+                        TranscribeOptions(
+                            language=options.asr_language if options else None,
+                            max_cost=options.asr_max_cost if options else None,
+                        ),
+                        chain=options.asr_chain if options else None,
+                        default_language="zh",
+                    )
+            except (MediaFetchError, AsrChainError) as exc:
+                logger.warning(f"[XiaohongshuExtractor] 视频候选失败: {exc}")
+                continue
+            except Exception as exc:
+                logger.warning(f"[XiaohongshuExtractor] 视频链路异常: {exc}")
+                continue
+
+            logger.info(f"[XiaohongshuExtractor] 口播 ASR 完成 {len(transcript.text)} 字符")
+            return transcript_to_extract_result(
+                transcript,
+                url=url,
+                platform="xiaohongshu",
+                title=title or (note.get("title") or "小红书视频"),
+                source="xiaohongshu_asr",
+                cost_tier=CostTier.FREE,
+                duration_seconds=float(duration_ms) / 1000 if duration_ms else 0.0,
+                metadata={
+                    "note_id": note_id,
+                    "author": author,
+                    "description": desc[:200],
+                },
+            )
+        return None
 
     @staticmethod
     def _is_video_html(html: str) -> bool:
@@ -208,20 +352,9 @@ class XiaohongshuExtractor(ContentExtractor):
         if data is None:
             return "", ""
         try:
-            note = (
-                data.get("note", {})
-                or data.get("noteDetail", {})
-                or data.get("currentNote", {})
-                or {}
-            )
-            # 新版结构: noteData.data.noteData (笔记详情在 data 首键下)
+            note = XiaohongshuExtractor._find_note_payload(data)
             if not note:
-                nd = data.get("noteData", {}).get("data", {})
-                if nd:
-                    first_key = next(iter(nd))
-                    first = nd[first_key]
-                    if isinstance(first, dict):
-                        note = first.get("note") or first
+                return "", ""
             title = note.get("title", "") or note.get("displayTitle", "") or ""
             desc = note.get("desc", "") or note.get("description", "") or ""
 

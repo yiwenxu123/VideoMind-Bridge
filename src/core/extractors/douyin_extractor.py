@@ -7,16 +7,29 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
+import tempfile
+from pathlib import Path
 from typing import Any
 
 import httpx
 
+from ..asr import (
+    AsrChainError,
+    MediaRef,
+    TranscribeOptions,
+    transcribe_with_chain,
+    transcript_to_extract_result,
+)
+from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from ._ssr import find_first_meta, find_ssr_payload
 from .base import ContentExtractor
+
+logger = logging.getLogger(__name__)
 
 # 抖音 URL 模式
 _DOUYIN_RE = re.compile(
@@ -78,7 +91,7 @@ class DouyinExtractor(ContentExtractor):
         """无 Cookie 也可用 (部分 IP 可直抓)"""
         return True
 
-    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
+    def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         try:
             # 解析短链接
             if "v.douyin.com" in url:
@@ -93,6 +106,11 @@ class DouyinExtractor(ContentExtractor):
                     source="douyin", url=url, cost_tier=CostTier.FREE,
                     error="暂不支持此抖音链接格式，请使用 /video/ 类链接或短链",
                 )
+
+            # 优先走 douyin-api 网关 + 音频 ASR（与内容运营agent 本地链路对齐）
+            gateway_result = self._extract_via_gateway(video_id, url, options)
+            if gateway_result is not None:
+                return gateway_result
 
             # 1. 获取视频信息和字幕
             title, content, segments = self._fetch_video_data(video_id)
@@ -155,6 +173,125 @@ class DouyinExtractor(ContentExtractor):
                 source="douyin", url=url, cost_tier=CostTier.FREE,
                 error=f"抖音提取失败: {e}",
             )
+
+    def _extract_via_gateway(
+        self, video_id: str, url: str, options: ExtractOptions | None = None,
+    ) -> ExtractResult | None:
+        """douyin-api 网关 + 视频下载 + ASR（失败返回 None 由页面/文案路径兜底）。"""
+        api_base = os.getenv("DOUYIN_API_URL", "http://127.0.0.1:8010").rstrip("/")
+        try:
+            resp = self._client.get(
+                f"{api_base}/api/douyin/web/fetch_one_video",
+                params={"aweme_id": video_id},
+                timeout=30.0,
+            )
+            body = resp.json()
+        except Exception as exc:
+            logger.warning(f"[DouyinExtractor] 网关不可用，回退页面解析: {exc}")
+            return None
+
+        detail = (body.get("data") or {}).get("aweme_detail")
+        if body.get("code") != 200 or not isinstance(detail, dict):
+            logger.warning(
+                f"[DouyinExtractor] 网关 code={body.get('code')} 无详情，回退页面解析"
+            )
+            return None
+
+        desc = str(detail.get("desc") or "").strip()
+        title = str(detail.get("title") or desc or f"抖音视频 {video_id}").strip()
+        author = (detail.get("author") or {}).get("nickname", "")
+        duration_ms = detail.get("duration") or (detail.get("video") or {}).get("duration") or 0
+        duration = float(duration_ms) / 1000 if duration_ms else 0.0
+
+        video = detail.get("video") or {}
+        play_urls = (video.get("play_addr") or {}).get("url_list") or []
+        video_url = next(
+            (u for u in play_urls if isinstance(u, str) and u.startswith("http")), None
+        )
+        if not video_url:
+            return self._gateway_meta_result(
+                video_id, url, title, desc, author, duration, source="douyin_gateway"
+            )
+
+        try:
+            with tempfile.TemporaryDirectory(prefix="vmb_douyin_") as tmp:
+                dest = Path(tmp) / "video.mp4"
+                HttpMediaFetcher().fetch(
+                    MediaFetchRequest(
+                        url=video_url,
+                        dest=dest,
+                        headers={
+                            "User-Agent": (
+                                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                                "Chrome/130.0.0.0 Safari/537.36"
+                            ),
+                            "Referer": "https://www.douyin.com/",
+                        },
+                        timeout=120.0,
+                        max_bytes=300 * 1024 * 1024,
+                    )
+                )
+                transcript = transcribe_with_chain(
+                    MediaRef(path=dest),
+                    TranscribeOptions(
+                        language=options.asr_language if options else None,
+                        max_cost=options.asr_max_cost if options else None,
+                    ),
+                    chain=options.asr_chain if options else None,
+                    default_language="zh",
+                )
+        except (MediaFetchError, AsrChainError) as exc:
+            logger.warning(f"[DouyinExtractor] 网关音频链路失败，降级 meta: {exc}")
+            return self._gateway_meta_result(
+                video_id, url, title, desc, author, duration, source="douyin_gateway"
+            )
+        except Exception as exc:
+            logger.warning(f"[DouyinExtractor] 网关提取异常，降级 meta: {exc}")
+            return self._gateway_meta_result(
+                video_id, url, title, desc, author, duration, source="douyin_gateway"
+            )
+
+        logger.info(f"[DouyinExtractor] 网关 ASR 完成 {len(transcript.text)} 字符")
+        return transcript_to_extract_result(
+            transcript,
+            url=url,
+            platform="douyin",
+            title=title,
+            source="douyin_asr",
+            cost_tier=CostTier.FREE,
+            duration_seconds=duration,
+            metadata={
+                "aweme_id": video_id,
+                "author": author,
+                "description": desc[:200],
+            },
+        )
+
+    def _gateway_meta_result(
+        self, video_id: str, url: str, title: str, desc: str,
+        author: str, duration: float, source: str,
+    ) -> ExtractResult | None:
+        if len(desc) < 30:
+            return None
+        return ExtractResult(
+            success=True,
+            platform="douyin",
+            title=title or f"抖音视频 {video_id}",
+            content=desc,
+            source=source,
+            url=url,
+            cost_tier=CostTier.FREE,
+            duration_seconds=duration,
+            language="zh",
+            metadata={
+                "aweme_id": video_id,
+                "author": author,
+                "description": desc[:200],
+            },
+            completeness="meta",
+            method="desc",
+        )
 
     def _extract_video_id(self, url: str) -> str | None:
         """从 URL 提取视频 ID"""
