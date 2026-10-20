@@ -7,9 +7,7 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import re
-import shutil
 import time
 import urllib.parse
 from pathlib import Path
@@ -17,10 +15,15 @@ from typing import Any
 
 import httpx
 
+from ..asr import (
+    AsrChainError,
+    MediaRef,
+    TranscribeOptions,
+    transcribe_with_chain,
+    transcript_to_extract_result,
+)
 from ..models import CostTier, ExtractResult
 from . import register_extractor
-from ._dashscope_asr import transcribe_audio_url
-from ._whisper_asr import transcribe_local
 from .base import ContentExtractor
 
 # Bilibili WBI 签名常量和密钥池
@@ -199,119 +202,43 @@ class BilibiliExtractor(ContentExtractor):
     def _try_audio_asr_fallback(
         self, url: str, bvid: str, title: str, duration: float,
     ) -> ExtractResult | None:
-        """无字幕时: playurl 音频直链下载 + 转码 + ASR 转写。
+        """无字幕时: playurl 音频直链下载 + 统一 ASR 链转写。
 
-        ASR 优先级: 本地 faster-whisper (稳定免费) → DashScope 异步 (公网 URL)。
         返回成功结果; 任一步失败返回 None (交由上层走原无字幕分支/降级链)。
         """
         playurl = self.get_playurl_audio_urls(url)
         if not playurl or not playurl.get("audio_urls"):
             return None
 
-        audio_urls = playurl["audio_urls"]
-        model_size = os.getenv("VMB_WHISPER_MODEL", "base")
-        for audio_url in audio_urls:
+        for audio_url in playurl["audio_urls"]:
             audio_path = self._download_audio(audio_url)
             if audio_path is None:
                 continue
+            transcript = None
             try:
-                # 本地 whisper (PyAV) 可直接解码 .m4s/.m4a, 免 ffmpeg 转码
-                try:
-                    text, segments = transcribe_local(
-                        audio_path, language="zh", model_size=model_size
-                    )
-                    provider = "faster_whisper"
-                    audio_path.unlink(missing_ok=True)
-                except ImportError:
-                    # 本地 whisper 未安装 → 转 mp3 走 DashScope 异步 (需公网 URL)
-                    mp3_path = self._transcode_to_mp3(audio_path)
-                    audio_path.unlink(missing_ok=True)
-                    if mp3_path is None:
-                        continue
-                    try:
-                        text, segments = self._transcribe_via_dashscope(mp3_path)
-                        provider = "dashscope_asr"
-                    finally:
-                        mp3_path.unlink(missing_ok=True)
-                if not text:
-                    continue
-                return ExtractResult(
-                    success=True,
-                    platform="bilibili",
-                    title=title or playurl.get("title", ""),
-                    content=text,
-                    source="bilibili_asr",
-                    url=url,
-                    cost_tier=CostTier.FREE,
-                    duration_seconds=float(duration or playurl.get("duration", 0)),
-                    language="zh",
-                    segments=segments,
-                    metadata={
-                        "bvid": bvid,
-                        "api_provider": provider,
-                        "model": model_size if provider == "faster_whisper" else "paraformer-v2",
-                    },
+                transcript = transcribe_with_chain(
+                    MediaRef(path=audio_path),
+                    TranscribeOptions(language="zh"),
                 )
-            except Exception:
+            except AsrChainError:
+                transcript = None
+            finally:
                 audio_path.unlink(missing_ok=True)
+
+            if transcript is None or not transcript.text:
                 continue
+
+            return transcript_to_extract_result(
+                transcript,
+                url=url,
+                platform="bilibili",
+                title=title or playurl.get("title", ""),
+                source="bilibili_asr",
+                cost_tier=CostTier.FREE,
+                duration_seconds=float(duration or playurl.get("duration", 0)),
+                metadata={"bvid": bvid},
+            )
         return None
-
-    def _transcribe_via_dashscope(
-        self, mp3_path: Path,
-    ) -> tuple[str, list[dict] | None]:
-        """DashScope 异步转写: 拷贝到媒体目录 → 公网 URL → 异步任务轮询。"""
-        dashscope_key = self._resolve_api_key("dashscope_key")
-        if not dashscope_key:
-            raise RuntimeError("dashscope_key 未配置")
-
-        media_dir = os.getenv("VMB_MEDIA_DIR", "")
-        public_url = os.getenv("VMB_PUBLIC_URL", "")
-        if not media_dir or not public_url:
-            raise RuntimeError("VMB_MEDIA_DIR/VMB_PUBLIC_URL 未配置")
-
-        dst = Path(media_dir) / f"bili_asr_{int(time.time() * 1000)}.mp3"
-        try:
-            shutil.copy2(mp3_path, dst)
-            return transcribe_audio_url(
-                f"{public_url.rstrip('/')}/media/{dst.name}", dashscope_key
-            )
-        finally:
-            dst.unlink(missing_ok=True)
-
-    @staticmethod
-    def _transcode_to_mp3(src: Path, timeout: float = 180.0) -> Path | None:
-        """ffmpeg 转码为 mp3 (DashScope 同步 ASR 不识别 .m4s 容器)"""
-        import shutil
-        import subprocess
-
-        ffmpeg = shutil.which("ffmpeg")
-        if ffmpeg is None:
-            # PATH 缺失时探测常见安装路径
-            for p in (
-                "/opt/homebrew/bin/ffmpeg",
-                "/usr/local/bin/ffmpeg",
-                "/usr/bin/ffmpeg",
-            ):
-                if Path(p).exists():
-                    ffmpeg = p
-                    break
-        if ffmpeg is None:
-            return None
-        dst = src.with_suffix(".mp3")
-        try:
-            proc = subprocess.run(
-                [ffmpeg, "-y", "-i", str(src), "-vn", "-acodec", "libmp3lame",
-                 "-b:a", "128k", str(dst)],
-                capture_output=True, text=True, timeout=timeout,
-            )
-            if proc.returncode != 0 or not dst.exists() or dst.stat().st_size < 1000:
-                dst.unlink(missing_ok=True)
-                return None
-            return dst
-        except Exception:
-            dst.unlink(missing_ok=True)
-            return None
 
     def _download_audio(self, audio_url: str, timeout: float = 300.0) -> Path | None:
         """下载音频直链到临时文件 (限 150MB 防御)。

@@ -1,8 +1,8 @@
-"""ASR 链路行为基线测试（阶段 0.1）
+"""ASR 链路行为基线测试（阶段 0.1 建立，阶段 1 迁移统一链后更新）
 
-锁定重构前 ytdlp_asr / B站 / TikHub 三条 ASR 路径的 source、content、
-segments、metadata 与降级语义。阶段 1 迁移到统一 Transcriber 端口后，
-这些断言应继续成立（允许新增字段，不允许丢字段或改语义）。
+锁定三个调用点的语义契约：source 命名、content/segments 映射、
+metadata 兼容键（api_provider/model）、失败时"落回页面/占位"的行为。
+阶段 1 允许新增字段（asr_provider 等），不允许丢字段或改降级语义。
 """
 
 from __future__ import annotations
@@ -12,10 +12,13 @@ from unittest import mock
 
 import pytest
 
+from src.core.asr import AsrChainError, Segment, Transcript
+from src.core.extractors import bilibili_extractor as bilibili_mod
+from src.core.extractors import tikhub_extractor as tikhub_mod
 from src.core.extractors import ytdlp_asr_extractor as ytdlp_mod
 from src.core.extractors.bilibili_extractor import BilibiliExtractor
 from src.core.extractors.tikhub_extractor import TikhubExtractor
-from src.core.models import CostTier, ExtractResult
+from src.core.models import CostTier
 
 
 @pytest.fixture(autouse=True)
@@ -37,7 +40,7 @@ def _long_text(prefix: str) -> str:
 
 
 # ============================================================
-# ytdlp_asr：本地 -> 阿里云 -> DashScope -> 占位
+# ytdlp_asr：本地 -> 云端 -> 占位（链由 src.core.asr 统一执行）
 # ============================================================
 
 def _make_ytdlp(monkeypatch: pytest.MonkeyPatch, audio_file: Path) -> ytdlp_mod.YtDlpASRExtractor:
@@ -52,74 +55,59 @@ def _make_ytdlp(monkeypatch: pytest.MonkeyPatch, audio_file: Path) -> ytdlp_mod.
     return ext
 
 
-def test_ytdlp_asr_local_success(monkeypatch, audio_file):
+def test_ytdlp_asr_local_source_and_mapping(monkeypatch, audio_file):
     ext = _make_ytdlp(monkeypatch, audio_file)
-    local_result = ExtractResult(
-        success=True,
-        platform="bilibili",
-        title="基线视频",
-        content=_long_text("本地转写"),
-        source="ytdlp_asr_local",
-        url="https://www.bilibili.com/video/BV1xx",
-        cost_tier=CostTier.CHEAP,
-        duration_seconds=120,
+    transcript = Transcript(
+        text=_long_text("本地转写"),
+        provider="faster-whisper",
+        model="base",
         language="zh",
-        segments=[{"start": 0.0, "end": 1.5, "text": "本地转写"}],
-        metadata={"asr_provider": "faster-whisper", "model": "base"},
+        segments=[Segment(start=0.0, end=1.5, text="本地转写")],
+        cost_tier=CostTier.CHEAP,
     )
-    monkeypatch.setattr(ext, "_transcribe_local", lambda *a, **k: local_result)
+    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", lambda media, options: transcript)
 
     result = ext.extract("https://www.bilibili.com/video/BV1xx")
 
-    assert result is local_result
     assert result.success is True
     assert result.source == "ytdlp_asr_local"
-    assert result.metadata["asr_provider"] == "faster-whisper"
-    assert result.metadata["model"] == "base"
+    assert result.content == transcript.text
+    assert result.language == "zh"
     assert result.segments == [{"start": 0.0, "end": 1.5, "text": "本地转写"}]
+    assert result.metadata["api_provider"] == "faster_whisper"
+    assert result.metadata["model"] == "base"
+    assert result.metadata["asr_provider"] == "faster-whisper"
+    assert result.metadata["platform_meta"]["title"] == "基线视频"
 
 
-def test_ytdlp_asr_falls_back_to_aliyun(monkeypatch, audio_file):
+def test_ytdlp_asr_aliyun_source_preserved(monkeypatch, audio_file):
     ext = _make_ytdlp(monkeypatch, audio_file)
-    monkeypatch.setattr(ext, "_transcribe_local", lambda *a, **k: None)
-
-    aliyun_result = ExtractResult(
-        success=True,
-        platform="unknown",
-        title="audio",
-        content=_long_text("阿里云转写"),
-        source="aliyun_asr",
-        url=str(audio_file),
-        cost_tier=CostTier.EXPENSIVE,
+    transcript = Transcript(
+        text=_long_text("阿里云转写"),
+        provider="aliyun",
+        model="paraformer-v2",
         language="zh",
-        segments=[{"start": 0.0, "end": 2.0, "text": "阿里云转写"}],
-        metadata={"api_provider": "aliyun_asr", "model": "paraformer-v2"},
+        segments=[Segment(start=0.0, end=2.0, text="阿里云转写")],
+        cost_tier=CostTier.EXPENSIVE,
     )
-    with (
-        mock.patch.object(ytdlp_mod.AliyunASRExtractor, "is_available", return_value=True),
-        mock.patch.object(
-            ytdlp_mod.AliyunASRExtractor,
-            "transcribe_audio",
-            return_value=aliyun_result,
-        ),
-    ):
-        result = ext.extract("https://www.bilibili.com/video/BV1xx")
+    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", lambda media, options: transcript)
 
-    assert result.success is True
+    result = ext.extract("https://www.bilibili.com/video/BV1xx")
+
     assert result.source == "aliyun_asr"
-    assert result.content == _long_text("阿里云转写")
-    assert result.url == "https://www.bilibili.com/video/BV1xx"
     assert result.metadata["api_provider"] == "aliyun_asr"
     assert result.metadata["model"] == "paraformer-v2"
 
 
-def test_ytdlp_asr_returns_placeholder_when_all_backends_unavailable(monkeypatch, audio_file):
+def test_ytdlp_asr_placeholder_when_chain_fails(monkeypatch, audio_file):
     ext = _make_ytdlp(monkeypatch, audio_file)
-    monkeypatch.setattr(ext, "_transcribe_local", lambda *a, **k: None)
-    monkeypatch.setattr(ext, "_resolve_api_key", lambda name: None)
 
-    with mock.patch.object(ytdlp_mod.AliyunASRExtractor, "is_available", return_value=False):
-        result = ext.extract("https://www.bilibili.com/video/BV1xx")
+    def _raise(*args, **kwargs):
+        raise AsrChainError([{"provider": "faster_whisper", "status": "unavailable"}])
+
+    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", _raise)
+
+    result = ext.extract("https://www.bilibili.com/video/BV1xx")
 
     assert result.success is True
     assert result.is_placeholder is True
@@ -129,7 +117,7 @@ def test_ytdlp_asr_returns_placeholder_when_all_backends_unavailable(monkeypatch
 
 
 # ============================================================
-# B站：本地 -> DashScope -> None（落回页面正文）
+# B站：链成功 → bilibili_asr；链失败 → None（落回页面正文）
 # ============================================================
 
 def _bili_playurl() -> dict:
@@ -142,18 +130,19 @@ def _bili_playurl() -> dict:
     }
 
 
-def test_bilibili_asr_local_success(audio_file):
+def test_bilibili_asr_source_and_mapping(audio_file):
     ext = BilibiliExtractor()
+    transcript = Transcript(
+        text=_long_text("B站本地转写"),
+        provider="faster-whisper",
+        model="base",
+        language="zh",
+        segments=[Segment(start=0.0, end=1.0, text="B站本地转写")],
+    )
     with (
         mock.patch.object(BilibiliExtractor, "get_playurl_audio_urls", return_value=_bili_playurl()),
         mock.patch.object(BilibiliExtractor, "_download_audio", return_value=audio_file),
-        mock.patch(
-            "src.core.extractors.bilibili_extractor.transcribe_local",
-            return_value=(
-                _long_text("B站本地转写"),
-                [{"start": 0.0, "end": 1.0, "text": "B站本地转写"}],
-            ),
-        ),
+        mock.patch.object(bilibili_mod, "transcribe_with_chain", return_value=transcript),
     ):
         result = ext._try_audio_asr_fallback(
             "https://www.bilibili.com/video/BV1xx", "BV1xx", "B站基线视频", 180
@@ -163,34 +152,24 @@ def test_bilibili_asr_local_success(audio_file):
     assert result.success is True
     assert result.source == "bilibili_asr"
     assert result.language == "zh"
-    assert result.metadata == {
-        "bvid": "BV1xx",
-        "api_provider": "faster_whisper",
-        "model": "base",
-    }
     assert result.segments == [{"start": 0.0, "end": 1.0, "text": "B站本地转写"}]
+    assert result.metadata["bvid"] == "BV1xx"
+    assert result.metadata["api_provider"] == "faster_whisper"
+    assert result.metadata["model"] == "base"
 
 
-def test_bilibili_falls_back_to_dashscope_on_import_error(audio_file, tmp_path):
+def test_bilibili_dashscope_maps_legacy_provider(audio_file):
     ext = BilibiliExtractor()
-    mp3_file = tmp_path / "audio.mp3"
-    mp3_file.write_bytes(b"x" * 2048)
+    transcript = Transcript(
+        text=_long_text("B站云端转写"),
+        provider="dashscope",
+        model="paraformer-v2",
+        language="zh",
+    )
     with (
         mock.patch.object(BilibiliExtractor, "get_playurl_audio_urls", return_value=_bili_playurl()),
         mock.patch.object(BilibiliExtractor, "_download_audio", return_value=audio_file),
-        mock.patch(
-            "src.core.extractors.bilibili_extractor.transcribe_local",
-            side_effect=ImportError("faster-whisper 未安装"),
-        ),
-        mock.patch.object(BilibiliExtractor, "_transcode_to_mp3", return_value=mp3_file),
-        mock.patch.object(
-            BilibiliExtractor,
-            "_transcribe_via_dashscope",
-            return_value=(
-                _long_text("B站云端转写"),
-                [{"start": 0.0, "end": 2.0, "text": "B站云端转写"}],
-            ),
-        ),
+        mock.patch.object(bilibili_mod, "transcribe_with_chain", return_value=transcript),
     ):
         result = ext._try_audio_asr_fallback(
             "https://www.bilibili.com/video/BV1xx", "BV1xx", "B站基线视频", 180
@@ -200,17 +179,17 @@ def test_bilibili_falls_back_to_dashscope_on_import_error(audio_file, tmp_path):
     assert result.source == "bilibili_asr"
     assert result.metadata["api_provider"] == "dashscope_asr"
     assert result.metadata["model"] == "paraformer-v2"
-    assert result.content == _long_text("B站云端转写")
 
 
-def test_bilibili_returns_none_when_asr_fails(audio_file):
+def test_bilibili_returns_none_when_chain_fails(audio_file):
     ext = BilibiliExtractor()
     with (
         mock.patch.object(BilibiliExtractor, "get_playurl_audio_urls", return_value=_bili_playurl()),
         mock.patch.object(BilibiliExtractor, "_download_audio", return_value=audio_file),
-        mock.patch(
-            "src.core.extractors.bilibili_extractor.transcribe_local",
-            side_effect=RuntimeError("model crashed"),
+        mock.patch.object(
+            bilibili_mod,
+            "transcribe_with_chain",
+            side_effect=AsrChainError([{"provider": "faster_whisper", "status": "asr_failed"}]),
         ),
     ):
         result = ext._try_audio_asr_fallback(
@@ -221,100 +200,42 @@ def test_bilibili_returns_none_when_asr_fails(audio_file):
 
 
 # ============================================================
-# TikHub：本地 -> DashScope -> 阿里云 -> 占位
+# TikHub：链成功 → tikhub_asr；链失败 → 占位
 # ============================================================
 
-def _tikhub_local_result(url: str) -> ExtractResult:
-    return ExtractResult(
-        success=True,
-        platform="douyin",
-        title="TikHub 基线视频",
-        content=_long_text("TikHub 本地转写"),
-        source="tikhub_asr",
-        url=url,
-        cost_tier=CostTier.PREMIUM,
-        duration_seconds=60,
-        language="zh",
-        segments=[{"start": 0.0, "end": 1.0, "text": "TikHub 本地转写"}],
-        metadata={"api_provider": "faster_whisper", "model": "base", "segments": 1},
-    )
-
-
-def test_tikhub_local_success(audio_file):
+def test_tikhub_asr_source_and_mapping(audio_file):
     ext = TikhubExtractor()
     url = "https://www.douyin.com/video/123"
-    local_result = _tikhub_local_result(url)
+    transcript = Transcript(
+        text=_long_text("TikHub 本地转写"),
+        provider="faster-whisper",
+        model="base",
+        language="zh",
+        segments=[Segment(start=0.0, end=1.0, text="TikHub 本地转写")],
+    )
     with (
         mock.patch.object(TikhubExtractor, "_download_audio", return_value=audio_file),
-        mock.patch.object(TikhubExtractor, "_transcribe_local", return_value=local_result),
+        mock.patch.object(tikhub_mod, "transcribe_with_chain", return_value=transcript),
     ):
         result = ext._try_download_and_transcribe("https://cdn.example/video.mp4", url, "douyin", "标题", 60)
 
-    assert result is local_result
+    assert result is not None
+    assert result.success is True
     assert result.source == "tikhub_asr"
+    assert result.segments == [{"start": 0.0, "end": 1.0, "text": "TikHub 本地转写"}]
     assert result.metadata["api_provider"] == "faster_whisper"
     assert result.metadata["model"] == "base"
 
 
-def test_tikhub_falls_back_to_dashscope(audio_file):
+def test_tikhub_placeholder_when_chain_fails(audio_file):
     ext = TikhubExtractor()
     url = "https://www.douyin.com/video/123"
-    failed_local = ExtractResult(
-        success=False,
-        platform="douyin",
-        title="标题",
-        content="",
-        source="tikhub_asr",
-        url=url,
-        cost_tier=CostTier.PREMIUM,
-        error="Whisper ASR 返回了空转录",
-    )
-    dashscope_result = ExtractResult(
-        success=True,
-        platform="douyin",
-        title="标题",
-        content=_long_text("TikHub 云端转写"),
-        source="tikhub_asr",
-        url=url,
-        cost_tier=CostTier.PREMIUM,
-        duration_seconds=60,
-        language="zh",
-        segments=[{"start": 0.0, "end": 1.0, "text": "TikHub 云端转写"}],
-        metadata={"api_provider": "dashscope_asr", "model": "paraformer-v2"},
-    )
     with (
         mock.patch.object(TikhubExtractor, "_download_audio", return_value=audio_file),
-        mock.patch.object(TikhubExtractor, "_transcribe_local", return_value=failed_local),
-        mock.patch.object(TikhubExtractor, "_resolve_api_key", return_value="test-key"),
-        mock.patch.object(TikhubExtractor, "_transcribe_with_dashscope", return_value=dashscope_result),
-    ):
-        result = ext._try_download_and_transcribe("https://cdn.example/video.mp4", url, "douyin", "标题", 60)
-
-    assert result is dashscope_result
-    assert result.source == "tikhub_asr"
-    assert result.metadata["api_provider"] == "dashscope_asr"
-
-
-def test_tikhub_returns_placeholder_when_all_asr_unavailable(audio_file):
-    ext = TikhubExtractor()
-    url = "https://www.douyin.com/video/123"
-    failed_local = ExtractResult(
-        success=False,
-        platform="douyin",
-        title="标题",
-        content="",
-        source="tikhub_asr",
-        url=url,
-        cost_tier=CostTier.PREMIUM,
-        error="faster-whisper 未安装",
-    )
-    with (
-        mock.patch.object(TikhubExtractor, "_download_audio", return_value=audio_file),
-        mock.patch.object(TikhubExtractor, "_transcribe_local", return_value=failed_local),
-        mock.patch.object(TikhubExtractor, "_resolve_api_key", return_value=None),
-        mock.patch(
-            "src.core.extractors.aliyun_asr_extractor.AliyunASRExtractor.is_available",
-            return_value=False,
+        mock.patch.object(
+            tikhub_mod,
+            "transcribe_with_chain",
+            side_effect=AsrChainError([{"provider": "faster_whisper", "status": "unavailable"}]),
         ),
     ):
         result = ext._try_download_and_transcribe("https://cdn.example/video.mp4", url, "douyin", "标题", 60)

@@ -13,7 +13,6 @@ ASR 不可用时返回元数据+下载链接。
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import tempfile
@@ -21,10 +20,15 @@ from pathlib import Path
 
 import httpx
 
+from ..asr import (
+    AsrChainError,
+    MediaRef,
+    TranscribeOptions,
+    transcribe_with_chain,
+    transcript_to_extract_result,
+)
 from ..models import CostTier, ExtractResult
 from . import register_extractor
-from ._dashscope_asr import transcribe_audio_data
-from ._whisper_asr import transcribe_local as shared_transcribe_local
 from .base import ContentExtractor
 
 TIKHUB_API_BASE = "https://api.tikhub.io"
@@ -225,26 +229,25 @@ class TikhubExtractor(ContentExtractor):
             if not audio_path or audio_path.stat().st_size < 1000:
                 return None
 
-            result = self._transcribe_local(audio_path, url, platform, title, duration)
-            if result.success and result.content:
-                return result
+            transcript = None
+            try:
+                transcript = transcribe_with_chain(
+                    MediaRef(path=audio_path),
+                    TranscribeOptions(language="zh"),
+                )
+            except AsrChainError:
+                transcript = None
 
-            dashscope_key = self._resolve_api_key("dashscope_key")
-            if dashscope_key:
-                result = self._transcribe_with_dashscope(audio_path, dashscope_key, url, platform, title, duration)
-                if result.success and result.content:
-                    return result
-
-            from .aliyun_asr_extractor import AliyunASRExtractor
-            asr = AliyunASRExtractor()
-            if asr.is_available():
-                result = asr.transcribe_audio(audio_path)
-                result.url = url
-                result.platform = platform
-                if not result.title or result.title == audio_path.stem:
-                    result.title = title or audio_path.stem
-                result.source = "tikhub_asr"
-                return result
+            if transcript is not None and transcript.text:
+                return transcript_to_extract_result(
+                    transcript,
+                    url=url,
+                    platform=platform,
+                    title=title or audio_path.stem,
+                    source="tikhub_asr",
+                    cost_tier=self._cost_tier,
+                    duration_seconds=duration,
+                )
 
             return ExtractResult(
                 success=True,
@@ -262,79 +265,6 @@ class TikhubExtractor(ContentExtractor):
                     "api_provider": "tikhub.io",
                 },
                 error="音频已下载但无可用 ASR 转写",
-            )
-
-    def _transcribe_local(self, audio_path: Path, url: str, platform: str, title: str, duration: float) -> ExtractResult:
-        try:
-            model_size = os.getenv("VMB_WHISPER_MODEL", "base")
-            text, segments = shared_transcribe_local(
-                audio_path, language="zh", model_size=model_size
-            )
-            segment_list = segments or []
-
-            if not text:
-                return ExtractResult(
-                    success=False, platform=platform, title=title, content="",
-                    source="tikhub_asr", url=url, cost_tier=self._cost_tier,
-                    error="Whisper ASR 返回了空转录",
-                )
-
-            return ExtractResult(
-                success=True, platform=platform,
-                title=title or audio_path.stem,
-                content=text,
-                source="tikhub_asr", url=url,
-                cost_tier=self._cost_tier,
-                duration_seconds=duration or (segment_list[-1]["end"] if segment_list else 0),
-                language="zh",
-                segments=segment_list,
-                metadata={
-                    "api_provider": "faster_whisper",
-                    "model": model_size,
-                    "segments": len(segment_list),
-                },
-            )
-        except ImportError:
-            return ExtractResult(
-                success=False, platform=platform, title=title, content="",
-                source="tikhub_asr", url=url, cost_tier=self._cost_tier,
-                error="faster-whisper 未安装",
-            )
-        except Exception as e:
-            return ExtractResult(
-                success=False, platform=platform, title=title, content="",
-                source="tikhub_asr", url=url, cost_tier=self._cost_tier,
-                error=f"Whisper ASR 失败: {e}",
-            )
-
-    def _transcribe_with_dashscope(
-        self, audio_path: Path, api_key: str, url: str,
-        platform: str, title: str, duration: float,
-    ) -> ExtractResult:
-        try:
-            text, segments = transcribe_audio_data(audio_path, api_key)
-
-            return ExtractResult(
-                success=bool(text),
-                platform=platform,
-                title=title or audio_path.stem,
-                content=text or "DashScope ASR 返回了空转录",
-                source="tikhub_asr",
-                url=url,
-                cost_tier=self._cost_tier,
-                duration_seconds=duration,
-                language="zh",
-                segments=segments,
-                metadata={"api_provider": "dashscope_asr", "model": "paraformer-v2"},
-            )
-        except Exception as e:
-            return ExtractResult(
-                success=False,
-                platform=platform, title=title or "TikHub 提取",
-                content="",
-                source="tikhub_asr", url=url, cost_tier=self._cost_tier,
-                duration_seconds=duration,
-                error=f"DashScope ASR 调用失败: {e}",
             )
 
     def _download_audio(self, url: str, tmp_dir: Path) -> Path | None:

@@ -28,15 +28,18 @@ import re
 import shutil
 import subprocess
 import tempfile
-import time
 from pathlib import Path
 from typing import Any
 
+from ..asr import (
+    AsrChainError,
+    MediaRef,
+    TranscribeOptions,
+    transcribe_with_chain,
+    transcript_to_extract_result,
+)
 from ..models import CostTier, ExtractResult
 from . import register_extractor
-from ._dashscope_asr import transcribe_audio_data
-from ._whisper_asr import transcribe_local
-from .aliyun_asr_extractor import AliyunASRExtractor
 from .base import ContentExtractor
 
 logger = logging.getLogger(__name__)
@@ -100,17 +103,10 @@ class YtDlpASRExtractor(ContentExtractor):
     )
 
     def __init__(self) -> None:
-        self._asr: AliyunASRExtractor | None = None
         self._ytdlp: str | None = None
         self._ffmpeg: str | None = None
         self._available: bool | None = None
         self._cookies_browser = os.getenv("VMB_COOKIES_BROWSER", "").strip()
-
-    def _get_aliyun_asr(self) -> AliyunASRExtractor:
-        """懒加载阿里云 ASR，避免每次构造提取器都访问密钥配置。"""
-        if self._asr is None:
-            self._asr = AliyunASRExtractor()
-        return self._asr
 
     def is_available(self) -> bool:
         """yt-dlp 可执行即可用 (本地 whisper 免费零 key, 不依赖云凭证)"""
@@ -144,45 +140,42 @@ class YtDlpASRExtractor(ContentExtractor):
             title = metadata.get("title", audio_path.stem)
             duration = float(metadata.get("duration", 0))
 
-            result: ExtractResult | None = None
+            # ── ASR 降级链: 本地 faster-whisper → 阿里云 → DashScope ────────
+            try:
+                transcript = transcribe_with_chain(
+                    MediaRef(path=audio_path),
+                    TranscribeOptions(language=os.getenv("VMB_ASR_LANGUAGE", "") or None),
+                )
+            except AsrChainError as chain_err:
+                logger.warning(f"ytdlp_asr 全链路失败: {chain_err}")
+                transcript = None
 
-            # ── ASR 链路 A: 本地 faster-whisper (默认, 零 key) ──────────────
-            result = self._transcribe_local(audio_path, url, platform, title, duration)
-            if result and result.success:
-                return result
-
-            # ── ASR 链路 B/C: 云 ASR 仅作可选增强 (已配置时) ───────────────
-            aliyun_asr = self._get_aliyun_asr()
-            if aliyun_asr.is_available():
-                result = aliyun_asr.transcribe_audio(audio_path)
-            else:
-                dashscope_key = self._resolve_api_key("dashscope_key")
-                if dashscope_key:
-                    result = self._transcribe_dashscope(
-                        audio_path, dashscope_key, url,
-                        platform, title, duration,
-                    )
+            if transcript is not None:
+                if transcript.provider == "faster-whisper":
+                    source = "ytdlp_asr_local"
+                elif transcript.provider == "aliyun":
+                    source = "aliyun_asr"
                 else:
-                    result = None
-
-            if result and result.success:
-                result.url = url
-                if not result.title or result.title == audio_path.stem:
-                    result.title = title
-                return result
-
-            if result and result.error:
-                logger.warning(f"ytdlp_asr 云转写失败: {result.error}")
+                    source = "ytdlp_asr"
+                return transcript_to_extract_result(
+                    transcript,
+                    url=url,
+                    platform=platform,
+                    title=title or audio_path.stem,
+                    source=source,
+                    cost_tier=CostTier.CHEAP,
+                    duration_seconds=duration,
+                    metadata={"platform_meta": metadata},
+                )
 
             # ── 全部 ASR 不可用: 占位结果 ─────────────────────────────────
-            whisper_hint = "本地 faster-whisper 未安装" if not self._whisper_importable() else "本地转写返回空"
             return ExtractResult(
                 success=True,
                 platform=platform,
                 title=title,
                 content=(
                     "[yt-dlp+ASR] 已下载音频但 ASR 全链路不可用\n"
-                    f"原因: {whisper_hint}; 可选: 安装 faster-whisper (pip install faster-whisper), "
+                    "可选: 安装 faster-whisper (pip install faster-whisper), "
                     "或配置 ALIYUN_ACCESS_KEY_ID/SECRET/APPKEY 或 dashscope_key\n"
                 ),
                 source="ytdlp_asr",
@@ -195,87 +188,6 @@ class YtDlpASRExtractor(ContentExtractor):
                     "asr_available": False,
                     "platform_meta": metadata,
                 },
-            )
-
-    # ─────────────────────────── ASR 实现 ───────────────────────────
-
-    def _transcribe_local(
-        self, audio_path: Path, url: str, platform: str, title: str, duration: float,
-    ) -> ExtractResult | None:
-        """本地 faster-whisper 转写 (零成本, 主链路)。
-
-        失败/未安装时返回 None (不抛异常), 由调用方继续降级。
-        """
-        try:
-            model_size = os.getenv("VMB_WHISPER_MODEL", "base")
-            language = os.getenv("VMB_ASR_LANGUAGE", "") or None
-            started = time.time()
-            text, segments = transcribe_local(audio_path, language=language, model_size=model_size)
-            elapsed = round(time.time() - started, 1)
-            if not text:
-                logger.warning(f"本地 whisper 返回空转录: {audio_path.name}")
-                return None
-            logger.info(f"✓ 本地 faster-whisper 转写完成 ({elapsed}s, model={model_size})")
-            return ExtractResult(
-                success=True,
-                platform=platform,
-                title=title or audio_path.stem,
-                content=text,
-                source="ytdlp_asr_local",
-                url=url,
-                cost_tier=CostTier.CHEAP,
-                duration_seconds=duration,
-                language=language or "auto",
-                segments=segments,
-                metadata={"asr_provider": "faster-whisper", "model": model_size},
-            )
-        except ImportError:
-            logger.warning("faster-whisper 未安装, 跳过本地 ASR")
-            return None
-        except Exception as e:
-            logger.warning(f"本地 faster-whisper 转写失败: {e}")
-            return None
-
-    @staticmethod
-    def _whisper_importable() -> bool:
-        try:
-            import faster_whisper  # noqa: F401
-            return True
-        except ImportError:
-            return False
-
-    def _transcribe_dashscope(
-        self, audio_path: Path, api_key: str, url: str,
-        platform: str, title: str, duration: float,
-    ) -> ExtractResult:
-        """DashScope paraformer-v2 转写 (复用 dashscope_key, 免额外配置)"""
-        try:
-            text, segments = transcribe_audio_data(audio_path, api_key)
-
-            return ExtractResult(
-                success=bool(text),
-                platform=platform,
-                title=title or audio_path.stem,
-                content=text or "DashScope ASR 返回了空转录",
-                source="ytdlp_asr",
-                url=url,
-                cost_tier=self._cost_tier,
-                duration_seconds=duration,
-                language="zh",
-                segments=segments,
-                metadata={"api_provider": "dashscope_asr", "model": "paraformer-v2"},
-            )
-        except Exception as e:
-            return ExtractResult(
-                success=False,
-                platform=platform,
-                title=title or audio_path.stem,
-                content="",
-                source="ytdlp_asr",
-                url=url,
-                cost_tier=self._cost_tier,
-                duration_seconds=duration,
-                error=f"DashScope ASR 调用失败: {e}",
             )
 
     # ─────────────────────────── 下载/元信息 ───────────────────────────

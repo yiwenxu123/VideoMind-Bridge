@@ -19,7 +19,6 @@ from src.core.extractors import (
     list_extractors,
     register_extractor,
 )
-from src.core.extractors.aliyun_asr_extractor import AliyunASRExtractor
 from src.core.extractors.apify_extractor import ApifyExtractor, _detect_apify_platform
 from src.core.extractors.base import ContentExtractor
 from src.core.extractors.bilibili_extractor import BilibiliExtractor
@@ -723,103 +722,6 @@ def test_apify_detect_apify_platform_b23():
     assert _detect_apify_platform("https://iesdouyin.com/share/video/123") == "douyin"
     assert _detect_apify_platform("https://youtu.be/xxx") == "youtube"
     assert _detect_apify_platform("https://xhslink.com/abc") == "xiaohongshu"
-
-
-# ============================================================
-# Aliyun ASR Extractor
-# ============================================================
-
-def _make_aliyun_extractor():
-    ext = AliyunASRExtractor.__new__(AliyunASRExtractor)
-    ext._access_key = ""
-    ext._access_secret = ""
-    ext._appkey = ""
-    ext._client = mock.MagicMock()
-    ext.url_pattern = AliyunASRExtractor.url_pattern
-    ext._cost_tier = AliyunASRExtractor._cost_tier
-    return ext
-
-
-def test_aliyun_supports_http():
-    ext = _make_aliyun_extractor()
-    assert ext.supports("http://example.com/video.mp4")
-
-
-def test_aliyun_supports_https():
-    ext = _make_aliyun_extractor()
-    assert ext.supports("https://example.com/video.mp4")
-
-
-def test_aliyun_supports_invalid():
-    ext = _make_aliyun_extractor()
-    assert not ext.supports("ftp://example.com")
-
-
-def test_aliyun_supports_empty_string():
-    ext = _make_aliyun_extractor()
-    assert not ext.supports("")
-
-
-def test_aliyun_is_available_with_keys():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key", return_value="test-key"):
-        ext = AliyunASRExtractor()
-        assert ext.is_available() is True
-
-
-def test_aliyun_is_available_without_keys():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key", return_value=None):
-        ext = AliyunASRExtractor()
-        assert ext.is_available() is False
-
-
-def test_aliyun_is_available_partial_keys():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key") as mock_resolve:
-        mock_resolve.side_effect = ["test-id", "", "test-app"]
-        ext = AliyunASRExtractor()
-        assert ext.is_available() is False
-
-
-def test_aliyun_is_available_one_key_missing():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key") as mock_resolve:
-        mock_resolve.side_effect = ["test-id", "test-secret", ""]
-        ext = AliyunASRExtractor()
-        assert ext.is_available() is False
-
-
-def test_aliyun_cost_tier():
-    assert AliyunASRExtractor._cost_tier == CostTier.EXPENSIVE
-
-
-def test_aliyun_platform_name():
-    assert AliyunASRExtractor.platform_name == "aliyun_asr"
-
-
-def test_aliyun_should_try_delegates_to_super():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key", return_value="test-key"):
-        ext = AliyunASRExtractor()
-        assert ext.should_try("https://example.com/video", CostTier.FREE) is False
-        assert ext.should_try("https://example.com/video", CostTier.CHEAP) is False
-        assert ext.should_try("https://example.com/video", CostTier.PAID) is False
-        assert ext.should_try("https://example.com/video", CostTier.EXPENSIVE) is True
-        assert ext.should_try("https://example.com/video", CostTier.PREMIUM) is True
-
-
-def test_aliyun_should_try_not_available():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key", return_value=None):
-        ext = AliyunASRExtractor()
-        assert ext.should_try("https://example.com/video") is False
-
-
-def test_aliyun_should_try_not_supported():
-    with mock.patch.object(AliyunASRExtractor, "_resolve_api_key", return_value="test-key"):
-        ext = AliyunASRExtractor()
-        assert ext.should_try("ftp://example.com") is False
-
-
-def test_aliyun_url_pattern_generic():
-    assert AliyunASRExtractor.url_pattern.search("http://a.com")
-    assert AliyunASRExtractor.url_pattern.search("https://bilibili.com/video/BV1xx")
-    assert not AliyunASRExtractor.url_pattern.search("ftp://a.com")
 
 
 # ============================================================
