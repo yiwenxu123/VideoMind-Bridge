@@ -1,0 +1,50 @@
+services:
+  videomind:
+    build:
+      context: .
+      args:
+        # 需要本地 SenseVoice 时设为 sensevoice（模型目录仍需挂载）
+        PIP_EXTRAS: ${PIP_EXTRAS:-}
+        # 国内网络可设 https://pypi.tuna.tsinghua.edu.cn/simple
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    image: videomind-gateway:local
+    init: true
+    restart: unless-stopped
+    ports:
+      # 默认只绑本机；远程消费者请设 VMB_BIND_ADDR=0.0.0.0
+      - "${VMB_BIND_ADDR:-127.0.0.1}:8787:8787"
+    environment:
+      VIDEOMIND_API_TOKEN: ${VIDEOMIND_API_TOKEN:-}
+      VMB_CONSUMER_TOKENS: ${VMB_CONSUMER_TOKENS:-}
+      VMB_RATE_LIMIT_PER_MIN: ${VMB_RATE_LIMIT_PER_MIN:-0}
+      VMB_ASR_CHAIN: ${VMB_ASR_CHAIN:-faster_whisper,sensevoice}
+      VMB_WHISPER_MODEL: ${VMB_WHISPER_MODEL:-base}
+      VMB_MEDIA_DIR: /data/media
+      # DashScope 需要公网可访问地址；本地/内网部署可留空
+      VMB_PUBLIC_URL: ${VMB_PUBLIC_URL:-}
+      VMB_SENSEVOICE_PYTHON: ${VMB_SENSEVOICE_PYTHON:-}
+      VMB_SENSEVOICE_MODEL_DIR: /models/sense-voice
+      VMB_COOKIES_FILE: ${VMB_COOKIES_FILE:-}
+    volumes:
+      - vmb-config:/home/videomind/.config/VideoMind
+      - vmb-cache:/home/videomind/.cache
+      - vmb-taskdata:/app/data
+      - vmb-output:/home/videomind/Downloads/VideoMind
+      - vmb-data:/data
+      - ${SENSEVOICE_MODEL_DIR:-./models/sense-voice}:/models/sense-voice:ro
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8787/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 20s
+
+volumes:
+  vmb-config:
+  vmb-cache:
+  vmb-taskdata:
+  vmb-output:
+  vmb-data:

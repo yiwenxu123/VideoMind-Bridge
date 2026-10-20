@@ -415,14 +415,14 @@ class TestSecurity:
 
     def test_token_required_when_configured(self, server):
         """配置 token 后, /api/v1 未携带 token 应 401"""
-        server._api_token = "test-secret-token"
+        server._auth.admin_token = "test-secret-token"
         with TestClient(server.app) as c:
             resp = c.get("/api/v1/status")
             assert resp.status_code == 401
 
     def test_token_authorized_when_configured(self, server):
         """配置 token 后, 携带正确 Bearer token 应通过"""
-        server._api_token = "test-secret-token"
+        server._auth.admin_token = "test-secret-token"
         with TestClient(server.app) as c:
             resp = c.get(
                 "/api/v1/status",
@@ -432,7 +432,7 @@ class TestSecurity:
 
     def test_token_wrong_token_rejected(self, server):
         """配置 token 后, 错误 token 应 401"""
-        server._api_token = "test-secret-token"
+        server._auth.admin_token = "test-secret-token"
         with TestClient(server.app) as c:
             resp = c.get(
                 "/api/v1/status",
@@ -442,7 +442,7 @@ class TestSecurity:
 
     def test_health_endpoint_no_auth_required(self, server):
         """配置 token 后, /health 仍应免鉴权"""
-        server._api_token = "test-secret-token"
+        server._auth.admin_token = "test-secret-token"
         with TestClient(server.app) as c:
             resp = c.get("/health")
             assert resp.status_code == 200

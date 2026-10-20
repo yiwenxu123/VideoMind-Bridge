@@ -2,7 +2,11 @@
 
 import sys
 
-from PySide6.QtWidgets import QApplication
+import pytest
+
+pytest.importorskip("PySide6", reason="GUI 测试需要安装 gui extra: uv sync --extra gui")
+
+from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
 def test_url_extraction():

@@ -1,7 +1,7 @@
 """SenseVoice 适配器（子进程模式，阶段 1）
 
 不在 VMB 基础依赖里塞 sherpa-onnx：用外部解释器调用
-scripts/sensevoice_transcribe.py，契约与内容运营agent 已验证的路径一致——
+src/core/asr/scripts/sensevoice_transcribe.py，契约与内容运营agent 已验证的路径一致——
 stdout 最后一行 JSON {"text": ...}，诊断走 stderr，exit 非 0 即失败。
 
 输入需 16k 单声道 wav；非 wav 输入会先用 ffmpeg 转码（SenseVoice 输入规格）。
@@ -29,8 +29,7 @@ from ..types import (
     Transcript,
 )
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-DEFAULT_SCRIPT = _REPO_ROOT / "scripts" / "sensevoice_transcribe.py"
+DEFAULT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "sensevoice_transcribe.py"
 DEFAULT_MODEL_DIR = Path.home() / ".cache" / "sherpa-onnx" / "sense-voice"
 DEFAULT_PYTHON = Path.home() / ".cache" / "sensevoice" / "venv" / "bin" / "python"
 ALT_PYTHON = Path.home() / ".cache" / "sherpa-onnx" / "venv" / "bin" / "python"

@@ -28,7 +28,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
-          pip install -e ".[dev]"
+          pip install -e ".[dev,gui]"
       
       - name: Install ffmpeg
         run: brew install ffmpeg
@@ -74,7 +74,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller
-          pip install -e ".[dev]"
+          pip install -e ".[dev,gui]"
       
       - name: Build exe
         run: |

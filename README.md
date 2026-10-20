@@ -42,11 +42,24 @@ git clone <repository-url>
 cd VideoMindBridge
 
 # 使用 uv 安装依赖（推荐）
-uv sync
+uv sync                 # 服务端 / CLI / MCP（轻装，不含 GUI）
+uv sync --extra gui     # 需要桌面 GUI 时追加
+uv sync --extra dev     # 开发（ruff/mypy/pytest）
 
 # 或使用 pip
-pip install -r requirements.txt
+pip install .
+pip install ".[gui]"    # 需要桌面 GUI 时追加
 ```
+
+### Docker 部署（服务端）
+
+```bash
+docker compose up -d --build
+curl http://127.0.0.1:8787/health
+```
+
+默认只绑定 `127.0.0.1:8787`；远程消费者请设置 `VMB_BIND_ADDR=0.0.0.0`，
+并按需配置 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS` / `VMB_RATE_LIMIT_PER_MIN`。
 
 ## 使用
 
@@ -96,6 +109,9 @@ MCP 工具列表:
 #### GUI 模式
 
 ```bash
+# GUI 依赖是可选的，先安装 gui extra
+uv sync --extra gui     # 或 pip install -e ".[gui]"
+
 python main.py
 # 或
 .venv/bin/python3 -m src.gui.app
@@ -217,6 +233,9 @@ src/
 ```bash
 # 安装测试依赖
 pip install -e ".[dev]"
+
+# GUI 测试还需要 PySide6
+pip install -e ".[dev,gui]"
 
 # 运行所有测试
 pytest tests/ -v

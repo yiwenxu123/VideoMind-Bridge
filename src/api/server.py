@@ -222,8 +222,12 @@ class APIServer:
         self.host = host or self.DEFAULT_HOST
         self.port = port or self.DEFAULT_PORT
 
-        # 可选鉴权 token: 设置 VIDEOMIND_API_TOKEN 后 /api/v1 需携带 Bearer token
-        self._api_token = os.environ.get("VIDEOMIND_API_TOKEN", "")
+        # 可选鉴权：admin token + 多消费者 token；未配置时保持本地无鉴权模式
+        from .auth import AuthConfig, RateLimiter
+
+        self._auth = AuthConfig.from_env()
+        self._rate_limiter = RateLimiter(self._auth.rate_limit_per_min)
+        self._api_token = self._auth.admin_token
 
         # 任务管理器
         self.task_manager = TaskManager()
@@ -284,11 +288,20 @@ class APIServer:
                 logger.warning(f"请求被拒绝，非法 Origin: {origin} {request.url.path}")
                 return JSONResponse(status_code=403, content={"detail": "非法 Origin"})
 
-            # 鉴权: 配置了 token 时, /api/v1 需携带 Bearer token
-            if self._api_token and request.url.path.startswith("/api/v1") and request.method != "OPTIONS":
-                auth = request.headers.get("authorization", "")
-                if auth != f"Bearer {self._api_token}":
+            # 鉴权: 配置了 admin/消费者 token 时, /api/v1 需携带 Bearer token
+            if self._auth.enabled and request.url.path.startswith("/api/v1") and request.method != "OPTIONS":
+                consumer = self._auth.authenticate(request.headers.get("authorization", ""))
+                if consumer is None:
                     return JSONResponse(status_code=401, content={"detail": "未授权"})
+                request.state.consumer = consumer
+
+                allowed, retry_after = self._rate_limiter.allow(consumer)
+                if not allowed:
+                    return JSONResponse(
+                        status_code=429,
+                        content={"detail": "请求过于频繁", "consumer": consumer},
+                        headers={"Retry-After": str(max(1, int(retry_after) + 1))},
+                    )
 
             response = await call_next(request)
 

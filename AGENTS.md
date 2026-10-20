@@ -8,7 +8,8 @@ Python 3.11+ monorepo。uv 驱动。
 ## Quick Start
 
 ```bash
-uv sync --extra dev             # 安装依赖（含 dev: ruff/mypy/pytest）
+uv sync --extra dev             # 服务端/CLI/MCP 依赖（含 dev: ruff/mypy/pytest）
+uv sync --extra dev --extra gui # 需要桌面 GUI 时追加 PySide6
 uv run python -m src.cli <url>  # CLI 模式
 python main.py                  # GUI 模式
 python main.py --api            # API 服务 (端口 8787)
@@ -106,11 +107,11 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **占位结果语义**: `ExtractResult.is_placeholder=True` 表示仅元信息/说明文本（无真实内容）。router 对占位结果不缓存、继续降级链；真正成功才缓存并返回
 - **`--smart`/MCP smart_extract**: FREE 提取到完整内容时直接复用（不二次提取）；仅当 FREE 失败/占位时才按推荐成本升级提取
 - **`--prescreen` 复用提取**: 仅真成功（有内容、非占位）结果被复用；失败/占位时允许二次高成本提取
-- **API 鉴权**: 默认绑定 127.0.0.1。设置环境变量 `VIDEOMIND_API_TOKEN` 后，`/api/v1/*` 需携带 `Authorization: Bearer <token>`；带非白名单 Origin 的浏览器请求被 403 拒绝（防 CSRF）
-- **GUI 使用 PySide6**: 依赖较重，macOS 需提前安装 Qt 运行时
+- **API 鉴权**: 默认绑定 127.0.0.1。设置 `VIDEOMIND_API_TOKEN`（admin）或 `VMB_CONSUMER_TOKENS`（JSON 多消费者）后，`/api/v1/*` 需携带 `Authorization: Bearer <token>`；`VMB_RATE_LIMIT_PER_MIN` 可开启每消费者每分钟限流（0=关闭）。带非白名单 Origin 的浏览器请求被 403 拒绝（防 CSRF）
+- **GUI 使用 PySide6**: 已移到 `gui` extra；服务端/CLI/MCP 不需要安装，GUI 测试在缺依赖时自动跳过
 - **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)
-- **v2 引擎完全独立**: 不依赖 `src/services/` 中的任何模块，可单独导入 `from src.core import ContentRouter`
+- **v2 引擎可独立导入**: `from src.core import ContentRouter` 不依赖 GUI；ASR 适配器在需要时通过 `src/services/config_manager` 读取密钥
 
 ## Testing
 
@@ -133,8 +134,10 @@ pytest tests/ --cov=src --cov-report=term       # 覆盖率
 ## Build & Release
 
 ```
-uv sync --extra dev             # 开发安装（含 dev 依赖）
+uv sync --extra dev             # 开发安装（服务端，不含 GUI）
+uv sync --extra dev --extra gui # 开发安装（含 GUI）
 pip install -e ".[dev]"         # 含 dev 依赖
+pip install -e ".[dev,gui]"     # 含 dev + GUI 依赖
 pyinstaller videomind.spec      # macOS 应用打包
 ```
 

@@ -31,6 +31,10 @@ fi
 
 # 安装 PyInstaller
 echo -e "\n📦 安装打包工具..."
+python3 -c "import PySide6" 2>/dev/null || {
+    echo -e "${RED}缺少 PySide6，请先安装 GUI 依赖: pip install -e \".[gui]\"${NC}"
+    exit 1
+}
 pip install pyinstaller pillow -q
 
 # 创建资源目录

@@ -27,7 +27,6 @@ dependencies = [
     "rich>=13.0.0",
     "jinja2>=3.1.0",
     "pyyaml>=6.0.1",
-    "pyside6>=6.10.1",
     "keyring>=25.7.0",
     "fastapi>=0.104.0",
     "uvicorn[standard]>=0.24.0",
@@ -35,6 +34,17 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+gui = [
+    "pyside6>=6.10.1",
+]
+bench = [
+    "jiwer>=3.0.0",
+    "psutil>=5.9.0",
+]
+sensevoice = [
+    "sherpa-onnx>=1.13.8",
+    "soundfile>=0.12.1",
+]
 dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
@@ -46,7 +56,7 @@ dev = [
 ]
 
 [project.scripts]
-videomind = "main:main"
+videomind = "src.cli:main"
 
 [build-system]
 requires = ["hatchling"]

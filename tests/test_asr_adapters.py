@@ -75,6 +75,18 @@ def test_dashscope_unavailable_without_key(monkeypatch, audio):
         backend.transcribe(MediaRef(path=audio), TranscribeOptions())
 
 
+def test_dashscope_requires_public_url(monkeypatch):
+    monkeypatch.setattr(dashscope_mod, "resolve_extractor_key", lambda name: "test-key")
+    monkeypatch.delenv("VMB_MEDIA_DIR", raising=False)
+    monkeypatch.delenv("VMB_PUBLIC_URL", raising=False)
+    backend = dashscope_mod.DashScopeTranscriber()
+    assert backend.capabilities().available is False
+
+    monkeypatch.setenv("VMB_MEDIA_DIR", "/tmp/media")
+    monkeypatch.setenv("VMB_PUBLIC_URL", "https://example.com")
+    assert backend.capabilities().available is True
+
+
 def test_dashscope_maps_result(monkeypatch, tmp_path):
     mp3 = tmp_path / "audio.mp3"
     mp3.write_bytes(b"x" * 2048)
@@ -158,6 +170,12 @@ def test_sensevoice_unavailable_when_script_missing(monkeypatch):
     caps = sv_mod.SenseVoiceTranscriber().capabilities()
     assert caps.available is False
     assert "脚本缺失" in caps.notes
+
+
+def test_sensevoice_default_script_is_packaged():
+    """脚本必须位于 src 包内，wheel 安装后仍可被适配器找到。"""
+    assert sv_mod.DEFAULT_SCRIPT.is_file()
+    assert "src/core/asr/scripts" in str(sv_mod.DEFAULT_SCRIPT)
 
 
 def test_sensevoice_parses_last_json_line(monkeypatch, tmp_path):

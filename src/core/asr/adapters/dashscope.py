@@ -151,15 +151,20 @@ class DashScopeTranscriber(Transcriber):
         return key.strip() if key and key.strip() else ""
 
     def capabilities(self) -> Capabilities:
+        key_ready = bool(self._api_key())
+        public_url_ready = bool(
+            os.getenv("VMB_MEDIA_DIR", "").strip()
+            and os.getenv("VMB_PUBLIC_URL", "").strip()
+        )
         return Capabilities(
             name=self.name,
-            available=bool(self._api_key()),
+            available=key_ready and public_url_ready,
             languages=["zh"],
             timestamps=True,
             requires_public_url=True,
             cost_tier=CostTier.PAID,
             model=DASHSCOPE_ASR_MODEL,
-            notes="需要 VMB_MEDIA_DIR + VMB_PUBLIC_URL 暴露公网音频；.m4s 自动转 mp3",
+            notes="需要 dashscope_key + VMB_MEDIA_DIR + VMB_PUBLIC_URL；.m4s 自动转 mp3",
         )
 
     def transcribe(self, media: MediaRef, options: TranscribeOptions) -> Transcript:
