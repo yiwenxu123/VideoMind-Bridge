@@ -5,6 +5,7 @@
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager, suppress
 from typing import Any
 from uuid import UUID, uuid4
@@ -276,6 +277,8 @@ class APIServer:
 
         @app.middleware("http")
         async def security_middleware(request, call_next):
+            started = time.perf_counter()
+            consumer = None
             origin = request.headers.get("origin", "")
 
             is_allowed = (
@@ -292,11 +295,21 @@ class APIServer:
             if self._auth.enabled and request.url.path.startswith("/api/v1") and request.method != "OPTIONS":
                 consumer = self._auth.authenticate(request.headers.get("authorization", ""))
                 if consumer is None:
+                    logger.info(
+                        f"api_access consumer=anonymous method={request.method} "
+                        f"path={request.url.path} status=401 "
+                        f"duration_ms={round((time.perf_counter() - started) * 1000, 1)}"
+                    )
                     return JSONResponse(status_code=401, content={"detail": "未授权"})
                 request.state.consumer = consumer
 
                 allowed, retry_after = self._rate_limiter.allow(consumer)
                 if not allowed:
+                    logger.info(
+                        f"api_access consumer={consumer} method={request.method} "
+                        f"path={request.url.path} status=429 "
+                        f"duration_ms={round((time.perf_counter() - started) * 1000, 1)}"
+                    )
                     return JSONResponse(
                         status_code=429,
                         content={"detail": "请求过于频繁", "consumer": consumer},
@@ -304,6 +317,13 @@ class APIServer:
                     )
 
             response = await call_next(request)
+
+            if consumer is not None:
+                logger.info(
+                    f"api_access consumer={consumer} method={request.method} "
+                    f"path={request.url.path} status={response.status_code} "
+                    f"duration_ms={round((time.perf_counter() - started) * 1000, 1)}"
+                )
 
             if is_allowed and origin:
                 response.headers["Access-Control-Allow-Origin"] = origin

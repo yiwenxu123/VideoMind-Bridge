@@ -61,6 +61,13 @@ curl http://127.0.0.1:8787/health
 默认只绑定 `127.0.0.1:8787`；远程消费者请设置 `VMB_BIND_ADDR=0.0.0.0`，
 并按需配置 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS` / `VMB_RATE_LIMIT_PER_MIN`。
 
+本机常驻（PM2）：
+
+```bash
+pm2 start ecosystem.config.cjs
+pm2 save
+```
+
 ## 使用
 
 ### v2 Engine (CLI, 主入口)

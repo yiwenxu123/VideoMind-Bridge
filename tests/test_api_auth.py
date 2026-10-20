@@ -103,3 +103,17 @@ def test_rate_limit_returns_429_with_retry_after(monkeypatch):
 
         # /health 不受限流影响
         assert client.get("/health").status_code == 200
+
+
+def test_access_log_records_consumer(monkeypatch, caplog):
+    caplog.set_level("INFO", logger="src.api.server")
+    tokens = json.dumps({"content-ops": "tok-a"})
+    with _client(monkeypatch, VMB_CONSUMER_TOKENS=tokens) as client:
+        resp = client.get("/api/v1/status", headers={"Authorization": "Bearer tok-a"})
+        assert resp.status_code == 200
+
+    messages = [record.message for record in caplog.records]
+    assert any(
+        "api_access consumer=content-ops" in message and "status=200" in message
+        for message in messages
+    )

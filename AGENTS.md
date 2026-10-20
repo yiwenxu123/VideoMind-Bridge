@@ -14,6 +14,7 @@ uv run python -m src.cli <url>  # CLI 模式
 python main.py                  # GUI 模式
 python main.py --api            # API 服务 (端口 8787)
 python main.py --mcp            # MCP Server (stdio JSON-RPC)
+pm2 start ecosystem.config.cjs  # 本机 PM2 常驻 API 服务
 pytest tests/ -v                # 运行测试
 ruff check src/                 # 代码风格检查
 mypy src/ --ignore-missing-imports  # 类型检查
