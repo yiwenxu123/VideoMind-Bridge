@@ -3,7 +3,7 @@ from unittest import mock
 
 import pytest
 
-from src.core.models import CostTier, ExtractResult
+from src.core.models import CostTier, ExtractOptions, ExtractResult
 from src.core.router import ContentRouter, RouterConfig
 
 
@@ -252,3 +252,39 @@ def test_router_lazy_instantiates_only_used_extractor():
 
         assert result.success is True
         assert counters == {"lazy": 1, "unused": 0}
+
+
+def test_router_passes_options_positionally_to_underscore_param_extractors():
+    """非 ASR 提取器用 _options 形参，Router 不能按 options= 关键字传。"""
+
+    class _UnderscoreOptionsExtractor:
+        platform_name = "underscore_options"
+
+        def is_available(self):
+            return True
+
+        def supports(self, url):
+            return True
+
+        def cost_tier(self):
+            return CostTier.FREE
+
+        def extract(self, url, _options=None):
+            return ExtractResult(
+                success=True, platform="underscore_options", title="t",
+                content="c", source="underscore_options", url=url,
+                cost_tier=CostTier.FREE, request_id=getattr(_options, "request_id", None),
+            )
+
+    with mock.patch(
+        "src.core.router.list_extractor_classes",
+        return_value={"underscore_options": _UnderscoreOptionsExtractor},
+    ):
+        router = ContentRouter(RouterConfig(priority=["underscore_options"]))
+        result = router.extract(
+            "https://example.com/v",
+            options=ExtractOptions(request_id="req-123"),
+        )
+
+    assert result.success is True
+    assert result.request_id == "req-123"

@@ -823,3 +823,10 @@ def test_xhs_ssr_text_list_concat():
     )
     title, desc = XiaohongshuExtractor._extract_from_ssr(html)
     assert desc == "第一段\n第二段"
+
+
+def test_xhs_video_html_detection():
+    from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
+    assert XiaohongshuExtractor._is_video_html('"type":"video"') is True
+    assert XiaohongshuExtractor._is_video_html('"noteType":1') is True
+    assert XiaohongshuExtractor._is_video_html('"type":"normal"') is False

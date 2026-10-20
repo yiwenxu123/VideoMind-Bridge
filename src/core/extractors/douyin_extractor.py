@@ -112,6 +112,8 @@ class DouyinExtractor(ContentExtractor):
                         "无可用字幕 (页面可能被验证码风控; "
                         "可配置 DOUYIN_COOKIES_FILE 或由 yt-dlp ASR 兜底)"
                     ),
+                    completeness="none",
+                    method="desc",
                 )
 
             # 文案过短 (< 120 字, 抖音 desc 通常=标题): 视为无实质内容,
@@ -128,6 +130,8 @@ class DouyinExtractor(ContentExtractor):
                     is_placeholder=True,
                     metadata={"video_id": video_id, "desc_short": True},
                     error="抖音文案过短 (desc≈标题), 触发 yt-dlp+ASR 降级",
+                    completeness="meta",
+                    method="desc",
                 )
 
             return ExtractResult(
@@ -141,6 +145,8 @@ class DouyinExtractor(ContentExtractor):
                 language="zh",
                 segments=segments if segments else None,
                 metadata={"video_id": video_id},
+                completeness="meta",
+                method="desc",
             )
 
         except Exception as e:

@@ -143,7 +143,8 @@ class ContentRouter:
             try:
                 logger.info(f"尝试提取器: {name}")
                 if options is not None:
-                    result = extractor.extract(url, options=options)
+                    # 位置参数：各提取器第二参数可能叫 options 或 _options
+                    result = extractor.extract(url, options)
                 else:
                     result = extractor.extract(url)
                 last_result = result

@@ -63,7 +63,7 @@ class XiaohongshuExtractor(ContentExtractor):
                 )
 
             # 获取笔记内容
-            title, content, images = self._fetch_note(note_id, url)
+            title, content, images, is_video = self._fetch_note(note_id, url)
 
             if not content and not title:
                 return ExtractResult(
@@ -90,6 +90,8 @@ class XiaohongshuExtractor(ContentExtractor):
                     "note_id": note_id,
                     "images": images,
                 },
+                completeness="meta" if is_video else "full",
+                method="desc" if is_video else "page",
             )
 
         except Exception as e:
@@ -106,7 +108,9 @@ class XiaohongshuExtractor(ContentExtractor):
             return m.group(1)
         return None
 
-    def _fetch_note(self, note_id: str, original_url: str = "") -> tuple[str, str, list[str]]:
+    def _fetch_note(
+        self, note_id: str, original_url: str = ""
+    ) -> tuple[str, str, list[str], bool]:
         """获取笔记内容
 
         保留原始 URL 中的 xsec_token/xsec_source 参数（未登录访问必需），
@@ -138,10 +142,15 @@ class XiaohongshuExtractor(ContentExtractor):
                 if ssr_title and not title:
                     title = ssr_title
 
-            return title, content, images
+            return title, content, images, self._is_video_html(html)
 
         except httpx.HTTPError:
-            return "", "", []
+            return "", "", [], False
+
+    @staticmethod
+    def _is_video_html(html: str) -> bool:
+        """判断笔记是否为视频：视频页只有发布文案，没有口播全文。"""
+        return bool(re.search(r'"type"\s*:\s*"video"|"noteType"\s*:\s*1', html))
 
     @staticmethod
     def _extract_title(html: str) -> str:
