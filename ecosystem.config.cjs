@@ -33,6 +33,9 @@ module.exports = {
       env: {
         VMB_ASR_CHAIN: process.env.VMB_ASR_CHAIN || "sensevoice,faster_whisper",
         VMB_WHISPER_MODEL: process.env.VMB_WHISPER_MODEL || "base",
+        // 评论采集已启用；creator feed 暂因 B站空间接口 IP/风控保持关闭
+        VMB_ENABLE_COMMENTS: "1",
+        VMB_ENABLE_CREATOR_FEED: "0",
         NODE_OPTIONS: "",
         NODE_PATH: "",
         HTTP_PROXY: "",
