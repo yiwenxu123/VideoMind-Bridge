@@ -43,3 +43,10 @@ def test_asr_registry_exposes_expected_backends():
     names = list_transcriber_names()
     for expected in ("faster_whisper", "dashscope", "aliyun", "sensevoice"):
         assert expected in names, f"缺少 ASR 后端: {expected}"
+
+
+def test_media_download_uses_shared_fetchers():
+    """平台提取器不再自带 httpx/ffmpeg 下载实现，统一走 media 包。"""
+    assert "HttpMediaFetcher" in inspect.getsource(bilibili_mod)
+    assert "HttpMediaFetcher" in inspect.getsource(tikhub_mod)
+    assert "YtDlpMediaFetcher" in inspect.getsource(ytdlp_mod)

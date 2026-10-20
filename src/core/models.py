@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+# 对外契约版本：所有 ExtractResult / capabilities 共用
+SCHEMA_VERSION = "1.0"
+
 
 class ContentGrade(Enum):
     """内容质量等级 (预筛结果)
@@ -103,7 +106,7 @@ class ExtractResult:
     error: str | None = None
     is_placeholder: bool = False  # 占位结果 (仅元信息/说明文本, 无真实内容)
     # 对外契约字段 (阶段 2)
-    schema_version: str = "1.0"
+    schema_version: str = SCHEMA_VERSION
     completeness: str = "unknown"  # full | meta | none | unknown
     method: str = ""               # subtitle | asr | page | desc | manual
     asr_provider: str | None = None

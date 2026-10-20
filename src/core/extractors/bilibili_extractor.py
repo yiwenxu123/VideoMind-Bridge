@@ -22,6 +22,7 @@ from ..asr import (
     transcribe_with_chain,
     transcript_to_extract_result,
 )
+from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
@@ -256,34 +257,28 @@ class BilibiliExtractor(ContentExtractor):
         """下载音频直链到临时文件 (限 150MB 防御)。
 
         B 站 CDN 防盗链: 需携带 Referer/UA, 否则返回 403。
+        实际下载由 HttpMediaFetcher 统一处理。
         """
-        try:
-            import tempfile
+        import tempfile
 
-            tmp = Path(tempfile.gettempdir()) / f"vmb_bili_{int(time.time() * 1000)}.m4s"
-            headers = {
+        dest = Path(tempfile.gettempdir()) / f"vmb_bili_{int(time.time() * 1000)}.m4s"
+        request = MediaFetchRequest(
+            url=audio_url,
+            dest=dest,
+            headers={
                 "Referer": "https://www.bilibili.com/",
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) "
                     "Chrome/120.0.0.0 Safari/537.36"
                 ),
-            }
-            with self._client.stream("GET", audio_url, timeout=timeout, headers=headers) as resp:
-                resp.raise_for_status()
-                total = 0
-                with open(tmp, "wb") as f:
-                    for chunk in resp.iter_bytes(chunk_size=65536):
-                        total += len(chunk)
-                        if total > 150 * 1024 * 1024:
-                            tmp.unlink(missing_ok=True)
-                            return None
-                        f.write(chunk)
-            if total < 1000:
-                tmp.unlink(missing_ok=True)
-                return None
-            return tmp
-        except Exception:
+            },
+            timeout=timeout,
+            max_bytes=150 * 1024 * 1024,
+        )
+        try:
+            return HttpMediaFetcher().fetch(request).path
+        except MediaFetchError:
             return None
 
     def _get_wbi_key(self) -> str:

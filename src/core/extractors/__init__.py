@@ -24,6 +24,11 @@ def list_extractors() -> list[str]:
     return list(_extractors.keys())
 
 
+def list_extractor_classes() -> dict[str, type[ContentExtractor]]:
+    """返回已注册提取器类（不实例化），供 Router 懒加载使用。"""
+    return dict(_extractors)
+
+
 def create_all_extractors() -> list[ContentExtractor]:
     """创建所有注册的提取器实例"""
     return [cls() for cls in _extractors.values()]

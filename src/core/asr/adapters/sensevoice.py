@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from ...media import MediaTranscodeError, to_16k_mono_wav
 from ...models import CostTier
 from ..base import Transcriber
 from ..registry import register_transcriber
@@ -68,29 +68,11 @@ def _ensure_wav(audio_path: Path) -> tuple[Path, Path | None]:
     """返回 (16k 单声道 wav, 需清理的临时文件)。"""
     if audio_path.suffix.lower() == ".wav":
         return audio_path, None
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"):
-            if Path(p).exists():
-                ffmpeg = p
-                break
-    if ffmpeg is None:
-        raise AsrFailed("SenseVoice 需要 16k wav，但未找到 ffmpeg 转码")
     dst = Path(f"{audio_path}.sensevoice16k.wav")
     try:
-        proc = subprocess.run(
-            [ffmpeg, "-y", "-loglevel", "error", "-i", str(audio_path),
-             "-vn", "-ar", "16000", "-ac", "1", str(dst)],
-            capture_output=True, text=True, timeout=180.0,
-        )
-        if proc.returncode != 0 or not dst.exists() or dst.stat().st_size < 1000:
-            raise AsrFailed(f"ffmpeg 转码失败: {proc.stderr[-200:]}")
-    except AsrFailed:
-        dst.unlink(missing_ok=True)
-        raise
-    except Exception as exc:
-        dst.unlink(missing_ok=True)
-        raise AsrFailed(f"ffmpeg 转码异常: {exc}") from exc
+        to_16k_mono_wav(audio_path, dst)
+    except MediaTranscodeError as exc:
+        raise AsrFailed(f"SenseVoice 需要 16k wav，转码失败: {exc}") from exc
     return dst, dst
 
 

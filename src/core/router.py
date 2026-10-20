@@ -10,7 +10,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from .extractors import create_all_extractors
+from .extractors import list_extractor_classes
 from .extractors.base import ContentExtractor
 from .models import _COST_TIER_PRIORITY, CostTier, ExtractOptions, ExtractResult
 
@@ -62,23 +62,29 @@ class ContentRouter:
 
     def __init__(self, config: RouterConfig | None = None) -> None:
         self.config = config or RouterConfig()
+        self._extractor_classes = list_extractor_classes()
         self._extractors: dict[str, ContentExtractor] = {}
-        self._init_extractors()
 
-    def _init_extractors(self) -> None:
-        """初始化所有提取器"""
-        for extractor in create_all_extractors():
-            self._extractors[extractor.platform_name] = extractor
+    def _get_extractor(self, name: str) -> ContentExtractor | None:
+        """按需实例化并缓存提取器；未注册返回 None。"""
+        cls = self._extractor_classes.get(name)
+        if cls is None:
+            return None
+        if name not in self._extractors:
+            self._extractors[name] = cls()
+        return self._extractors[name]
 
     def get_extractor(self, name: str) -> ContentExtractor | None:
         """获取指定名称的提取器"""
-        return self._extractors.get(name)
+        return self._get_extractor(name)
 
     def list_extractors(self) -> dict[str, bool]:
-        """列出所有提取器及其可用状态"""
+        """列出所有提取器及其可用状态（会实例化全部，仅用于能力探测）"""
         result: dict[str, bool] = {}
-        for name, ext in self._extractors.items():
-            result[name] = ext.is_available()
+        for name in self._extractor_classes:
+            extractor = self._get_extractor(name)
+            if extractor is not None:
+                result[name] = extractor.is_available()
         return result
 
     def extract(
@@ -115,7 +121,7 @@ class ContentRouter:
         last_result: ExtractResult | None = None
 
         for name in priority:
-            extractor = self._extractors.get(name)
+            extractor = self._get_extractor(name)
             if extractor is None:
                 continue
 

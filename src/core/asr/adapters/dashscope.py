@@ -11,12 +11,12 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import time
 from pathlib import Path
 
 import httpx
 
+from ...media import MediaTranscodeError, transcode_to_mp3
 from ...models import CostTier
 from ..base import Transcriber, resolve_extractor_key
 from ..registry import register_transcriber
@@ -133,29 +133,11 @@ def _prepare_audio(audio_path: Path) -> tuple[Path, Path | None]:
     """返回 (可提交文件, 需清理的临时文件)。.m4s 先转 mp3。"""
     if audio_path.suffix.lower() != ".m4s":
         return audio_path, None
-    ffmpeg = shutil.which("ffmpeg")
-    if ffmpeg is None:
-        for p in ("/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"):
-            if Path(p).exists():
-                ffmpeg = p
-                break
-    if ffmpeg is None:
-        raise AsrFailed("DashScope 需要 mp3，但未找到 ffmpeg 转码 .m4s")
     dst = Path(f"{audio_path}.dashscope.mp3")
     try:
-        proc = subprocess.run(
-            [ffmpeg, "-y", "-loglevel", "error", "-i", str(audio_path),
-             "-vn", "-acodec", "libmp3lame", "-b:a", "128k", str(dst)],
-            capture_output=True, text=True, timeout=180.0,
-        )
-        if proc.returncode != 0 or not dst.exists() or dst.stat().st_size < 1000:
-            raise AsrFailed(f"ffmpeg 转码失败: {proc.stderr[-200:]}")
-    except AsrFailed:
-        dst.unlink(missing_ok=True)
-        raise
-    except Exception as exc:
-        dst.unlink(missing_ok=True)
-        raise AsrFailed(f"ffmpeg 转码异常: {exc}") from exc
+        transcode_to_mp3(audio_path, dst)
+    except MediaTranscodeError as exc:
+        raise AsrFailed(f"DashScope 需要 mp3，转码失败: {exc}") from exc
     return dst, dst
 
 

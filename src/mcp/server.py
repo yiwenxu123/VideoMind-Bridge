@@ -757,22 +757,9 @@ class MCPServer:
         return router.list_extractors()
 
     def _call_capabilities(self, _args: dict) -> dict:
-        from src.core import ContentRouter
-        from src.core.asr import available_transcribers
-        from src.services.config_manager import ConfigManager
+        from src.core.capabilities import capabilities_payload
 
-        cfg = ConfigManager().get_asr_config()
-        return {
-            "schema_version": "1.0",
-            "asr": {
-                "default_chain": list(cfg.chain),
-                "language": cfg.language,
-                "max_cost": cfg.max_cost,
-                "backends": [caps.to_dict() for caps in available_transcribers()],
-            },
-            "extractors": ContentRouter().list_extractors(),
-            "platforms": ["bilibili", "youtube", "douyin", "xiaohongshu"],
-        }
+        return capabilities_payload()
 
     def _call_config(self, _args: dict) -> dict:
         import yt_dlp

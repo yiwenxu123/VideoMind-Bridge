@@ -13,6 +13,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..core.models import SCHEMA_VERSION
 from ..models.task import ProcessingMode, TaskStatus, VideoTask
 from ..services.config_manager import ConfigManager
 from ..utils import get_logger
@@ -105,7 +106,7 @@ def _extract_response(result, request_id: str) -> dict:
     """构造 /extract 响应（只增不减：保留旧字段并补契约字段）。"""
     payload = {
         "success": result.success,
-        "schema_version": result.schema_version,
+        "schema_version": SCHEMA_VERSION,
         "platform": result.platform,
         "title": result.title,
         "content": result.content,
@@ -131,25 +132,6 @@ def _extract_response(result, request_id: str) -> dict:
     if result.error_code:
         payload["error_code"] = result.error_code
     return payload
-
-
-def _capabilities_payload() -> dict:
-    """进程内能力探测：只检查依赖/密钥/路径，不加载模型、不发网络请求。"""
-    from ..core import ContentRouter
-    from ..core.asr import available_transcribers
-
-    cfg = ConfigManager().get_asr_config()
-    return {
-        "schema_version": "1.0",
-        "asr": {
-            "default_chain": list(cfg.chain),
-            "language": cfg.language,
-            "max_cost": cfg.max_cost,
-            "backends": [caps.to_dict() for caps in available_transcribers()],
-        },
-        "extractors": ContentRouter().list_extractors(),
-        "platforms": ["bilibili", "youtube", "douyin", "xiaohongshu"],
-    }
 
 
 class ConnectionManager:
@@ -377,7 +359,9 @@ class APIServer:
         @app.get("/api/v1/capabilities", response_model=dict)
         async def get_capabilities():
             """能力发现：ASR 后端 + 平台提取器（不加载模型）"""
-            return _capabilities_payload()
+            from ..core.capabilities import capabilities_payload
+
+            return capabilities_payload()
 
         @app.get("/api/v1/config", response_model=ConfigResponse)
         async def get_config():
@@ -416,7 +400,7 @@ class APIServer:
                     "success": False,
                     "url": url,
                     "error": str(e),
-                    "schema_version": "1.0",
+                    "schema_version": SCHEMA_VERSION,
                     "request_id": request_id,
                     "error_code": "internal_error",
                 }

@@ -14,7 +14,6 @@ ASR 不可用时返回元数据+下载链接。
 from __future__ import annotations
 
 import re
-import subprocess
 import tempfile
 from pathlib import Path
 
@@ -27,12 +26,18 @@ from ..asr import (
     transcribe_with_chain,
     transcript_to_extract_result,
 )
+from ..media import (
+    HttpMediaFetcher,
+    MediaFetchError,
+    MediaFetchRequest,
+    MediaTranscodeError,
+    transcode_to_mp3,
+)
 from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
 TIKHUB_API_BASE = "https://api.tikhub.io"
-_FFMPEG_CMD = "ffmpeg"
 
 PLATFORM_ENDPOINTS: dict[str, dict] = {
     "douyin": {
@@ -281,23 +286,24 @@ class TikhubExtractor(ContentExtractor):
             )
 
     def _download_audio(self, url: str, tmp_dir: Path) -> Path | None:
-        temp_file = tmp_dir / "video.mp4"
+        video_path = tmp_dir / "video.mp4"
+        request = MediaFetchRequest(
+            url=url,
+            dest=video_path,
+            headers={"User-Agent": "VideoMind-Bridge/1.0"},
+            timeout=300.0,
+        )
         try:
-            resp = self._client.get(url, timeout=300.0)
-            resp.raise_for_status()
-            temp_file.write_bytes(resp.content)
-        except Exception:
+            HttpMediaFetcher().fetch(request)
+        except MediaFetchError:
             return None
 
         audio_path = tmp_dir / "audio.mp3"
         try:
-            subprocess.run(
-                [_FFMPEG_CMD, "-y", "-i", str(temp_file), "-vn", "-acodec", "libmp3lame", str(audio_path)],
-                capture_output=True, text=True, timeout=120.0, check=True,
-            )
-            return audio_path if audio_path.exists() else None
-        except (subprocess.TimeoutExpired, subprocess.CalledProcessError, FileNotFoundError):
+            transcode_to_mp3(video_path, audio_path, timeout=120.0)
+        except MediaTranscodeError:
             return None
+        return audio_path
 
 
 register_extractor("tikhub", TikhubExtractor)

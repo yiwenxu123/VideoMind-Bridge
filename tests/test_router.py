@@ -10,7 +10,7 @@ from src.core.router import ContentRouter, RouterConfig
 @pytest.fixture
 def mock_extractors():
     """创建模拟提取器环境"""
-    with mock.patch("src.core.router.create_all_extractors") as mock_create:
+    with mock.patch("src.core.router.list_extractor_classes") as mock_create:
         # 创建两个模拟提取器
         mock_free = mock.Mock()
         mock_free.platform_name = "mock_free"
@@ -34,7 +34,10 @@ def mock_extractors():
             url="https://example.com/cheap", cost_tier=CostTier.CHEAP,
         )
 
-        mock_create.return_value = [mock_free, mock_cheap]
+        mock_create.return_value = {
+            "mock_free": lambda: mock_free,
+            "mock_cheap": lambda: mock_cheap,
+        }
         yield mock_free, mock_cheap
 
 
@@ -68,7 +71,7 @@ def test_extract_skips_cache_when_cost_exceeded(mock_extractors):
 
 def test_extract_skips_unknown_extractor_in_priority():
     """优先级中引用不存在的提取器时跳过（不崩溃）"""
-    with mock.patch("src.core.router.create_all_extractors", return_value=[]):
+    with mock.patch("src.core.router.list_extractor_classes", return_value={}):
         router = ContentRouter(RouterConfig(priority=["nonexistent", "bilibili"]))
     # 覆盖到 line 102: continue for None extractor
     with mock.patch.object(router, "_extractors", {}):
@@ -140,12 +143,12 @@ def test_extract_all_fail_with_exception(mock_extractors):
 
 def test_extract_no_supporting_extractor():
     """没有提取器支持该 URL 时返回正确错误"""
-    with mock.patch("src.core.router.create_all_extractors") as mock_create:
+    with mock.patch("src.core.router.list_extractor_classes") as mock_create:
         mock_ext = mock.Mock()
         mock_ext.platform_name = "mock_only"
         mock_ext.is_available.return_value = True
         mock_ext.supports.return_value = False  # 不支持任何 URL
-        mock_create.return_value = [mock_ext]
+        mock_create.return_value = {"mock_only": lambda: mock_ext}
 
         router = ContentRouter(RouterConfig(priority=["mock_only"]))
         result = router.extract("https://example.com/unsupported")
@@ -209,3 +212,43 @@ def test_router_preserves_best_metadata_on_total_failure(mock_extractors):
     assert result.duration_seconds == 120.0
     assert "无字幕" in result.error
     assert "下载失败" in result.error
+
+
+def test_router_lazy_instantiates_only_used_extractor():
+    counters = {"lazy": 0, "unused": 0}
+
+    def make_extractor(name: str):
+        class _Ext:
+            platform_name = name
+
+            def __init__(self):
+                counters[name] += 1
+
+            def is_available(self):
+                return True
+
+            def supports(self, url):
+                return True
+
+            def cost_tier(self):
+                return CostTier.FREE
+
+            def extract(self, url):
+                return ExtractResult(
+                    success=True, platform=name, title="t", content="c",
+                    source=name, url=url, cost_tier=CostTier.FREE,
+                )
+
+        return _Ext
+
+    with mock.patch(
+        "src.core.router.list_extractor_classes",
+        return_value={"lazy": make_extractor("lazy"), "unused": make_extractor("unused")},
+    ):
+        router = ContentRouter(RouterConfig(priority=["lazy"]))
+        assert counters == {"lazy": 0, "unused": 0}
+
+        result = router.extract("https://example.com/v")
+
+        assert result.success is True
+        assert counters == {"lazy": 1, "unused": 0}
