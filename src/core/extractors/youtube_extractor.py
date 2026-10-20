@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -37,7 +37,7 @@ class YouTubeExtractor(ContentExtractor):
     def is_available(self) -> bool:
         return True
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
         try:
             video_id = self._extract_video_id(url)
             if not video_id:

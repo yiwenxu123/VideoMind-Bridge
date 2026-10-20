@@ -1,0 +1,21 @@
+# ASR 基准清单示例
+# 复制为 manifest.yaml 后填写本地音频路径与参考文本。
+# 音频与大模型不要提交到仓库。
+
+- id: solo-speech
+  audio: ~/audio/bench/solo-speech.wav
+  reference: "这里填写人工校对的参考文本"
+  language: zh
+  tags: [口播, 清晰]
+
+- id: bgm-heavy
+  audio: ~/audio/bench/bgm-heavy.wav
+  reference: ""
+  language: zh
+  tags: [bgm, 噪声]
+
+- id: multi-speaker
+  audio: ~/audio/bench/multi-speaker.wav
+  reference: ""
+  language: zh
+  tags: [多人, 对话]

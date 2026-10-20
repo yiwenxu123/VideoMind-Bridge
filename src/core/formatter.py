@@ -45,12 +45,16 @@ class HermesFormatter:
         output["source_type"] = "video_content"
         output["extracted_at"] = datetime.now().isoformat()
         output["version"] = "2.0"
-        # 内容完整性标记: 供 Agent 判断是否拿到了完整正文 (非仅元信息)
-        output["content_complete"] = (
-            bool(result.success)
-            and bool(result.content and result.content.strip())
-            and not result.is_placeholder
-        )
+        # 内容完整性标记: 优先使用提取器声明的 completeness;
+        # 旧提取器未声明时回退到"成功且非占位"的兼容判断
+        if result.completeness != "unknown":
+            output["content_complete"] = result.completeness == "full"
+        else:
+            output["content_complete"] = (
+                bool(result.success)
+                and bool(result.content and result.content.strip())
+                and not result.is_placeholder
+            )
 
         if prescreen:
             output["prescreen"] = HermesFormatter.format_prescreen_result(prescreen)

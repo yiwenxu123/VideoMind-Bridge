@@ -175,7 +175,20 @@ class MCPServer:
                             "cost_tier": {
                                 "type": "string",
                                 "enum": ["free", "cheap", "paid", "expensive", "premium"],
-                                "description": "最大可接受成本等级 (默认 cheap, 允许使用 Coze 免费积分)",
+                                "description": "最大可接受成本等级 (默认 cheap)",
+                            },
+                            "asr": {
+                                "type": "string",
+                                "description": "首选 ASR 后端（失败后继续默认链）: faster_whisper / dashscope / aliyun / sensevoice",
+                            },
+                            "asr_chain": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "严格按此链执行（不追加默认后端）",
+                            },
+                            "asr_language": {
+                                "type": "string",
+                                "description": "ASR 语言提示（如 zh / en / auto）",
                             },
                         },
                         "required": ["url"],
@@ -246,6 +259,14 @@ class MCPServer:
                     },
                 },
                 {
+                    "name": "videomind_capabilities",
+                    "description": "能力发现: 列出可用 ASR 后端（语言/时间戳/成本/模型）与平台提取器状态。不加载模型。",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                    },
+                },
+                {
                     "name": "videomind_config",
                     "description": "获取当前系统配置和平台支持信息",
                     "inputSchema": {
@@ -295,6 +316,7 @@ class MCPServer:
             "extract_video": self._call_extract_video,
             "archive_extract": self._call_archive_extract,
             "list_extractors": self._call_list_extractors,
+            "videomind_capabilities": self._call_capabilities,
         }.get(name)
 
         if not handler:
@@ -630,7 +652,9 @@ class MCPServer:
         cost_tier_str = args.get("cost_tier", "cheap")
 
         from src.core import ContentRouter, HermesFormatter
-        from src.core.models import CostTier
+        from src.core.asr import validate_chain
+        from src.core.models import CostTier, ExtractOptions
+        from src.services.config_manager import ConfigManager
 
         cost_map = {
             "free": CostTier.FREE, "cheap": CostTier.CHEAP,
@@ -639,8 +663,29 @@ class MCPServer:
         }
         max_cost = cost_map.get(cost_tier_str)
 
+        chain = args.get("asr_chain")
+        if chain is not None:
+            if not isinstance(chain, list) or not chain:
+                raise ValueError("asr_chain 必须是非空字符串数组")
+            validate_chain(chain)
+        elif args.get("asr"):
+            backend = str(args["asr"]).strip()
+            validate_chain([backend])
+            default_chain = ConfigManager().get_asr_config().chain
+            chain = [backend] + [name for name in default_chain if name != backend]
+
+        language = args.get("asr_language")
+        options = (
+            ExtractOptions(asr_chain=chain, asr_language=language)
+            if chain or language
+            else None
+        )
+
         router = ContentRouter()
-        result = router.extract(url, max_cost=max_cost)
+        if options is not None:
+            result = router.extract(url, max_cost=max_cost, options=options)
+        else:
+            result = router.extract(url, max_cost=max_cost)
         return HermesFormatter.format_extract_result_full(result)
 
     def _call_archive_extract(self, args: dict) -> dict:
@@ -710,6 +755,24 @@ class MCPServer:
         from src.core import ContentRouter
         router = ContentRouter()
         return router.list_extractors()
+
+    def _call_capabilities(self, _args: dict) -> dict:
+        from src.core import ContentRouter
+        from src.core.asr import available_transcribers
+        from src.services.config_manager import ConfigManager
+
+        cfg = ConfigManager().get_asr_config()
+        return {
+            "schema_version": "1.0",
+            "asr": {
+                "default_chain": list(cfg.chain),
+                "language": cfg.language,
+                "max_cost": cfg.max_cost,
+                "backends": [caps.to_dict() for caps in available_transcribers()],
+            },
+            "extractors": ContentRouter().list_extractors(),
+            "platforms": ["bilibili", "youtube", "douyin", "xiaohongshu"],
+        }
 
     def _call_config(self, _args: dict) -> dict:
         import yt_dlp

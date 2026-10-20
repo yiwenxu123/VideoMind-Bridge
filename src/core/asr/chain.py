@@ -1,22 +1,25 @@
-"""ASR 降级链（阶段 1）
+"""ASR 降级链（阶段 1 建立，阶段 2 接入配置默认值与成本过滤）
 
 统一语义（对齐现有三条调用路径的既有行为）：
 - 后端不可用 → 跳过，不调用
+- 超出成本上限 → 跳过
 - 抛异常 → 记录，换下一个
 - 返回空文本 → 记录 empty，换下一个
 - 第一个非空结果返回，并把失败尝试写进 transcript.metadata["attempts"]
 - 全部失败 → AsrChainError，携带每次尝试摘要
 
-Stage 1 不做自动重试；默认链与现有行为一致（本地 whisper → DashScope）。
+优先级：请求显式参数 > 环境变量 > 配置文件 > 代码默认值。
 """
 
 from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any
 
-from .registry import create_transcriber
+from ..models import _COST_TIER_PRIORITY, CostTier
+from .registry import create_transcriber, validate_chain
 from .types import (
     AsrChainError,
     AsrConfigError,
@@ -24,13 +27,27 @@ from .types import (
     MediaRef,
     TranscribeOptions,
     Transcript,
+    parse_cost_tier,
 )
+
+if TYPE_CHECKING:
+    from ...models.config import AsrConfig
 
 DEFAULT_CHAIN = ["faster_whisper", "dashscope"]
 
 
-def resolve_chain(chain: list[str] | None = None) -> list[str]:
-    """解析降级链：显式参数 > VMB_ASR_CHAIN 环境变量 > 默认链。
+def _config_defaults() -> AsrConfig | None:
+    """读取配置文件 + 环境变量合并后的 ASR 配置；失败时返回 None。"""
+    try:
+        from ...services.config_manager import get_config_manager
+
+        return get_config_manager().get_asr_config()
+    except Exception:
+        return None
+
+
+def resolve_chain(chain: list[str] | None = None, cfg: AsrConfig | None = None) -> list[str]:
+    """解析降级链：显式参数 > VMB_ASR_CHAIN > 配置文件 > 默认链。
 
     显式传入空列表视为配置错误（返回空链，由调用方报 AsrChainError）。
     """
@@ -39,7 +56,53 @@ def resolve_chain(chain: list[str] | None = None) -> list[str]:
     env_chain = os.getenv("VMB_ASR_CHAIN", "").strip()
     if env_chain:
         return [name.strip() for name in env_chain.split(",") if name.strip()]
+    if cfg is None:
+        cfg = _config_defaults()
+    if cfg and cfg.chain:
+        return list(cfg.chain)
     return list(DEFAULT_CHAIN)
+
+
+def validate_configured_chain() -> list[str]:
+    """校验配置文件/环境变量里的默认链，供 API/CLI 启动时快速失败。"""
+    cfg = _config_defaults()
+    names = list(cfg.chain) if cfg and cfg.chain else list(DEFAULT_CHAIN)
+    validate_chain(names)
+    return names
+
+
+def resolve_language(
+    explicit: str | None = None,
+    *,
+    default: str | None = None,
+    cfg: AsrConfig | None = None,
+) -> str | None:
+    """语言优先级：请求 > VMB_ASR_LANGUAGE > 配置文件 > 调用方默认值。"""
+    if explicit:
+        return explicit
+    if "VMB_ASR_LANGUAGE" in os.environ:
+        return os.environ.get("VMB_ASR_LANGUAGE", "").strip() or None
+    if cfg is None:
+        cfg = _config_defaults()
+    if cfg and cfg.language:
+        return cfg.language
+    return default
+
+
+def resolve_max_cost(
+    explicit: CostTier | None = None,
+    *,
+    cfg: AsrConfig | None = None,
+) -> CostTier | None:
+    """成本上限优先级：请求 > VMB_ASR_MAX_COST > 配置文件。"""
+    if explicit is not None:
+        return explicit
+    env_cost = parse_cost_tier(os.getenv("VMB_ASR_MAX_COST", "").strip() or None)
+    if env_cost is not None:
+        return env_cost
+    if cfg is None:
+        cfg = _config_defaults()
+    return parse_cost_tier(cfg.max_cost) if cfg else None
 
 
 def transcribe_with_chain(
@@ -47,28 +110,46 @@ def transcribe_with_chain(
     options: TranscribeOptions | None = None,
     chain: list[str] | None = None,
     backend_configs: dict[str, dict[str, Any]] | None = None,
+    default_language: str | None = None,
 ) -> Transcript:
     """按链执行转写，返回第一个非空结果。"""
-    names = resolve_chain(chain)
+    cfg = _config_defaults()
+    names = resolve_chain(chain, cfg=cfg)
     if not names:
         raise AsrChainError([])
     opts = options or TranscribeOptions()
+    effective_opts = replace(
+        opts,
+        language=resolve_language(opts.language, default=default_language, cfg=cfg),
+    )
+    max_cost = resolve_max_cost(opts.max_cost, cfg=cfg)
+    if backend_configs is None:
+        backend_configs = cfg.backend_configs() if cfg else {}
     attempts: list[dict[str, Any]] = []
 
     for name in names:
         try:
-            backend = create_transcriber(name, (backend_configs or {}).get(name))
+            backend = create_transcriber(name, backend_configs.get(name))
         except AsrConfigError as exc:
             attempts.append({"provider": name, "status": "config_error", "message": str(exc)})
             continue
 
-        if not backend.is_available():
+        caps = backend.capabilities()
+        if not caps.available:
             attempts.append({"provider": name, "status": "unavailable"})
             continue
+        if max_cost is not None:
+            allowed = _COST_TIER_PRIORITY.get(max_cost, 99)
+            actual = _COST_TIER_PRIORITY.get(caps.cost_tier, 99)
+            if actual > allowed:
+                attempts.append(
+                    {"provider": name, "status": "cost_exceeded", "cost_tier": caps.cost_tier.value}
+                )
+                continue
 
         started = time.perf_counter()
         try:
-            transcript = backend.transcribe(media, opts)
+            transcript = backend.transcribe(media, effective_opts)
         except AsrError as exc:
             attempts.append(
                 {

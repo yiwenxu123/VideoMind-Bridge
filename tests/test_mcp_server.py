@@ -178,11 +178,11 @@ class TestProtocolToolsList:
             "videomind_process", "videomind_download", "videomind_transcribe",
             "videomind_supported", "videomind_config", "configure",
             "prescreen_video", "smart_extract", "extract_video",
-            "archive_extract", "list_extractors",
+            "archive_extract", "list_extractors", "videomind_capabilities",
         ]
         for name in expected:
             assert name in tool_names
-        assert len(tools) == 11
+        assert len(tools) == 12
 
     def test_each_tool_has_required_fields(self, server, captured_send):
         server.handle_message({
@@ -613,6 +613,61 @@ class TestCallExtractVideo:
         result = captured_send[0]["result"]
         assert result["success"] is False
         assert "error" in result
+
+
+class TestCallExtractVideoAsrOverride:
+
+    @patch("src.services.config_manager.ConfigManager.get_asr_config")
+    @patch(f"{CORE_PATCH}.HermesFormatter")
+    @patch(f"{CORE_PATCH}.ContentRouter")
+    def test_asr_override_passes_options(
+        self, MockContentRouter, MockFormatter, mock_cfg, server, captured_send,
+    ):
+        from src.models.config import AsrConfig
+
+        mock_cfg.return_value = AsrConfig(chain=["faster_whisper", "dashscope"])
+        mock_router = MockContentRouter.return_value
+        mock_router.extract.return_value = make_extract_result()
+        MockFormatter.format_extract_result_full.return_value = {"success": True}
+
+        server.handle_message({
+            "jsonrpc": "2.0", "id": 30, "method": "tools/call",
+            "params": {
+                "name": "extract_video",
+                "arguments": {
+                    "url": _MOCK_URL,
+                    "asr": "sensevoice",
+                    "asr_language": "zh",
+                },
+            },
+        })
+
+        options = mock_router.extract.call_args.kwargs["options"]
+        assert options.asr_chain == ["sensevoice", "faster_whisper", "dashscope"]
+        assert options.asr_language == "zh"
+
+
+# ============================================================
+# _call_capabilities
+# ============================================================
+
+
+class TestCallCapabilities:
+
+    @patch(f"{CORE_PATCH}.ContentRouter")
+    def test_returns_asr_capabilities(self, MockContentRouter, server, captured_send):
+        MockContentRouter.return_value.list_extractors.return_value = {"bilibili": True}
+
+        server.handle_message({
+            "jsonrpc": "2.0", "id": 41, "method": "tools/call",
+            "params": {"name": "videomind_capabilities", "arguments": {}},
+        })
+
+        result = captured_send[0]["result"]
+        assert result["schema_version"] == "1.0"
+        backend_names = [b["name"] for b in result["asr"]["backends"]]
+        assert "faster_whisper" in backend_names
+        assert result["extractors"]["bilibili"] is True
 
 
 # ============================================================

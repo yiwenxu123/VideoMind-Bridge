@@ -29,6 +29,11 @@ def test_maps_new_and_legacy_metadata_keys():
     assert result.success is True
     assert result.content == "hello"
     assert result.language == "zh"
+    assert result.completeness == "full"
+    assert result.method == "asr"
+    assert result.asr_provider == "faster-whisper"
+    assert result.asr_model == "base"
+    assert result.asr_model_version == "1.2.1"
     assert result.segments == [{"start": 0.0, "end": 1.0, "text": "hello"}]
     assert result.metadata["asr_provider"] == "faster-whisper"
     assert result.metadata["asr_model"] == "base"

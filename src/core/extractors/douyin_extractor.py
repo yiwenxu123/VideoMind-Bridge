@@ -13,7 +13,7 @@ from typing import Any
 
 import httpx
 
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from ._ssr import find_first_meta, find_ssr_payload
 from .base import ContentExtractor
@@ -78,7 +78,7 @@ class DouyinExtractor(ContentExtractor):
         """无 Cookie 也可用 (部分 IP 可直抓)"""
         return True
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
         try:
             # 解析短链接
             if "v.douyin.com" in url:

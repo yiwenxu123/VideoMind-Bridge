@@ -73,6 +73,19 @@ class PrescreenResult:
 
 
 @dataclass
+class ExtractOptions:
+    """单次提取的请求级选项（阶段 2）
+
+    ASR 覆盖只影响真正走音频转写的路径；平台字幕/页面正文路径不受影响。
+    """
+
+    asr_chain: list[str] | None = None
+    asr_language: str | None = None
+    asr_max_cost: CostTier | None = None
+    request_id: str | None = None
+
+
+@dataclass
 class ExtractResult:
     """内容提取结果"""
 
@@ -89,6 +102,15 @@ class ExtractResult:
     metadata: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     is_placeholder: bool = False  # 占位结果 (仅元信息/说明文本, 无真实内容)
+    # 对外契约字段 (阶段 2)
+    schema_version: str = "1.0"
+    completeness: str = "unknown"  # full | meta | none | unknown
+    method: str = ""               # subtitle | asr | page | desc | manual
+    asr_provider: str | None = None
+    asr_model: str | None = None
+    asr_model_version: str | None = None
+    request_id: str | None = None
+    error_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """转为字典 (Hermes 兼容)"""
@@ -101,6 +123,9 @@ class ExtractResult:
             "url": self.url,
             "cost_tier": self.cost_tier.value,
             "duration_seconds": self.duration_seconds,
+            "schema_version": self.schema_version,
+            "completeness": self.completeness,
+            "method": self.method,
         }
         if self.language:
             d["language"] = self.language
@@ -110,4 +135,14 @@ class ExtractResult:
             d["metadata"] = self.metadata
         if self.error:
             d["error"] = self.error
+        if self.error_code:
+            d["error_code"] = self.error_code
+        if self.asr_provider:
+            d["asr_provider"] = self.asr_provider
+        if self.asr_model:
+            d["asr_model"] = self.asr_model
+        if self.asr_model_version:
+            d["asr_model_version"] = self.asr_model_version
+        if self.request_id:
+            d["request_id"] = self.request_id
         return d

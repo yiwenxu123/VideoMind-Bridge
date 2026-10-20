@@ -153,6 +153,20 @@ def test_parse_args_list_extractors():
     print("  ✓ --list-extractors 为 True")
 
 
+def test_parse_args_asr_overrides():
+    """测试 --asr / --asr-chain / --asr-language / --list-asr"""
+    args = parse_args(["--asr", "sensevoice", "--asr-language", "zh"])
+    assert args.asr == "sensevoice"
+    assert args.asr_language == "zh"
+    assert args.asr_chain is None
+
+    args = parse_args(["--asr-chain", "sensevoice,faster_whisper"])
+    assert args.asr_chain == "sensevoice,faster_whisper"
+
+    args = parse_args(["--list-asr"])
+    assert args.list_asr is True
+
+
 def test_parse_args_boolean_flags():
     """测试布尔标志参数"""
     print("\n=== 测试布尔标志参数 ===")

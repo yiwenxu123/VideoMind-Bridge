@@ -17,7 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -67,7 +67,7 @@ class YtDlpExtractor(ContentExtractor):
             self._available = False
         return self._available
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
         if not self.is_available():
             return ExtractResult(
                 success=False, platform="ytdlp", title="", content="",

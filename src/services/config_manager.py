@@ -8,7 +8,15 @@ from typing import Any, Optional
 
 import yaml
 
-from ..models.config import AIConfig, AppConfig, DownloadConfig, ExportConfig, UIConfig
+from ..models.config import (
+    AIConfig,
+    AppConfig,
+    AsrBackendConfig,
+    AsrConfig,
+    DownloadConfig,
+    ExportConfig,
+    UIConfig,
+)
 from ..utils.credential_manager import CredentialManager
 
 logger = logging.getLogger(__name__)
@@ -217,6 +225,60 @@ class ConfigManager:
         loaded = self._load_config()
         if loaded:
             self._config = loaded
+
+    def get_asr_config(self) -> AsrConfig:
+        """返回合并环境变量后的 ASR 配置副本。
+
+        优先级：环境变量 > 配置文件 > 默认值。返回副本，调用方修改
+        不会污染 ConfigManager 持有的配置。
+        """
+        cfg = self._config.asr
+        chain = list(cfg.chain)
+        env_chain = os.getenv("VMB_ASR_CHAIN", "").strip()
+        if env_chain:
+            chain = [name.strip() for name in env_chain.split(",") if name.strip()]
+
+        language = cfg.language
+        if "VMB_ASR_LANGUAGE" in os.environ:
+            language = os.environ.get("VMB_ASR_LANGUAGE", "").strip() or None
+
+        max_cost = os.getenv("VMB_ASR_MAX_COST", "").strip() or cfg.max_cost
+
+        backends = {
+            name: AsrBackendConfig(
+                enabled=backend.enabled,
+                model=backend.model,
+                options=dict(backend.options),
+            )
+            for name, backend in cfg.backends.items()
+        }
+
+        # 兼容旧的 VMB_WHISPER_MODEL；新变量 VMB_ASR_MODEL 优先
+        model_override = (
+            os.getenv("VMB_ASR_MODEL", "").strip()
+            or os.getenv("VMB_WHISPER_MODEL", "").strip()
+        )
+        if model_override:
+            backends.setdefault("faster_whisper", AsrBackendConfig()).model = model_override
+
+        # SenseVoice 运行时路径（子进程解释器/模型目录）走 options
+        sensevoice = backends.setdefault("sensevoice", AsrBackendConfig())
+        for env_name, option_name in (
+            ("VMB_SENSEVOICE_PYTHON", "python"),
+            ("VMB_SENSEVOICE_MODEL_DIR", "model_dir"),
+            ("VMB_SENSEVOICE_SCRIPT", "script"),
+            ("VMB_SENSEVOICE_TIMEOUT", "timeout"),
+        ):
+            value = os.getenv(env_name, "").strip()
+            if value:
+                sensevoice.options[option_name] = value
+
+        return AsrConfig(
+            chain=chain,
+            language=language,
+            max_cost=max_cost,
+            backends=backends,
+        )
 
     @property
     def config(self) -> AppConfig:

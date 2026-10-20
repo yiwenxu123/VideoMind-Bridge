@@ -86,12 +86,25 @@ class MediaRef:
 
 @dataclass
 class TranscribeOptions:
-    """单次转写选项（阶段 2 会接请求级覆盖）"""
+    """单次转写选项（阶段 2 接入请求级覆盖与成本上限）"""
 
     language: str | None = None
     timestamps: bool = True
     max_duration_sec: float | None = None
+    max_cost: CostTier | None = None
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+def parse_cost_tier(value: str | CostTier | None) -> CostTier | None:
+    """把配置/请求里的成本档位字符串转成 CostTier；非法值返回 None。"""
+    if value is None:
+        return None
+    if isinstance(value, CostTier):
+        return value
+    try:
+        return CostTier(str(value).strip().lower())
+    except ValueError:
+        return None
 
 
 @dataclass(frozen=True)

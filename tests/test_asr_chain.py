@@ -10,21 +10,43 @@ from src.core.asr import (
     AsrChainError,
     AsrConfigError,
     AsrFailed,
+    Capabilities,
     MediaRef,
     TranscribeOptions,
     Transcript,
     resolve_chain,
     transcribe_with_chain,
 )
+from src.core.models import CostTier
+
+
+@pytest.fixture(autouse=True)
+def _isolate_asr_config(monkeypatch):
+    """隔离本机配置文件/环境变量，保证链测试可复现。"""
+    monkeypatch.setattr("src.core.asr.chain._config_defaults", lambda: None)
+    monkeypatch.delenv("VMB_ASR_CHAIN", raising=False)
+    monkeypatch.delenv("VMB_ASR_LANGUAGE", raising=False)
+    monkeypatch.delenv("VMB_ASR_MAX_COST", raising=False)
 
 
 class _Backend:
-    def __init__(self, name: str, text: str = "", available: bool = True, error: Exception | None = None):
+    def __init__(
+        self,
+        name: str,
+        text: str = "",
+        available: bool = True,
+        error: Exception | None = None,
+        cost_tier: CostTier = CostTier.CHEAP,
+    ):
         self.name = name
         self.text = text
         self.available = available
         self.error = error
+        self.cost_tier = cost_tier
         self.calls = 0
+
+    def capabilities(self) -> Capabilities:
+        return Capabilities(name=self.name, available=self.available, cost_tier=self.cost_tier)
 
     def is_available(self) -> bool:
         return self.available
@@ -120,3 +142,37 @@ def test_resolve_chain_precedence(monkeypatch):
 
     monkeypatch.delenv("VMB_ASR_CHAIN")
     assert resolve_chain() == ["faster_whisper", "dashscope"]
+
+
+def test_cost_limit_skips_expensive_backend(tmp_path):
+    expensive = _Backend("expensive", text="ok", cost_tier=CostTier.EXPENSIVE)
+    cheap = _Backend("cheap", text="fallback", cost_tier=CostTier.CHEAP)
+    with _patch_backends(expensive, cheap):
+        transcript = transcribe_with_chain(
+            _media(tmp_path),
+            options=TranscribeOptions(max_cost=CostTier.CHEAP),
+            chain=["expensive", "cheap"],
+        )
+
+    assert transcript.text == "fallback"
+    assert expensive.calls == 0
+    assert transcript.metadata["attempts"][0]["status"] == "cost_exceeded"
+
+
+def test_language_resolution_is_passed_to_backend(tmp_path):
+    captured = {}
+
+    class _LanguageBackend(_Backend):
+        def transcribe(self, media, options):
+            captured["language"] = options.language
+            return Transcript(text="ok", provider=self.name)
+
+    backend = _LanguageBackend("lang")
+    with _patch_backends(backend):
+        transcribe_with_chain(
+            _media(tmp_path),
+            options=TranscribeOptions(language="en"),
+            chain=["lang"],
+        )
+
+    assert captured["language"] == "en"

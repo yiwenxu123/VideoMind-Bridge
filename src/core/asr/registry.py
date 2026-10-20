@@ -34,6 +34,16 @@ def create_transcriber(name: str, config: dict[str, Any] | None = None) -> Trans
     return get_transcriber_class(name)(config)
 
 
+def validate_chain(names: list[str]) -> None:
+    """校验链非空且后端均已注册；用于 API/CLI 的请求参数校验。"""
+    if not names:
+        raise AsrConfigError("ASR 链不能为空")
+    unknown = [name for name in names if name not in _TRANSCRIBERS]
+    if unknown:
+        available = ", ".join(list_transcriber_names()) or "（空）"
+        raise AsrConfigError(f"未知 ASR 后端: {', '.join(unknown)}；可用: {available}")
+
+
 def available_transcribers() -> list[Capabilities]:
     """探测所有已注册后端的能力；单个后端探测失败不影响其他后端。"""
     result: list[Capabilities] = []

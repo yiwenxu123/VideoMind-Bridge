@@ -38,7 +38,7 @@ from ..asr import (
     transcribe_with_chain,
     transcript_to_extract_result,
 )
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -118,7 +118,7 @@ class YtDlpASRExtractor(ContentExtractor):
             self._ytdlp = ytdlp
         return self._available
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         if not self.is_available():
             return ExtractResult(
                 success=False, platform="ytdlp_asr", title="", content="",
@@ -144,7 +144,11 @@ class YtDlpASRExtractor(ContentExtractor):
             try:
                 transcript = transcribe_with_chain(
                     MediaRef(path=audio_path),
-                    TranscribeOptions(language=os.getenv("VMB_ASR_LANGUAGE", "") or None),
+                    TranscribeOptions(
+                        language=options.asr_language if options else None,
+                        max_cost=options.asr_max_cost if options else None,
+                    ),
+                    chain=options.asr_chain if options else None,
                 )
             except AsrChainError as chain_err:
                 logger.warning(f"ytdlp_asr 全链路失败: {chain_err}")
@@ -188,6 +192,8 @@ class YtDlpASRExtractor(ContentExtractor):
                     "asr_available": False,
                     "platform_meta": metadata,
                 },
+                completeness="none",
+                method="asr",
             )
 
     # ─────────────────────────── 下载/元信息 ───────────────────────────

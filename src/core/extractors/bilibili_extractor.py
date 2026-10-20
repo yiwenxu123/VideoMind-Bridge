@@ -22,7 +22,7 @@ from ..asr import (
     transcribe_with_chain,
     transcript_to_extract_result,
 )
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -66,7 +66,7 @@ class BilibiliExtractor(ContentExtractor):
         """Bilibili 提取器始终可用 (无需 Cookie/Token)"""
         return True
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         try:
             bvid = self._resolve_video_id(url)
             if not bvid:
@@ -86,7 +86,9 @@ class BilibiliExtractor(ContentExtractor):
 
             if not subtitle_content:
                 # 无字幕: 尝试 playurl 音频直链 + DashScope ASR (绕 yt-dlp 网页 412 风控)
-                asr_result = self._try_audio_asr_fallback(url, bvid, title, duration)
+                asr_result = self._try_audio_asr_fallback(
+                    url, bvid, title, duration, options=options
+                )
                 if asr_result is not None:
                     return asr_result
 
@@ -103,6 +105,8 @@ class BilibiliExtractor(ContentExtractor):
                     language="zh",
                     metadata={"bvid": bvid, "video_info": info},
                     error="无可用字幕 (视频可能无 CC 字幕, 或需要登录 Cookie 才能访问字幕接口)",
+                    completeness="meta",
+                    method="page",
                 )
 
             return ExtractResult(
@@ -117,6 +121,8 @@ class BilibiliExtractor(ContentExtractor):
                 language=language or "zh",
                 segments=segments,
                 metadata={"bvid": bvid, "video_info": info},
+                completeness="full",
+                method="subtitle",
             )
 
         except httpx.HTTPStatusError as e:
@@ -201,6 +207,7 @@ class BilibiliExtractor(ContentExtractor):
 
     def _try_audio_asr_fallback(
         self, url: str, bvid: str, title: str, duration: float,
+        options: ExtractOptions | None = None,
     ) -> ExtractResult | None:
         """无字幕时: playurl 音频直链下载 + 统一 ASR 链转写。
 
@@ -218,7 +225,12 @@ class BilibiliExtractor(ContentExtractor):
             try:
                 transcript = transcribe_with_chain(
                     MediaRef(path=audio_path),
-                    TranscribeOptions(language="zh"),
+                    TranscribeOptions(
+                        language=options.asr_language if options else None,
+                        max_cost=options.asr_max_cost if options else None,
+                    ),
+                    chain=options.asr_chain if options else None,
+                    default_language="zh",
                 )
             except AsrChainError:
                 transcript = None

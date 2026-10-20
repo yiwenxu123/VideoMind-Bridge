@@ -11,7 +11,7 @@ import re
 
 import httpx
 
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from ._ssr import find_ssr_payload
 from .base import ContentExtractor
@@ -46,7 +46,7 @@ class XiaohongshuExtractor(ContentExtractor):
         """无需 Cookie, 始终可用"""
         return True
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
         try:
             # 解析短链接 (xhslink.com / xhslink.cn)
             if "xhslink." in url:

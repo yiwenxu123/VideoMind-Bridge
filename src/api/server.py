@@ -7,7 +7,7 @@ import asyncio
 import os
 from contextlib import asynccontextmanager, suppress
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
 from fastapi.responses import FileResponse, JSONResponse
@@ -32,6 +32,124 @@ from .models import (
 from .task_manager import TaskManager
 
 logger = get_logger(__name__)
+
+
+def _resolve_request_asr_chain(payload: dict) -> list[str] | None:
+    """解析请求里的 asr / asr_chain 覆盖，返回链或 None。
+
+    asr: 首选后端，失败后继续默认链；asr_chain: 严格按给定链执行。
+    """
+    from ..core.asr import validate_chain
+    from ..core.asr.types import AsrConfigError
+
+    raw_chain = payload.get("asr_chain")
+    if raw_chain is not None:
+        if (
+            not isinstance(raw_chain, list)
+            or not raw_chain
+            or not all(isinstance(name, str) and name.strip() for name in raw_chain)
+        ):
+            raise HTTPException(status_code=400, detail="asr_chain 必须是非空字符串数组")
+        chain = [name.strip() for name in raw_chain]
+        try:
+            validate_chain(chain)
+        except AsrConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return chain
+
+    raw_asr = payload.get("asr")
+    if raw_asr is not None:
+        if not isinstance(raw_asr, str) or not raw_asr.strip():
+            raise HTTPException(status_code=400, detail="asr 必须是非空字符串")
+        backend = raw_asr.strip()
+        try:
+            validate_chain([backend])
+        except AsrConfigError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        default_chain = ConfigManager().get_asr_config().chain
+        return [backend] + [name for name in default_chain if name != backend]
+
+    return None
+
+
+def _build_extract_options(payload: dict, request_id: str):
+    """把请求参数转成 ExtractOptions，非法参数返回 400。"""
+    from ..core.models import CostTier, ExtractOptions
+
+    chain = _resolve_request_asr_chain(payload)
+
+    asr_options = payload.get("asr_options") or {}
+    if not isinstance(asr_options, dict):
+        raise HTTPException(status_code=400, detail="asr_options 必须是对象")
+    language = asr_options.get("language")
+    if language is not None and not isinstance(language, str):
+        raise HTTPException(status_code=400, detail="asr_options.language 必须是字符串")
+
+    max_cost = None
+    raw_max_cost = payload.get("asr_max_cost")
+    if raw_max_cost is not None:
+        try:
+            max_cost = CostTier(str(raw_max_cost).strip().lower())
+        except ValueError:
+            raise HTTPException(status_code=400, detail="asr_max_cost 非法")
+
+    return ExtractOptions(
+        asr_chain=chain,
+        asr_language=language,
+        asr_max_cost=max_cost,
+        request_id=request_id,
+    )
+
+
+def _extract_response(result, request_id: str) -> dict:
+    """构造 /extract 响应（只增不减：保留旧字段并补契约字段）。"""
+    payload = {
+        "success": result.success,
+        "schema_version": result.schema_version,
+        "platform": result.platform,
+        "title": result.title,
+        "content": result.content,
+        "language": result.language,
+        "duration_seconds": result.duration_seconds,
+        "cost_tier": result.cost_tier.value,
+        "source": result.source,
+        "url": result.url,
+        "completeness": result.completeness,
+        "method": result.method,
+        "request_id": request_id or result.request_id,
+    }
+    if result.segments:
+        payload["segments"] = result.segments
+    if result.asr_provider:
+        payload["asr"] = {
+            "provider": result.asr_provider,
+            "model": result.asr_model,
+            "model_version": result.asr_model_version,
+        }
+    if result.error:
+        payload["error"] = result.error
+    if result.error_code:
+        payload["error_code"] = result.error_code
+    return payload
+
+
+def _capabilities_payload() -> dict:
+    """进程内能力探测：只检查依赖/密钥/路径，不加载模型、不发网络请求。"""
+    from ..core import ContentRouter
+    from ..core.asr import available_transcribers
+
+    cfg = ConfigManager().get_asr_config()
+    return {
+        "schema_version": "1.0",
+        "asr": {
+            "default_chain": list(cfg.chain),
+            "language": cfg.language,
+            "max_cost": cfg.max_cost,
+            "backends": [caps.to_dict() for caps in available_transcribers()],
+        },
+        "extractors": ContentRouter().list_extractors(),
+        "platforms": ["bilibili", "youtube", "douyin", "xiaohongshu"],
+    }
 
 
 class ConnectionManager:
@@ -130,6 +248,14 @@ class APIServer:
 
         # WebSocket连接管理器
         self.connection_manager = ConnectionManager()
+
+        # 启动即校验 ASR 默认链，坏配置不拖到第一次转写才暴露
+        from ..core.asr import validate_configured_chain
+
+        try:
+            validate_configured_chain()
+        except Exception as exc:
+            raise RuntimeError(f"ASR 配置非法: {exc}") from exc
 
         # 事件循环引用（用于线程间调度）
         self._event_loop: Any = None
@@ -248,6 +374,11 @@ class APIServer:
                 failed_tasks=stats["failed"],
             )
 
+        @app.get("/api/v1/capabilities", response_model=dict)
+        async def get_capabilities():
+            """能力发现：ASR 后端 + 平台提取器（不加载模型）"""
+            return _capabilities_payload()
+
         @app.get("/api/v1/config", response_model=ConfigResponse)
         async def get_config():
             """获取系统配置"""
@@ -268,37 +399,26 @@ class APIServer:
             if not url:
                 raise HTTPException(status_code=400, detail="url 不能为空")
 
+            request_id = uuid4().hex
             try:
                 from src.core import ContentRouter
                 from src.core.models import CostTier
 
+                options = _build_extract_options(request, request_id)
                 router = ContentRouter()
-                result = router.extract(url, max_cost=CostTier.CHEAP)
-
-                if result.success:
-                    return {
-                        "success": True,
-                        "platform": result.platform,
-                        "title": result.title,
-                        "content": result.content,
-                        "language": result.language,
-                        "duration_seconds": result.duration_seconds,
-                        "cost_tier": result.cost_tier.value,
-                        "source": result.source,
-                        "url": url,
-                    }
-                else:
-                    return {
-                        "success": False,
-                        "error": result.error,
-                        "url": url,
-                    }
+                result = router.extract(url, max_cost=CostTier.CHEAP, options=options)
+                return _extract_response(result, request_id)
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"v2 提取失败: {e}")
                 return {
                     "success": False,
-                    "error": str(e),
                     "url": url,
+                    "error": str(e),
+                    "schema_version": "1.0",
+                    "request_id": request_id,
+                    "error_code": "internal_error",
                 }
 
         # v2 提取 + 归档 API

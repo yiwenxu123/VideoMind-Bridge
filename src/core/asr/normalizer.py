@@ -62,4 +62,9 @@ def transcript_to_extract_result(
         language=transcript.language,
         segments=[s.to_dict() for s in transcript.segments] if transcript.segments else None,
         metadata=meta,
+        completeness="full",
+        method="asr",
+        asr_provider=transcript.provider,
+        asr_model=transcript.model,
+        asr_model_version=transcript.model_version or None,
     )

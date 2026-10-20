@@ -65,7 +65,7 @@ def test_ytdlp_asr_local_source_and_mapping(monkeypatch, audio_file):
         segments=[Segment(start=0.0, end=1.5, text="本地转写")],
         cost_tier=CostTier.CHEAP,
     )
-    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", lambda media, options: transcript)
+    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", lambda *a, **k: transcript)
 
     result = ext.extract("https://www.bilibili.com/video/BV1xx")
 
@@ -90,7 +90,7 @@ def test_ytdlp_asr_aliyun_source_preserved(monkeypatch, audio_file):
         segments=[Segment(start=0.0, end=2.0, text="阿里云转写")],
         cost_tier=CostTier.EXPENSIVE,
     )
-    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", lambda media, options: transcript)
+    monkeypatch.setattr(ytdlp_mod, "transcribe_with_chain", lambda *a, **k: transcript)
 
     result = ext.extract("https://www.bilibili.com/video/BV1xx")
 

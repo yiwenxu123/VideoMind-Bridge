@@ -192,6 +192,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="列出可用提取器及其状态"
     )
     parser.add_argument(
+        "--asr",
+        default=None,
+        help="首选 ASR 后端（失败后继续默认链）: faster_whisper / dashscope / aliyun / sensevoice"
+    )
+    parser.add_argument(
+        "--asr-chain",
+        default=None,
+        help="严格按此 ASR 链执行，逗号分隔（不追加默认后端）"
+    )
+    parser.add_argument(
+        "--asr-language",
+        default=None,
+        help="ASR 语言提示（如 zh / en / auto）"
+    )
+    parser.add_argument(
+        "--list-asr",
+        action="store_true",
+        default=False,
+        help="列出可用 ASR 后端及其能力"
+    )
+    parser.add_argument(
         "--config-list",
         action="store_true",
         default=False,
@@ -213,7 +234,7 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
     import logging
 
     from src.core import ContentRouter, HermesFormatter, Prescreener
-    from src.core.models import ContentGrade, CostTier, ExtractResult
+    from src.core.models import ContentGrade, CostTier, ExtractOptions, ExtractResult
 
     # quiet 模式: 抑制 HTTP 和路由器日志
     if args.quiet or args.json_output:
@@ -236,6 +257,25 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
                 console.print(f"  {icon} {name}: {'可用' if avail else '不可用'}")
         return 0
 
+    # --list-asr 模式
+    if args.list_asr:
+        from src.core.asr import available_transcribers
+
+        caps = [c.to_dict() for c in available_transcribers()]
+        if use_json:
+            print(json.dumps(caps, ensure_ascii=False, indent=2))
+        else:
+            for cap in caps:
+                icon = "[green]✓[/green]" if cap["available"] else "[red]✗[/red]"
+                console.print(
+                    f"  {icon} {cap['name']}: {'可用' if cap['available'] else '不可用'} "
+                    f"(model={cap['model'] or '-'}, cost={cap['cost_tier']}, "
+                    f"timestamps={'yes' if cap['timestamps'] else 'no'})"
+                )
+                if cap.get("notes") and not cap["available"]:
+                    console.print(f"    [dim]{cap['notes']}[/dim]")
+        return 0
+
     if not url:
         console.print("[red]错误: 需要提供 URL[/red]")
         return 1
@@ -247,6 +287,32 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
         "premium": CostTier.PREMIUM,
     }
     max_cost = cost_map.get(args.cost_tier) if args.cost_tier else None
+
+    # ASR 请求级覆盖（--asr / --asr-chain / --asr-language）
+    asr_chain = None
+    if args.asr_chain:
+        from src.core.asr import validate_chain
+
+        asr_chain = [name.strip() for name in args.asr_chain.split(",") if name.strip()]
+        validate_chain(asr_chain)
+    elif args.asr:
+        from src.core.asr import validate_chain
+        from src.services.config_manager import ConfigManager
+
+        validate_chain([args.asr])
+        default_chain = ConfigManager().get_asr_config().chain
+        asr_chain = [args.asr] + [name for name in default_chain if name != args.asr]
+
+    extract_options = (
+        ExtractOptions(asr_chain=asr_chain, asr_language=args.asr_language)
+        if (asr_chain or args.asr_language)
+        else None
+    )
+
+    def _extract(target_url: str, **kwargs):
+        if extract_options is not None:
+            kwargs["options"] = extract_options
+        return router.extract(target_url, **kwargs)
 
     # --prescreen-only: 仅预筛 (快速模式, 无网络)
     if args.prescreen_only:
@@ -281,6 +347,11 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
             console.print("\n  [dim]提示: 执行 \"--smart\" 获取完整评分+提取[/dim]")
         return 0
 
+    # 校验默认 ASR 链，坏配置在提取前快速失败
+    from src.core.asr import validate_configured_chain
+
+    validate_configured_chain()
+
     # --prescreen 或 --smart: 先提取获取元信息, 再用元信息评分
     prescreen_meta = None
     if args.prescreen or args.smart:
@@ -289,7 +360,7 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
 
         # --smart 模式: 先用最小成本获取元信息做预筛决策
         if args.smart:
-            quick_result = router.extract(url, max_cost=CostTier.FREE)
+            quick_result = _extract(url, max_cost=CostTier.FREE)
             if quick_result.success and quick_result.title:
                 prescreen_result = prescreener.prescreen(
                     url,
@@ -349,7 +420,7 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
         else:
             # --prescreen 模式: 提取一次, 用提取结果做预筛评分
             max_cost_info = max_cost or CostTier.CHEAP
-            prescreen_extract = router.extract(url, max_cost=max_cost_info)
+            prescreen_extract = _extract(url, max_cost=max_cost_info)
             prescreen_result = prescreener.prescreen(
                 url,
                 title=prescreen_extract.title if prescreen_extract.success else "",
@@ -390,11 +461,11 @@ def run_v2_extraction(args: argparse.Namespace) -> int:
     # 提取内容 (复用 --prescreen 的结果, 避免重复提取)
     result: ExtractResult
     if prescreen_meta and "extract_result" in prescreen_meta:
-        result = prescreen_meta.pop("extract_result")  # type: ignore
+        result = prescreen_meta.pop("extract_result")
     else:
         if not use_json:
             console.print(f"\n[cyan]提取中 ({'成本上限: ' + max_cost.value if max_cost else '无限'} )...[/cyan]")
-        result = router.extract(url, max_cost=max_cost)
+        result = _extract(url, max_cost=max_cost)
 
     # 输出
     if use_json:
@@ -645,7 +716,7 @@ def main() -> int:
     )
     if (
         args.prescreen or args.smart or args.prescreen_only
-        or args.cost_tier or args.list_extractors
+        or args.cost_tier or args.list_extractors or args.list_asr
         or not v1_requested
     ):
         return run_v2_extraction(args)

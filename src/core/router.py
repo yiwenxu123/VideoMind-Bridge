@@ -12,7 +12,7 @@ from typing import Any
 
 from .extractors import create_all_extractors
 from .extractors.base import ContentExtractor
-from .models import _COST_TIER_PRIORITY, CostTier, ExtractResult
+from .models import _COST_TIER_PRIORITY, CostTier, ExtractOptions, ExtractResult
 
 
 def _best_metadata(meta_list: list[dict[str, Any]]) -> dict[str, Any]:
@@ -81,20 +81,30 @@ class ContentRouter:
             result[name] = ext.is_available()
         return result
 
-    def extract(self, url: str, max_cost: CostTier | None = None) -> ExtractResult:
+    def extract(
+        self,
+        url: str,
+        max_cost: CostTier | None = None,
+        options: ExtractOptions | None = None,
+    ) -> ExtractResult:
         """提取内容, 自动遍历优先级列表
 
         Args:
             url: 视频/内容 URL
             max_cost: 最大可接受成本 (None = 不限制)
+            options: 请求级选项（ASR 链/语言/请求 ID）
 
         Returns:
             ExtractResult: 第一个成功的提取结果, 或全部失败的汇总
         """
+        request_id = options.request_id if options else None
+
         # 检查缓存
         if url in self.config.cache:
             cached = self.config.cache[url]
             if max_cost is None or _COST_TIER_PRIORITY.get(cached.cost_tier, 99) <= _COST_TIER_PRIORITY.get(max_cost, 99):
+                if request_id:
+                    cached.request_id = request_id
                 return cached
 
         # 确定优先级列表
@@ -126,8 +136,13 @@ class ContentRouter:
 
             try:
                 logger.info(f"尝试提取器: {name}")
-                result = extractor.extract(url)
+                if options is not None:
+                    result = extractor.extract(url, options=options)
+                else:
+                    result = extractor.extract(url)
                 last_result = result
+                if request_id and not result.request_id:
+                    result.request_id = request_id
                 if result.title:
                     failures_meta.append({
                         "platform": result.platform,
@@ -168,6 +183,8 @@ class ContentRouter:
                 last_result.duration_seconds = best_meta.get("duration_seconds", 0.0)
             last_result.success = False
             last_result.error = "; ".join(failures)
+            last_result.error_code = last_result.error_code or "extract_failed"
+            last_result.request_id = request_id or last_result.request_id
             return last_result
 
         # 全部失败且无结果对象时, 保留沿途拿到的最佳元信息 (标题/时长)
@@ -183,4 +200,6 @@ class ContentRouter:
             duration_seconds=best_meta.get("duration_seconds", 0.0),
             metadata={"attempted": failures},
             error=f"无可用提取器: {'; '.join(failures) if failures else '所有提取器均不支持此 URL'}",
+            error_code="unsupported_url",
+            request_id=request_id,
         )

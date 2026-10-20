@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from abc import ABC, abstractmethod
 
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 
 
 class ContentExtractor(ABC):
@@ -25,11 +25,12 @@ class ContentExtractor(ABC):
     url_pattern: re.Pattern = re.compile(r"^https?://")
 
     @abstractmethod
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         """从 URL 提取内容
 
         Args:
             url: 视频/内容链接
+            options: 请求级选项（ASR 链/语言/请求 ID），平台提取器按需消费
 
         Returns:
             ExtractResult: 提取结果

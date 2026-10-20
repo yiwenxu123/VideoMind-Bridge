@@ -13,7 +13,7 @@ import re
 
 import httpx
 
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -65,7 +65,7 @@ class ApifyExtractor(ContentExtractor):
     def supports(self, url: str) -> bool:
         return bool(self.url_pattern.search(url))
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
         platform = _detect_apify_platform(url)
         if not platform:
             return ExtractResult(

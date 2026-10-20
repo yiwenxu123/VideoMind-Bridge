@@ -35,6 +35,20 @@ def test_format_extract_result_full_with_prescreen():
     assert d["prescreen"]["grade"] == "A"
 
 
+def test_content_complete_uses_declared_completeness():
+    full = HermesFormatter.format_extract_result_full(
+        make_extract_result(completeness="full", method="asr")
+    )
+    meta = HermesFormatter.format_extract_result_full(
+        make_extract_result(completeness="meta", method="page")
+    )
+    legacy = HermesFormatter.format_extract_result_full(make_extract_result())
+
+    assert full["content_complete"] is True
+    assert meta["content_complete"] is False
+    assert legacy["content_complete"] is True
+
+
 def test_format_extract_result_full_without_prescreen():
     result = make_extract_result()
     d = HermesFormatter.format_extract_result_full(result)

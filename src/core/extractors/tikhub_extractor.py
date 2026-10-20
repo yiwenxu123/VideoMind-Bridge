@@ -27,7 +27,7 @@ from ..asr import (
     transcribe_with_chain,
     transcript_to_extract_result,
 )
-from ..models import CostTier, ExtractResult
+from ..models import CostTier, ExtractOptions, ExtractResult
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -139,7 +139,7 @@ class TikhubExtractor(ContentExtractor):
     def supports(self, url: str) -> bool:
         return bool(self.url_pattern.search(url))
 
-    def extract(self, url: str) -> ExtractResult:
+    def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         platform = _detect_commercial_platform(url)
         if not platform:
             return ExtractResult(
@@ -157,7 +157,7 @@ class TikhubExtractor(ContentExtractor):
 
         try:
             result_json = self._call_api(url, platform)
-            return self._parse_response(result_json, url, platform)
+            return self._parse_response(result_json, url, platform, options=options)
         except Exception as e:
             return ExtractResult(
                 success=False, platform=platform, title="", content="",
@@ -183,7 +183,10 @@ class TikhubExtractor(ContentExtractor):
         resp.raise_for_status()
         return dict(resp.json())
 
-    def _parse_response(self, data: dict, url: str, platform: str) -> ExtractResult:
+    def _parse_response(
+        self, data: dict, url: str, platform: str,
+        options: ExtractOptions | None = None,
+    ) -> ExtractResult:
         raw_data = data.get("data")
         if not isinstance(raw_data, dict):
             raw_data = {}
@@ -199,7 +202,9 @@ class TikhubExtractor(ContentExtractor):
         download_url = _get_download_url(aweme)
 
         if download_url:
-            audio_result = self._try_download_and_transcribe(download_url, url, platform, title, duration)
+            audio_result = self._try_download_and_transcribe(
+                download_url, url, platform, title, duration, options=options
+            )
             if audio_result and audio_result.success and audio_result.content:
                 return audio_result
 
@@ -223,6 +228,7 @@ class TikhubExtractor(ContentExtractor):
     def _try_download_and_transcribe(
         self, download_url: str, url: str, platform: str,
         title: str, duration: float,
+        options: ExtractOptions | None = None,
     ) -> ExtractResult | None:
         with tempfile.TemporaryDirectory() as tmp_dir:
             audio_path = self._download_audio(download_url, Path(tmp_dir))
@@ -233,7 +239,12 @@ class TikhubExtractor(ContentExtractor):
             try:
                 transcript = transcribe_with_chain(
                     MediaRef(path=audio_path),
-                    TranscribeOptions(language="zh"),
+                    TranscribeOptions(
+                        language=options.asr_language if options else None,
+                        max_cost=options.asr_max_cost if options else None,
+                    ),
+                    chain=options.asr_chain if options else None,
+                    default_language="zh",
                 )
             except AsrChainError:
                 transcript = None
@@ -265,6 +276,8 @@ class TikhubExtractor(ContentExtractor):
                     "api_provider": "tikhub.io",
                 },
                 error="音频已下载但无可用 ASR 转写",
+                completeness="none",
+                method="asr",
             )
 
     def _download_audio(self, url: str, tmp_dir: Path) -> Path | None:

@@ -11,7 +11,14 @@ from __future__ import annotations
 
 from . import adapters  # noqa: E402,F401  触发后端注册
 from .base import Transcriber, resolve_extractor_key
-from .chain import DEFAULT_CHAIN, resolve_chain, transcribe_with_chain
+from .chain import (
+    DEFAULT_CHAIN,
+    resolve_chain,
+    resolve_language,
+    resolve_max_cost,
+    transcribe_with_chain,
+    validate_configured_chain,
+)
 from .normalizer import transcript_to_extract_result
 from .registry import (
     available_transcribers,
@@ -19,6 +26,7 @@ from .registry import (
     get_transcriber_class,
     list_transcriber_names,
     register_transcriber,
+    validate_chain,
 )
 from .types import (
     AsrChainError,
@@ -33,6 +41,7 @@ from .types import (
     Segment,
     TranscribeOptions,
     Transcript,
+    parse_cost_tier,
 )
 
 __all__ = [
@@ -54,9 +63,14 @@ __all__ = [
     "create_transcriber",
     "get_transcriber_class",
     "list_transcriber_names",
+    "parse_cost_tier",
     "register_transcriber",
     "resolve_chain",
     "resolve_extractor_key",
+    "resolve_language",
+    "resolve_max_cost",
     "transcribe_with_chain",
     "transcript_to_extract_result",
+    "validate_chain",
+    "validate_configured_chain",
 ]
