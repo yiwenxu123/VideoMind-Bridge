@@ -41,6 +41,8 @@ coverage/
 
 # Local real-link regression manifest (contains expiring tokens)
 benchmarks/real-links.local.yaml
+benchmarks/discovery-links.local.yaml
+benchmarks/reports/
 
 # Build artifacts
 *.spec
