@@ -20,6 +20,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import pytest
 
+from src.core.discovery.models import (
+    CommentItem,
+    CommentsResult,
+    CreatorFeedItem,
+    CreatorFeedResult,
+    CreatorRef,
+)
+from src.core.models import CostTier
 from src.mcp.server import MCPServer
 
 # ============================================================
@@ -165,7 +173,9 @@ class TestProtocolNotifications:
 
 class TestProtocolToolsList:
 
-    def test_returns_tools(self, server, captured_send):
+    def test_returns_tools(self, server, captured_send, monkeypatch):
+        monkeypatch.delenv("VMB_ENABLE_CREATOR_FEED", raising=False)
+        monkeypatch.delenv("VMB_ENABLE_COMMENTS", raising=False)
         server.handle_message({
             "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
         })
@@ -1074,7 +1084,9 @@ class TestErrorHandling:
 
 class TestDispatchCoverage:
 
-    def test_all_tools_have_handlers(self, server, captured_send):
+    def test_all_tools_have_handlers(self, server, captured_send, monkeypatch):
+        monkeypatch.delenv("VMB_ENABLE_CREATOR_FEED", raising=False)
+        monkeypatch.delenv("VMB_ENABLE_COMMENTS", raising=False)
         server.handle_message({
             "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {},
         })
@@ -1111,3 +1123,126 @@ class TestDispatchCoverage:
                             assert len(captured) == 1, (
                                 f"Tool '{name}' did not respond"
                             )
+
+
+class TestDiscoveryTools:
+
+    def test_discovery_tools_hidden_by_default(self, server, captured_send, monkeypatch):
+        monkeypatch.delenv("VMB_ENABLE_CREATOR_FEED", raising=False)
+        monkeypatch.delenv("VMB_ENABLE_COMMENTS", raising=False)
+
+        server.handle_message({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
+        })
+        names = [tool["name"] for tool in captured_send[0]["result"]["tools"]]
+
+        assert "get_creator_feed" not in names
+        assert "get_comments" not in names
+
+    def test_discovery_tools_listed_when_enabled(
+        self, server, captured_send, monkeypatch
+    ):
+        monkeypatch.setenv("VMB_ENABLE_CREATOR_FEED", "1")
+        monkeypatch.setenv("VMB_ENABLE_COMMENTS", "1")
+
+        server.handle_message({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {},
+        })
+        names = [tool["name"] for tool in captured_send[0]["result"]["tools"]]
+
+        assert "get_creator_feed" in names
+        assert "get_comments" in names
+
+    def test_call_get_creator_feed(self, server, captured_send, monkeypatch):
+        monkeypatch.setenv("VMB_ENABLE_CREATOR_FEED", "1")
+        fake = MagicMock()
+        fake.creator_feed.return_value = CreatorFeedResult(
+            success=True,
+            platform="bilibili",
+            source="bilibili_discovery",
+            cost_tier=CostTier.FREE,
+            creator=CreatorRef(
+                id="123456",
+                name="示例UP主",
+                url="https://space.bilibili.com/123456",
+            ),
+            items=[
+                CreatorFeedItem(
+                    id="BV1demo",
+                    url="https://www.bilibili.com/video/BV1demo",
+                    title="示例作品",
+                )
+            ],
+            completeness="full",
+            fetched_at="2026-10-20T08:00:00+00:00",
+            request_id="req-1",
+        )
+        monkeypatch.setattr(server, "_get_discovery_service", lambda: fake)
+
+        server.handle_message({
+            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+            "params": {
+                "name": "get_creator_feed",
+                "arguments": {
+                    "url": "https://space.bilibili.com/123456",
+                    "limit": 5,
+                },
+            },
+        })
+
+        result = captured_send[0]["result"]
+        assert result["success"] is True
+        assert result["creator"]["id"] == "123456"
+        assert result["returned_count"] == 1
+        fake.creator_feed.assert_called_once()
+        assert fake.creator_feed.call_args.kwargs["limit"] == 5
+
+    def test_call_get_comments(self, server, captured_send, monkeypatch):
+        monkeypatch.setenv("VMB_ENABLE_COMMENTS", "1")
+        fake = MagicMock()
+        fake.comments.return_value = CommentsResult(
+            success=True,
+            platform="bilibili",
+            source="bilibili_discovery",
+            cost_tier=CostTier.FREE,
+            items=[
+                CommentItem(
+                    id="c1",
+                    parent_id=None,
+                    root_id="c1",
+                    text="示例评论",
+                    likes=3,
+                )
+            ],
+            completeness="full",
+            sort="recent",
+            fetched_at="2026-10-20T08:00:00+00:00",
+            request_id="req-2",
+        )
+        monkeypatch.setattr(server, "_get_discovery_service", lambda: fake)
+
+        server.handle_message({
+            "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+            "params": {
+                "name": "get_comments",
+                "arguments": {
+                    "url": "https://www.bilibili.com/video/BV1demo",
+                    "limit": 10,
+                    "sort": "recent",
+                    "include_replies": True,
+                    "max_replies_per_thread": 2,
+                },
+            },
+        })
+
+        result = captured_send[0]["result"]
+        assert result["success"] is True
+        assert result["items"][0]["text"] == "示例评论"
+        assert result["sort"] == "recent"
+        fake.comments.assert_called_once()
+        kwargs = fake.comments.call_args.kwargs
+        assert kwargs["limit"] == 10
+        assert kwargs["sort"] == "recent"
+        assert kwargs["include_replies"] is True
+        assert kwargs["max_replies_per_thread"] == 2
+        assert kwargs["include_author"] is False

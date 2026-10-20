@@ -1,5 +1,7 @@
 # VideoMind Bridge API 使用文档
 
+> 创作者作品列表 / 评论采样接口见 [DISCOVERY_API.md](DISCOVERY_API.md)；默认关闭，需显式开启。
+
 ## 快速开始
 
 ### 1. 下载视频

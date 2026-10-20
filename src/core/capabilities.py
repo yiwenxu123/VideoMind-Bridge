@@ -17,7 +17,7 @@ def capabilities_payload() -> dict[str, Any]:
     from .router import ContentRouter
 
     cfg = ConfigManager().get_asr_config()
-    return {
+    payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "asr": {
             "default_chain": list(cfg.chain),
@@ -28,3 +28,41 @@ def capabilities_payload() -> dict[str, Any]:
         "extractors": ContentRouter().list_extractors(),
         "platforms": ["bilibili", "youtube", "douyin", "xiaohongshu"],
     }
+
+    from .discovery.config import (
+        COMMENTS_PLATFORMS,
+        CREATOR_FEED_PLATFORMS,
+        DEFAULT_COMMENTS_LIMIT,
+        DEFAULT_CREATOR_FEED_LIMIT,
+        DEFAULT_REPLIES_PER_THREAD,
+        MAX_COMMENTS_LIMIT,
+        MAX_CREATOR_FEED_LIMIT,
+        MAX_REPLIES_PER_THREAD,
+        comments_enabled,
+        creator_feed_enabled,
+    )
+
+    discovery: dict[str, Any] = {}
+    if creator_feed_enabled():
+        discovery["creator_feed"] = {
+            "enabled": True,
+            "platforms": list(CREATOR_FEED_PLATFORMS),
+            "limits": {
+                "default": DEFAULT_CREATOR_FEED_LIMIT,
+                "max": MAX_CREATOR_FEED_LIMIT,
+            },
+        }
+    if comments_enabled():
+        discovery["comments"] = {
+            "enabled": True,
+            "platforms": list(COMMENTS_PLATFORMS),
+            "limits": {
+                "default": DEFAULT_COMMENTS_LIMIT,
+                "max": MAX_COMMENTS_LIMIT,
+                "replies_per_thread_default": DEFAULT_REPLIES_PER_THREAD,
+                "replies_per_thread_max": MAX_REPLIES_PER_THREAD,
+            },
+        }
+    if discovery:
+        payload["discovery"] = discovery
+    return payload

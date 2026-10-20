@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from src.core.discovery.models import CommentsResult, CreatorFeedResult
 from src.models.task import ExportTarget, ProcessingMode
 from src.services.ai_service import AIService
 from src.services.download_service import DownloadService
@@ -93,8 +94,7 @@ class MCPServer:
         })
 
     def _handle_tools_list(self, req_id: Any):
-        self._send_result(req_id, {
-            "tools": [
+        tools = [
                 {
                     "name": "videomind_process",
                     "description": "[DEPRECATED] 完整处理视频：下载→转录→AI摘要→导出 (v1 扩展模式, 推荐使用 smart_extract + archive_extract)",
@@ -297,8 +297,88 @@ class MCPServer:
                         "required": ["action"],
                     },
                 },
-            ],
-        })
+        ]
+        tools.extend(self._discovery_tools())
+        self._send_result(req_id, {"tools": tools})
+
+    def _discovery_tools(self) -> list[dict[str, Any]]:
+        from src.core.discovery.config import comments_enabled, creator_feed_enabled
+
+        tools: list[dict[str, Any]] = []
+        if creator_feed_enabled():
+            tools.append(
+                {
+                    "name": "get_creator_feed",
+                    "description": "获取创作者最新作品列表及互动数据。默认关闭；B站空间接口可能需要配置 Cookie。",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "创作者主页链接"},
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 30,
+                                "description": "返回作品数上限（默认 20）",
+                            },
+                            "cost_tier": {
+                                "type": "string",
+                                "enum": [
+                                    "free", "cheap", "paid", "expensive", "premium",
+                                ],
+                                "description": "最大可接受成本等级（默认 cheap）",
+                            },
+                        },
+                        "required": ["url"],
+                    },
+                }
+            )
+        if comments_enabled():
+            tools.append(
+                {
+                    "name": "get_comments",
+                    "description": "获取内容评论样本，可选一层二级回复。默认关闭；只返回公开评论，默认不含用户 ID。",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "url": {"type": "string", "description": "内容链接"},
+                            "limit": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 50,
+                                "description": "返回评论总数上限（默认 20）",
+                            },
+                            "sort": {
+                                "type": "string",
+                                "enum": ["hot", "recent"],
+                                "description": "排序方式（默认 hot）",
+                            },
+                            "include_replies": {
+                                "type": "boolean",
+                                "description": "是否展开一层二级回复（默认 false）",
+                            },
+                            "max_replies_per_thread": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10,
+                                "description": "每个一级评论最多返回的回复数（默认 3）",
+                            },
+                            "include_author": {
+                                "type": "boolean",
+                                "description": "是否返回作者展示名（默认 false）",
+                            },
+                            "cost_tier": {
+                                "type": "string",
+                                "enum": [
+                                    "free", "cheap", "paid", "expensive", "premium",
+                                ],
+                                "description": "最大可接受成本等级（默认 cheap）",
+                            },
+                        },
+                        "required": ["url"],
+                    },
+                }
+            )
+        return tools
 
     def _handle_tools_call(self, req_id: Any, params: dict):
         name = params.get("name", "")
@@ -317,6 +397,8 @@ class MCPServer:
             "archive_extract": self._call_archive_extract,
             "list_extractors": self._call_list_extractors,
             "videomind_capabilities": self._call_capabilities,
+            "get_creator_feed": self._call_get_creator_feed,
+            "get_comments": self._call_get_comments,
         }.get(name)
 
         if not handler:
@@ -760,6 +842,45 @@ class MCPServer:
         from src.core.capabilities import capabilities_payload
 
         return capabilities_payload()
+
+    def _get_discovery_service(self) -> Any:
+        from src.core.discovery.service import DiscoveryService
+
+        return self._get_service("discovery", DiscoveryService)
+
+    def _call_get_creator_feed(self, args: dict) -> dict:
+        from src.core.discovery.config import creator_feed_enabled
+        from src.core.models import CostTier
+
+        if not creator_feed_enabled():
+            raise RuntimeError("get_creator_feed 未启用（VMB_ENABLE_CREATOR_FEED=0）")
+        cost = CostTier(str(args.get("cost_tier", "cheap")).lower())
+        result: CreatorFeedResult = self._get_discovery_service().creator_feed(
+            str(args["url"]),
+            limit=int(args.get("limit", 20)),
+            max_cost=cost,
+            request_id=uuid.uuid4().hex,
+        )
+        return result.to_dict()
+
+    def _call_get_comments(self, args: dict) -> dict:
+        from src.core.discovery.config import comments_enabled
+        from src.core.models import CostTier
+
+        if not comments_enabled():
+            raise RuntimeError("get_comments 未启用（VMB_ENABLE_COMMENTS=0）")
+        cost = CostTier(str(args.get("cost_tier", "cheap")).lower())
+        result: CommentsResult = self._get_discovery_service().comments(
+            str(args["url"]),
+            limit=int(args.get("limit", 20)),
+            sort=str(args.get("sort", "hot")).lower(),
+            include_replies=bool(args.get("include_replies", False)),
+            max_replies_per_thread=int(args.get("max_replies_per_thread", 3)),
+            include_author=bool(args.get("include_author", False)),
+            max_cost=cost,
+            request_id=uuid.uuid4().hex,
+        )
+        return result.to_dict()
 
     def _call_config(self, _args: dict) -> dict:
         import yt_dlp

@@ -109,6 +109,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **`--smart`/MCP smart_extract**: FREE 提取到完整内容时直接复用（不二次提取）；仅当 FREE 失败/占位时才按推荐成本升级提取
 - **`--prescreen` 复用提取**: 仅真成功（有内容、非占位）结果被复用；失败/占位时允许二次高成本提取
 - **API 鉴权**: 默认绑定 127.0.0.1。设置 `VIDEOMIND_API_TOKEN`（admin）或 `VMB_CONSUMER_TOKENS`（JSON 多消费者）后，`/api/v1/*` 需携带 `Authorization: Bearer <token>`；`VMB_RATE_LIMIT_PER_MIN` 可开启每消费者每分钟限流（0=关闭）。带非白名单 Origin 的浏览器请求被 403 拒绝（防 CSRF）
+- **Discovery API**: `VMB_ENABLE_CREATOR_FEED=1` 开启 `/api/v1/creator/feed`，`VMB_ENABLE_COMMENTS=1` 开启 `/api/v1/comments`（默认都不注册路由）；MCP 同步出现 `get_creator_feed` / `get_comments`。B站空间接口对无登录态请求常返回 HTTP 412 / `code=-352`，可用 `VMB_BILIBILI_COOKIES_FILE`（Netscape cookies.txt）或 `VMB_BILIBILI_SESSDATA` / `VMB_BILIBILI_COOKIE` 提供登录态；评论接口实测可无登录采样。cookie 可能绑定出口 IP/指纹，换机器仍可能 `risk_control`；VMB 不绕过验证码。回归脚本：`scripts/check_discovery_links.py`
 - **GUI 使用 PySide6**: 已移到 `gui` extra；服务端/CLI/MCP 不需要安装，GUI 测试在缺依赖时自动跳过
 - **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)

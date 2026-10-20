@@ -1,11 +1,12 @@
 """API数据模型"""
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field, HttpUrl
 
+from ..core.models import CostTier
 from ..models.task import ExportTarget, ProcessingMode, TaskStatus
 
 
@@ -14,6 +15,139 @@ class APIError(BaseModel):
     error: str = Field(..., description="错误类型")
     message: str = Field(..., description="错误信息")
     details: dict[str, Any] | None = Field(None, description="详细错误信息")
+
+
+class CreatorFeedRequest(BaseModel):
+    """创作者作品列表请求。"""
+
+    url: HttpUrl = Field(..., description="创作者主页链接")
+    limit: int = Field(default=20, ge=1, le=30, description="返回作品数上限")
+    max_cost: CostTier = Field(
+        default=CostTier.CHEAP,
+        description="最大可接受成本等级",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "url": "https://space.bilibili.com/123456",
+                "limit": 20,
+                "max_cost": "cheap",
+            }
+        }
+
+
+class CreatorInfoResponse(BaseModel):
+    id: str
+    name: str
+    url: str
+
+
+class CreatorFeedItemResponse(BaseModel):
+    id: str
+    url: str
+    title: str
+    published_at: str | None = None
+    duration_seconds: float = 0.0
+    metrics: dict[str, int] | None = None
+    cover_url: str | None = None
+
+
+class CreatorFeedResponse(BaseModel):
+    success: bool
+    schema_version: str
+    request_id: str
+    platform: str
+    source: str
+    cost_tier: str
+    completeness: str
+    sampled: bool
+    cached: bool
+    fetched_at: str
+    creator: CreatorInfoResponse | None = None
+    items: list[CreatorFeedItemResponse] = Field(default_factory=list)
+    returned_count: int
+    has_more: bool
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    error_code: str | None = None
+    retry_after_seconds: int | None = None
+
+
+class CommentsRequest(BaseModel):
+    """评论采样请求。"""
+
+    url: HttpUrl = Field(..., description="内容链接")
+    limit: int = Field(default=20, ge=1, le=50, description="返回评论总数上限")
+    sort: Literal["hot", "recent"] = Field(default="hot", description="热度或最新")
+    include_replies: bool = Field(default=False, description="是否展开一层二级回复")
+    max_replies_per_thread: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="每个一级评论最多返回的回复数",
+    )
+    include_author: bool = Field(
+        default=False,
+        description="是否返回作者展示名（不返回用户 ID/头像/主页）",
+    )
+    max_cost: CostTier = Field(
+        default=CostTier.CHEAP,
+        description="最大可接受成本等级",
+    )
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "url": "https://www.bilibili.com/video/BV1xx411c7mD",
+                "limit": 20,
+                "sort": "hot",
+                "include_replies": True,
+                "max_replies_per_thread": 3,
+                "include_author": False,
+                "max_cost": "cheap",
+            }
+        }
+
+
+class CommentAuthorResponse(BaseModel):
+    display_name: str
+
+
+class CommentItemResponse(BaseModel):
+    id: str
+    parent_id: str | None = None
+    root_id: str
+    text: str
+    likes: int
+    created_at: str | None = None
+    is_reply: bool
+    reply_count: int | None = None
+    author: CommentAuthorResponse | None = None
+    truncated: bool | None = None
+
+
+class CommentsResponse(BaseModel):
+    success: bool
+    schema_version: str
+    request_id: str
+    platform: str
+    source: str
+    cost_tier: str
+    completeness: str
+    sampled: bool
+    cached: bool
+    fetched_at: str
+    sort: str
+    items: list[CommentItemResponse] = Field(default_factory=list)
+    returned_count: int
+    top_level_count: int
+    reply_count: int
+    has_more: bool
+    warnings: list[str] = Field(default_factory=list)
+    error: str | None = None
+    error_code: str | None = None
+    retry_after_seconds: int | None = None
 
 
 class TaskCreateRequest(BaseModel):

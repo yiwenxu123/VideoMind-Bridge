@@ -1,0 +1,52 @@
+{
+  "code": 0,
+  "message": "0",
+  "data": {
+    "list": {
+      "vlist": [
+        {
+          "aid": 1001,
+          "bvid": "BV1demo00001",
+          "title": "示例视频 <em class=\"keyword\">AI</em>",
+          "author": "示例UP主",
+          "created": 1760000000,
+          "length": "12:34",
+          "pic": "//i0.hdslb.com/bfs/archive/demo1.jpg",
+          "stat": {
+            "view": 12000,
+            "like": 800,
+            "reply": 60,
+            "favorite": 300,
+            "coin": 50,
+            "share": 40
+          }
+        },
+        {
+          "aid": 1002,
+          "bvid": "BV1demo00002",
+          "title": "第二个视频",
+          "author": "示例UP主",
+          "created": 1759900000,
+          "length": "1:02:03",
+          "pic": "http://i0.hdslb.com/bfs/archive/demo2.jpg",
+          "stat": {
+            "view": 500,
+            "like": 10
+          }
+        },
+        {
+          "aid": 1003,
+          "bvid": "BV1demo00003",
+          "title": "第三个视频",
+          "author": "示例UP主",
+          "created": 1759800000,
+          "length": 95,
+          "stat": {}
+        }
+      ]
+    },
+    "page": {
+      "count": 125
+    }
+  }
+}

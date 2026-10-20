@@ -1,0 +1,21 @@
+{
+  "code": 0,
+  "data": {
+    "replies": [
+      {
+        "rpid": 20001,
+        "root": 10001,
+        "parent": 10001,
+        "like": 5,
+        "ctime": 1760000100,
+        "content": {
+          "message": "同意，尤其是第二点"
+        },
+        "member": {
+          "uname": "用户丙",
+          "mid": "333"
+        }
+      }
+    ]
+  }
+}

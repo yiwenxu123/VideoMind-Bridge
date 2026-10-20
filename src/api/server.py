@@ -274,6 +274,9 @@ class APIServer:
         )
 
         allowed_origins = self.ALLOWED_ORIGINS
+        from ..core.discovery.config import comments_enabled, creator_feed_enabled
+        creator_feed_is_enabled = creator_feed_enabled()
+        comments_is_enabled = comments_enabled()
 
         @app.middleware("http")
         async def security_middleware(request, call_next):
@@ -285,6 +288,16 @@ class APIServer:
                 not origin or
                 any(origin.startswith(allowed) for allowed in allowed_origins)
             )
+
+            # 默认关闭的 Discovery 端点显式返回 404，避免被 OPTIONS 通配路由变成 405
+            request_path = request.url.path.rstrip("/")
+            if (
+                not creator_feed_is_enabled
+                and request_path == "/api/v1/creator/feed"
+            ):
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
+            if not comments_is_enabled and request_path == "/api/v1/comments":
+                return JSONResponse(status_code=404, content={"detail": "Not Found"})
 
             # CSRF 防护: 带非白名单 Origin 的请求直接拒绝 (而非仅不返回 CORS 头)
             if not is_allowed:
@@ -340,6 +353,11 @@ class APIServer:
 
         # 注册路由
         self._register_routes(app)
+
+        # Discovery API 默认关闭；开启后才注册对应路由
+        if creator_feed_is_enabled or comments_is_enabled:
+            from .discovery_routes import include_discovery_routes
+            include_discovery_routes(app)
 
         # 挂载静态文件 (Web UI) — 基于文件位置解析, 不依赖 CWD
         from pathlib import Path as _Path

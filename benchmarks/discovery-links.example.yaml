@@ -1,0 +1,17 @@
+# 复制为 benchmarks/discovery-links.local.yaml 后填入真实链接
+# 本地文件已被 gitignore，不要提交带时效 token 的链接
+- name: bilibili-creator
+  kind: creator_feed
+  url: "https://space.bilibili.com/123456"
+  limit: 5
+  min_items: 1
+
+- name: bilibili-comments
+  kind: comments
+  url: "https://www.bilibili.com/video/BVxxxxxxxxxx"
+  limit: 10
+  min_items: 1
+  sort: hot
+  include_replies: true
+  max_replies_per_thread: 2
+  include_author: false

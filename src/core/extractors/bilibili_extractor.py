@@ -6,10 +6,8 @@
 
 from __future__ import annotations
 
-import hashlib
 import re
 import time
-import urllib.parse
 from pathlib import Path
 from typing import Any
 
@@ -24,19 +22,9 @@ from ..asr import (
 )
 from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
+from ..platforms.bilibili_client import BilibiliClient
 from . import register_extractor
 from .base import ContentExtractor
-
-# Bilibili WBI 签名常量和密钥池
-MIXIN_KEY_ENC_TABLE = [
-    46, 47, 18, 2, 53, 8, 23, 32, 15, 50, 10, 31, 58, 3, 45, 35,
-    27, 43, 5, 49, 33, 9, 42, 19, 29, 28, 14, 37, 12, 52, 56, 7,
-    0, 16, 22, 38, 59, 55, 11, 61, 34, 40, 26, 17, 51, 41, 60, 39,
-    20, 13, 48, 6, 36, 24, 44, 25, 21, 4, 54, 57, 30, 1,
-]
-
-# 默认 WBI 密钥 (当 API 获取失败时使用)
-_FALLBACK_WBI_KEY = "ea1db124afe2e5b2"
 
 _BV_RE = re.compile(r"/(BV\w+)")
 _EP_RE = re.compile(r"/(EP\w+)")
@@ -52,16 +40,8 @@ class BilibiliExtractor(ContentExtractor):
     url_pattern = re.compile(r"(bilibili\.com|b23\.tv)")
 
     def __init__(self) -> None:
-        self._wbi_key: str | None = None
-        self._client = httpx.Client(
-            timeout=30.0,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                              "AppleWebKit/537.36 (KHTML, like Gecko) "
-                              "Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://www.bilibili.com",
-            },
-        )
+        self._bili = BilibiliClient(timeout=30.0)
+        self._client = self._bili.client
 
     def is_available(self) -> bool:
         """Bilibili 提取器始终可用 (无需 Cookie/Token)"""
@@ -152,7 +132,7 @@ class BilibiliExtractor(ContentExtractor):
 
         try:
             params = {"bvid": bvid}
-            signed = self._wbi_sign(params, self._get_wbi_key())
+            signed = self._bili.sign(params)
             resp = self._client.get(
                 "https://api.bilibili.com/x/web-interface/view", params=signed
             )
@@ -168,7 +148,7 @@ class BilibiliExtractor(ContentExtractor):
                 return None
 
             play_params = {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 1}
-            signed = self._wbi_sign(play_params, self._get_wbi_key())
+            signed = self._bili.sign(play_params)
             resp2 = self._client.get(
                 "https://api.bilibili.com/x/player/playurl", params=signed
             )
@@ -281,42 +261,6 @@ class BilibiliExtractor(ContentExtractor):
         except MediaFetchError:
             return None
 
-    def _get_wbi_key(self) -> str:
-        """获取 WBI 签名密钥"""
-        if self._wbi_key is not None:
-            return self._wbi_key
-
-        try:
-            resp = self._client.get("https://api.bilibili.com/x/web-interface/nav")
-            data = resp.json()
-            if data.get("code") == 0 and data.get("data", {}).get("isLogin") is not None:
-                img_url: str = data["data"]["wbi_img"]["img_url"]
-                sub_url: str = data["data"]["wbi_img"]["sub_url"]
-                img_key = img_url.rsplit("/", 1)[1].split(".")[0]
-                sub_key = sub_url.rsplit("/", 1)[1].split(".")[0]
-                self._wbi_key = self._mixin_key(img_key + sub_key)
-            else:
-                self._wbi_key = _FALLBACK_WBI_KEY
-        except Exception:
-            self._wbi_key = _FALLBACK_WBI_KEY
-
-        return self._wbi_key
-
-    @staticmethod
-    def _mixin_key(orig: str) -> str:
-        """WBI mixin key 计算"""
-        return "".join(orig[i] for i in MIXIN_KEY_ENC_TABLE if i < len(orig))[:32]
-
-    @staticmethod
-    def _wbi_sign(params: dict[str, str], wbi_key: str) -> dict[str, str]:
-        """对参数字典进行 WBI 签名"""
-        params["wts"] = str(int(time.time()))
-        sorted_params = sorted(params.items())
-        query = urllib.parse.urlencode(sorted_params)
-        sign_str = query + wbi_key
-        params["w_rid"] = hashlib.md5(sign_str.encode()).hexdigest()
-        return params
-
     def _resolve_video_id(self, url: str) -> str | None:
         """解析视频 ID (支持 BV/EP/SS/短链接)"""
         # 短链接
@@ -346,7 +290,7 @@ class BilibiliExtractor(ContentExtractor):
     def _get_video_info(self, bvid: str) -> dict[str, Any]:
         """获取视频元信息"""
         params = {"bvid": bvid}
-        signed = self._wbi_sign(params, self._get_wbi_key())
+        signed = self._bili.sign(params)
         resp = self._client.get(
             "https://api.bilibili.com/x/web-interface/view",
             params=signed,
@@ -367,7 +311,7 @@ class BilibiliExtractor(ContentExtractor):
     def _get_subtitle(self, bvid: str) -> tuple[str, list, str | None]:
         """获取字幕内容"""
         params = {"bvid": bvid}
-        signed = self._wbi_sign(params, self._get_wbi_key())
+        signed = self._bili.sign(params)
         resp = self._client.get(
             "https://api.bilibili.com/x/web-interface/view",
             params=signed,

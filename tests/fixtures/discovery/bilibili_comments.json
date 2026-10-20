@@ -1,0 +1,41 @@
+{
+  "code": 0,
+  "data": {
+    "page": {
+      "count": 2
+    },
+    "replies": [
+      {
+        "rpid": 10001,
+        "rpid_str": "10001",
+        "root": 0,
+        "parent": 0,
+        "like": 42,
+        "ctime": 1760000000,
+        "rcount": 5,
+        "content": {
+          "message": "这个观点很有启发"
+        },
+        "member": {
+          "uname": "用户甲",
+          "mid": "111"
+        }
+      },
+      {
+        "rpid": 10002,
+        "root": 0,
+        "parent": 0,
+        "like": 3,
+        "ctime": 1759900000,
+        "rcount": 0,
+        "content": {
+          "message": "第二条评论"
+        },
+        "member": {
+          "uname": "用户乙",
+          "mid": "222"
+        }
+      }
+    ]
+  }
+}
