@@ -25,6 +25,13 @@ from ..asr import (
 )
 from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
+from ..platforms.http import platform_get
+from ..platforms.rate_limit import (
+    PlatformRateLimiter,
+    PlatformRequestError,
+    get_platform_rate_limiter,
+)
+from ..platforms.session import get_session_manager
 from . import register_extractor
 from ._ssr import find_first_meta, find_ssr_payload
 from .base import ContentExtractor
@@ -38,27 +45,6 @@ _DOUYIN_RE = re.compile(
 _DOUYIN_SHORT_RE = re.compile(r"v\.douyin\.com/(\w+)")
 
 
-def _load_cookies_file(path: str) -> str:
-    """读取 Netscape cookies.txt, 拼装为 Cookie header。
-
-    文件格式 (yt-dlp/浏览器导出):
-        domain \t includeSubdomains \t path \t secure \t expiry \t name \t value
-    """
-    try:
-        with open(path, encoding="utf-8") as f:
-            parts = []
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                fields = line.split("\t")
-                if len(fields) >= 7:
-                    parts.append(f"{fields[5]}={fields[6]}")
-            return "; ".join(parts)
-    except (OSError, IndexError):
-        return ""
-
-
 class DouyinExtractor(ContentExtractor):
     """抖音内容提取器"""
 
@@ -66,10 +52,13 @@ class DouyinExtractor(ContentExtractor):
     _cost_tier = CostTier.FREE
     url_pattern = re.compile(r"(douyin\.com|iesdouyin\.com)")
 
-    def __init__(self) -> None:
-        # 手机 UA 更易通过风控; 可通过 DOUYIN_COOKIES_FILE 提供 cookies.txt 绕过验证码
-        cookies_file = os.getenv("DOUYIN_COOKIES_FILE", "")
-        cookie_header = _load_cookies_file(cookies_file) if cookies_file else ""
+    def __init__(
+        self,
+        *,
+        client: httpx.Client | None = None,
+        limiter: PlatformRateLimiter | None = None,
+    ) -> None:
+        # 手机 UA 更易通过风控; 登录态统一由 SessionManager 读取
         headers = {
             "User-Agent": (
                 "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
@@ -77,15 +66,16 @@ class DouyinExtractor(ContentExtractor):
                 "Version/16.0 Mobile/15E148 Safari/604.1"
             ),
         }
-        if cookie_header:
-            headers["Cookie"] = cookie_header
+        session = get_session_manager().get("douyin")
+        if session is not None:
+            headers.update(session.headers())
 
-        self._client = httpx.Client(
+        self._limiter = limiter or get_platform_rate_limiter()
+        self._client = client or httpx.Client(
             timeout=30.0,
             follow_redirects=True,
             headers=headers,
         )
-        self._has_cookies = bool(cookie_header)
 
     def is_available(self) -> bool:
         """无 Cookie 也可用 (部分 IP 可直抓)"""
@@ -308,15 +298,40 @@ class DouyinExtractor(ContentExtractor):
         使用 Share API (无需 Cookie):
         https://www.iesdouyin.com/share/video/{video_id}/
         """
+        share_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
         try:
-            # 尝试分享页面
-            share_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
-            resp = self._client.get(share_url, timeout=15.0)
+            try:
+                resp = platform_get(
+                    self.platform_name,
+                    self._client,
+                    share_url,
+                    timeout=15.0,
+                    limiter=self._limiter,
+                )
+            except PlatformRequestError as exc:
+                if exc.code in {"risk_control", "auth_required"}:
+                    return "", "", None
+                # 分享页不存在/网络异常时，交给 detail API 兜底
+                return self._fetch_via_share_api(video_id)
+            except httpx.HTTPError:
+                return self._fetch_via_share_api(video_id)
 
             if resp.status_code != 200:
-                # 降级到 Douyin 页面
                 douyin_url = f"https://www.douyin.com/video/{video_id}"
-                resp = self._client.get(douyin_url, timeout=15.0)
+                try:
+                    resp = platform_get(
+                        self.platform_name,
+                        self._client,
+                        douyin_url,
+                        timeout=15.0,
+                        limiter=self._limiter,
+                    )
+                except PlatformRequestError as exc:
+                    if exc.code in {"risk_control", "auth_required"}:
+                        return "", "", None
+                    return self._fetch_via_share_api(video_id)
+                except httpx.HTTPError:
+                    return self._fetch_via_share_api(video_id)
 
             html = resp.text
 
@@ -338,8 +353,7 @@ class DouyinExtractor(ContentExtractor):
 
             return title, description, None
 
-        except httpx.HTTPError:
-            # HTTP 错误时尝试备用 API
+        except (httpx.HTTPError, PlatformRequestError):
             return self._fetch_via_share_api(video_id)
 
     def _fetch_via_share_api(
@@ -355,12 +369,17 @@ class DouyinExtractor(ContentExtractor):
                 "https://www.douyin.com/aweme/v1/web/aweme/detail/"
                 f"?aweme_id={video_id}&device_platform=webapp&aid=6383"
             )
-            resp = self._client.get(api_url, timeout=10.0,
+            resp = platform_get(
+                self.platform_name,
+                self._client,
+                api_url,
+                timeout=10.0,
                 headers={
                     "Accept": "application/json",
                     "Referer": "https://www.douyin.com/",
-                })
-            resp.raise_for_status()
+                },
+                limiter=self._limiter,
+            )
             data = resp.json()
             aweme = data.get("aweme_detail", {})
             if not isinstance(aweme, dict):

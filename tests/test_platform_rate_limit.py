@@ -204,3 +204,25 @@ def test_timeout_retries_then_raises_upstream_error():
 
     assert exc_info.value.code == "upstream_error"
     assert len(calls) == 2
+
+
+def test_from_env_scales_max_wait_with_interval(monkeypatch):
+    monkeypatch.setenv(
+        "VMB_PLATFORM_INTERVALS_MS",
+        '{"bilibili": 1000, "douyin": 2000}',
+    )
+    monkeypatch.delenv("VMB_PLATFORM_MAX_WAIT_SECONDS", raising=False)
+
+    limiter = PlatformRateLimiter.from_env()
+
+    assert limiter._policy("bilibili").max_wait_seconds == 2.0
+    assert limiter._policy("douyin").max_wait_seconds == 3.0
+
+
+def test_from_env_respects_explicit_max_wait(monkeypatch):
+    monkeypatch.setenv("VMB_PLATFORM_INTERVALS_MS", '{"douyin": 2000}')
+    monkeypatch.setenv("VMB_PLATFORM_MAX_WAIT_SECONDS", "7")
+
+    limiter = PlatformRateLimiter.from_env()
+
+    assert limiter._policy("douyin").max_wait_seconds == 7.0

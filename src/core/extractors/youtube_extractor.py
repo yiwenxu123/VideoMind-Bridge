@@ -14,6 +14,8 @@ from typing import Any
 import httpx
 
 from ..models import CostTier, ExtractOptions, ExtractResult
+from ..platforms.http import platform_get
+from ..platforms.rate_limit import PlatformRateLimiter, get_platform_rate_limiter
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -31,8 +33,14 @@ class YouTubeExtractor(ContentExtractor):
     _cost_tier = CostTier.FREE
     url_pattern = re.compile(r"(youtube\.com|youtu\.be)")
 
-    def __init__(self) -> None:
-        self._client = httpx.Client(timeout=30.0)
+    def __init__(
+        self,
+        *,
+        client: httpx.Client | None = None,
+        limiter: PlatformRateLimiter | None = None,
+    ) -> None:
+        self._limiter = limiter or get_platform_rate_limiter()
+        self._client = client or httpx.Client(timeout=30.0)
 
     def is_available(self) -> bool:
         return True
@@ -105,7 +113,14 @@ class YouTubeExtractor(ContentExtractor):
         """通过 oembed 获取视频标题"""
         try:
             oembed_url = f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
-            resp = self._client.get(oembed_url, timeout=10.0)
+            resp = platform_get(
+                self.platform_name,
+                self._client,
+                oembed_url,
+                timeout=10.0,
+                follow_redirects=True,
+                limiter=self._limiter,
+            )
             data = resp.json()
             return str(data.get("title", ""))
         except Exception:
@@ -117,7 +132,7 @@ class YouTubeExtractor(ContentExtractor):
         直接调用 youtube-transcript-api 的内置 API 端点。
         """
         try:
-            # YouTube Transcript API 端点
+            # YouTube Transcript API 端点（第三方服务，不套平台 limiter）
             url = f"https://youtubetranscript.com/?v={video_id}&format=json"
             resp = self._client.get(url, timeout=15.0)
 
@@ -150,8 +165,15 @@ class YouTubeExtractor(ContentExtractor):
         """通过 YouTube 内部字幕 API 获取"""
         try:
             watch_url = f"https://www.youtube.com/watch?v={video_id}"
-            resp = self._client.get(watch_url, timeout=15.0,
-                headers={"User-Agent": "Mozilla/5.0"})
+            resp = platform_get(
+                self.platform_name,
+                self._client,
+                watch_url,
+                timeout=15.0,
+                headers={"User-Agent": "Mozilla/5.0"},
+                follow_redirects=True,
+                limiter=self._limiter,
+            )
 
             # 从页面提取字幕轨道 URL
             html = resp.text
@@ -184,7 +206,14 @@ class YouTubeExtractor(ContentExtractor):
                 return "", [], None
 
             # 获取字幕 XML
-            sub_resp = self._client.get(track_url, timeout=10.0)
+            sub_resp = platform_get(
+                self.platform_name,
+                self._client,
+                track_url,
+                timeout=10.0,
+                follow_redirects=True,
+                limiter=self._limiter,
+            )
             sub_text = sub_resp.text
 
             # 解析字幕 XML

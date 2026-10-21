@@ -37,7 +37,7 @@ def detect_platform(url: str) -> str:
         "youtube": ["youtube.com", "youtu.be"],
         "douyin": ["douyin.com", "iesdouyin.com", "v.douyin.com"],
         "tiktok": ["tiktok.com", "vm.tiktok.com"],
-        "xiaohongshu": ["xiaohongshu.com", "xhs.link", "xhslink.com"],
+        "xiaohongshu": ["xiaohongshu.com", "xhs.link", "xhslink.com", "xhslink.cn"],
         "kuaishou": ["kuaishou.com", "gifshow.com"],
         "weibo": ["weibo.com", "weibo.cn"],
         "zhihu": ["zhihu.com"],

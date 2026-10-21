@@ -14,6 +14,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from ..platforms.ytdlp_options import ytdlp_cookie_args, ytdlp_network_args
 from .audio import find_ffmpeg
 from .types import FetchedMedia, MediaFetchFailed
 
@@ -49,7 +50,6 @@ class YtDlpMediaFetcher:
 
     def __init__(self, ytdlp: str | None = None) -> None:
         self._ytdlp = ytdlp
-        self._cookies_browser = os.getenv("VMB_COOKIES_BROWSER", "").strip()
 
     @property
     def binary(self) -> str | None:
@@ -61,17 +61,8 @@ class YtDlpMediaFetcher:
         return self.binary is not None
 
     def _cookies_args(self) -> list[str]:
-        """下载所用登录态: 优先 cookies 文件 (VMB_COOKIES_FILE, 服务器场景),
-        其次借本机浏览器登录态 (VMB_COOKIES_BROWSER, 本机/桌面场景)。"""
-        cookies_file = os.getenv("VMB_COOKIES_FILE", "").strip()
-        if cookies_file:
-            if not Path(cookies_file).exists():
-                logger.warning(f"VMB_COOKIES_FILE 不存在: {cookies_file}, 忽略 cookies")
-            else:
-                return ["--cookies", cookies_file]
-        if self._cookies_browser:
-            return ["--cookies-from-browser", self._cookies_browser]
-        return []
+        """下载所用登录态统一由 YtDlpSessionProvider 提供。"""
+        return ytdlp_cookie_args()
 
     def _timeout(self, timeout: float | None) -> float:
         if timeout is not None:
@@ -117,7 +108,14 @@ class YtDlpMediaFetcher:
         """yt-dlp --dump-json --skip-download；失败返回空字典。"""
         if not self.is_available():
             return {}
-        cmd = [self.binary or _YTDLP_CMD, "--dump-json", "--skip-download", url]
+        cmd = [
+            self.binary or _YTDLP_CMD,
+            "--dump-json",
+            "--skip-download",
+            *ytdlp_network_args(url),
+            *self._cookies_args(),
+            url,
+        ]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
             if result.returncode == 0:
@@ -136,6 +134,7 @@ class YtDlpMediaFetcher:
             "-f", "bestaudio/best",
             "--no-playlist",
             "--output", output_template,
+            *ytdlp_network_args(url),
             *self._cookies_args(),
             url,
         ]
@@ -165,6 +164,7 @@ class YtDlpMediaFetcher:
             "--no-playlist",
             "--output", output_template,
             "--ffmpeg-location", ffmpeg,
+            *ytdlp_network_args(url),
             *self._cookies_args(),
             url,
         ]

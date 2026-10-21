@@ -102,12 +102,22 @@ class ContentExtractor(ABC):
         """解析短链接为最终 URL（跟随重定向）
 
         使用子类构造的 self._client（httpx.Client）；无客户端时返回 None。
+        短链也属于平台自有请求，因此走统一平台节流。
         """
         client = getattr(self, "_client", None)
         if client is None:
             return None
         try:
-            resp = client.get(url, follow_redirects=True, timeout=timeout)
-            return str(resp.url)
+            from ..platforms.http import platform_get
+
+            response = platform_get(
+                self.platform_name,
+                client,
+                url,
+                timeout=timeout,
+                follow_redirects=True,
+                limiter=getattr(self, "_limiter", None),
+            )
+            return str(response.url)
         except Exception:
             return None

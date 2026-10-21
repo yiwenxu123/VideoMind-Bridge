@@ -23,6 +23,13 @@ from ..asr import (
 )
 from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
+from ..platforms.http import platform_get
+from ..platforms.rate_limit import (
+    PlatformRateLimiter,
+    PlatformRequestError,
+    get_platform_rate_limiter,
+)
+from ..platforms.session import get_session_manager
 from . import register_extractor
 from ._ssr import find_ssr_payload
 from .base import ContentExtractor
@@ -45,13 +52,22 @@ class XiaohongshuExtractor(ContentExtractor):
     _cost_tier = CostTier.FREE
     url_pattern = re.compile(r"(xiaohongshu\.com|xhslink\.(?:com|cn))")
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        client: httpx.Client | None = None,
+        limiter: PlatformRateLimiter | None = None,
+    ) -> None:
         # 手机 UA: 小红书桌面 UA 的 SSR 不返回笔记内容, 仅移动端页面含 noteData
-        self._client = httpx.Client(
+        headers = {"User-Agent": MOBILE_UA}
+        session = get_session_manager().get("xiaohongshu")
+        if session is not None:
+            headers.update(session.headers())
+
+        self._limiter = limiter or get_platform_rate_limiter()
+        self._client = client or httpx.Client(
             timeout=30.0,
-            headers={
-                "User-Agent": MOBILE_UA,
-            },
+            headers=headers,
             follow_redirects=True,
         )
 
@@ -148,7 +164,13 @@ class XiaohongshuExtractor(ContentExtractor):
                 note_url += "?" + "&".join(xsec_params)
 
         try:
-            resp = self._client.get(note_url, timeout=15.0)
+            resp = platform_get(
+                self.platform_name,
+                self._client,
+                note_url,
+                timeout=15.0,
+                limiter=self._limiter,
+            )
             html = resp.text
 
             title = self._extract_title(html)
@@ -165,7 +187,7 @@ class XiaohongshuExtractor(ContentExtractor):
 
             return title, content, images, self._is_video_html(html), html
 
-        except httpx.HTTPError:
+        except (httpx.HTTPError, PlatformRequestError):
             return "", "", [], False, ""
 
     @staticmethod

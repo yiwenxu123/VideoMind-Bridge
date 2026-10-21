@@ -1,6 +1,6 @@
 # Router 生命周期与平台会话加固方案
 
-> 状态：阶段 1–3 已实施（2026-10-21）；阶段 4–5 未实施。实现差异见 §8。
+> 状态：阶段 1–4 已实施（2026-10-21）；阶段 5 未实施。实现差异见 §8。
 > 范围：第 1 项（Router 生命周期 + `/extract` 成本透传）与第 2 项（统一会话健康 + 平台级限流/退避）
 > 目标：减少重复初始化与连接泄漏，让成本兜底真正可达，并降低 412/-352/429 的触发率。
 
@@ -203,11 +203,15 @@ class SessionProvider(Protocol):
   - 解析 Netscape，按 `bilibili.com` 域过滤，计算最近过期时间。
   - `check()` 调用 `/x/web-interface/nav`，`isLogin` 判断；-101/-401 → expired，-352 → risk_control；超时 → unknown。
 - `DouyinSessionProvider`：
-  - `DOUYIN_COOKIES_FILE`；解析过期时间；默认只做 `status()`，`check()` 可选。
+  - `DOUYIN_COOKIES_FILE`；按 `douyin.com` 域过滤，`DouyinExtractor` 直接复用该 Cookie header。
+  - 默认只做 `status()`，`check()` 不发起网络探测。
+- `XiaohongshuSessionProvider`：
+  - `VMB_XHS_COOKIE` > `VMB_XHS_COOKIES_FILE` > `VMB_COOKIES_FILE`；按 `xiaohongshu.com` 域过滤。
+  - 不配置时保持零 Cookie；`check()` 不发起网络探测。
 - `YtDlpSessionProvider`：
-  - `VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`；只报配置状态，不做浏览器探测。
+  - `VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`；`cookie_args()` 是 yt-dlp `--cookies` / `--cookies-from-browser` 的唯一来源。
 - `NoneSessionProvider`：
-  - XHS/YouTube 等当前无需登录态的提取器返回 `configured=False, source="none"`。
+  - `youtube` 等当前无需登录态的提取器返回 `configured=False, source="none"`。YouTube 的登录态由 yt-dlp 自行管理，不新增直连 Cookie provider。
 
 **安全约束**
 - API/日志永不返回 cookie 值；只返回来源、数量、过期时间、状态。
@@ -277,8 +281,11 @@ class PlatformRateLimiter:
 
 **接线**
 - Bilibili：`BilibiliClient` 的所有请求（nav/view/playurl/reply/space）走 limiter；删除 discovery 中重复的 `PlatformThrottle`（service 与 provider 不再双重等待）。
-- Douyin/XHS/YouTube/Tikhub/Apify：优先把各自的 top-level HTTP 调用包进 `limiter.execute`；不做一次性大重构。
-- yt-dlp/yt-dlp+ASR：把 `sleep_requests`、`retries`、`extractor_retries`、`socket_timeout` 写入 yt-dlp options；不要用 HTTP limiter 包整个子进程。
+- Douyin：`iesdouyin.com` / `www.douyin.com` 页面和 detail API 走 limiter；本地 `douyin-api` 网关不套 limiter。
+- Xiaohongshu：`xhslink` 短链和 `xiaohongshu.com` 页面走 limiter。
+- YouTube：`oembed`、watch 页和字幕轨道走 limiter；`youtubetranscript.com` 第三方服务不套平台 limiter。
+- yt-dlp/yt-dlp+ASR：注入 `--sleep-requests`、`--retries`、`--extractor-retries`、`--socket-timeout`，不使用 HTTP limiter 包整个子进程；平台熔断打开时跳过 yt-dlp 兜底。
+- TikHub/Apify：付费第三方 API 不套平台 limiter，保留各自配额与重试。
 - 配置：
   - `VMB_PLATFORM_RATE_LIMIT_ENABLED=1`
   - `VMB_PLATFORM_INTERVALS_MS='{"bilibili":1000,"douyin":2000,"xiaohongshu":1500,"youtube":500}'`
@@ -286,7 +293,9 @@ class PlatformRateLimiter:
   - `VMB_PLATFORM_MAX_RETRIES=2`
   - `VMB_PLATFORM_BACKOFF_BASE_MS=500`
   - `VMB_PLATFORM_CIRCUIT_COOLDOWN_SEC=60`
-- 默认开启对 B站/抖音；YouTube 可后置。提供一键关闭开关以便回滚。
+  - `VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE`（可选登录态）
+  - `VMB_YTDLP_SLEEP_REQUESTS` / `VMB_YTDLP_RETRIES` / `VMB_YTDLP_EXTRACTOR_RETRIES` / `VMB_YTDLP_SOCKET_TIMEOUT` / `VMB_YTDLP_SLEEP_INTERVAL`
+- 默认开启对 B站/抖音/小红书/YouTube 的平台直连节流；提供一键关闭开关以便回滚。
 
 ### 3.4 验收
 
@@ -296,7 +305,7 @@ class PlatformRateLimiter:
 - [x] 429 按 `Retry-After` 重试，最终失败返回 `rate_limited` + `retry_after_seconds`。
 - [x] 同平台请求满足最小间隔/并发上限；测试用 fake clock，不真实 sleep。
 - [x] 评论总超时仍生效，重试不突破总预算。
-- [ ] yt-dlp options 包含 sleep/retries；现有提取测试通过。（阶段 4）
+- [x] yt-dlp options 包含 sleep/retries；现有提取测试通过。
 - [x] 全量 pytest、ruff、mypy 通过。
 
 ---
@@ -325,13 +334,13 @@ class PlatformRateLimiter:
 
 ## 5. 分阶段实施
 
-| 阶段 | 内容 | 预计 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| 1 | RouterRuntime + 缓存 + close + cost_tier 透传 + 测试 | 1–2 天 |
-| 2 | SessionManager + B站接入 + `/sessions` 状态 + 测试 | 1–2 天 |
-| 3 | PlatformRateLimiter + B站接入 + 删除 discovery 重复 throttle + 测试 | 1–2 天 |
-| 4 | 抖音/小红书/YouTube/yt-dlp 接入与默认值调优 | 2–3 天 |
-| 5 | 观测、灰度、文档、全量回归 | 1 天 |
+| 1 | RouterRuntime + 缓存 + close + cost_tier 透传 + 测试 | 已完成 |
+| 2 | SessionManager + B站接入 + `/sessions` 状态 + 测试 | 已完成 |
+| 3 | PlatformRateLimiter + B站接入 + 删除 discovery 重复 throttle + 测试 | 已完成 |
+| 4 | 抖音/小红书/YouTube 直连接入 + yt-dlp 网络参数/会话 + 测试 | 已完成（2026-10-21） |
+| 5 | 观测、灰度、文档、全量回归 | 未实施 |
 
 **回滚**
 - `cost_tier` 默认 cheap，旧调用方无感。
@@ -369,10 +378,13 @@ class PlatformRateLimiter:
 - `SessionManager`（`src/core/platforms/session.py`）+ `GET /api/v1/sessions`、`POST /api/v1/sessions/{platform}/check`；B站状态只返回来源、数量、过期时间和错误码，永不返回 cookie 值；仅 B站支持显式 check，其他平台 422。
 - `PlatformRateLimiter`（`src/core/platforms/rate_limit.py`）：B站 `BilibiliClient` 全部请求接入；412/-352 不重试并熔断，429/5xx/超时退避重试，401 直接 `auth_required`；HTTP 200 响应体内的 -352/-412/-799 也会登记风控。
 - 删除 discovery 的 `PlatformThrottle`，避免 service/provider 双重等待；评论总超时预算继续生效。
+- 阶段 4：新增 `platform_get()`（`src/core/platforms/http.py`）；抖音 `iesdouyin`/`douyin.com` 直连、小红书短链/笔记页、YouTube oembed/watch/字幕轨道接入 limiter；本地 `douyin-api`、`youtubetranscript.com`、TikHub/Apify 不接平台 limiter。
+- 阶段 4：`XiaohongshuSessionProvider`（`VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE` / `VMB_COOKIES_FILE`）；抖音改用 SessionManager 的 Cookie；`YtDlpSessionProvider.cookie_args()` 成为 yt-dlp cookies 参数唯一来源。
+- 阶段 4：yt-dlp 命令注入 `--sleep-requests`、`--retries`、`--extractor-retries`、`--socket-timeout`；平台熔断打开时 yt-dlp/yt-dlp+ASR 直接跳过。
+- 阶段 4：平台最大等待按间隔自动放大（`max(2s, interval+1s)`），避免抖音 2s 间隔在并发请求下误报 `rate_limited`。
 
 **与草案的差异**
 - 限流器公开接口为 `execute()` + `notify_risk_control()`，没有单独的 `acquire()`/`record_failure()`。
 - `SessionStatus` 为普通 dataclass；B站 `check()` 的错误码为 `auth_required` / `risk_control` / `upstream_error`。
 - 提取缓存默认 TTL 600 秒、容量 256，可由 `VMB_EXTRACT_CACHE_TTL` / `VMB_EXTRACT_CACHE_MAX_ENTRIES` 调整。
-- 阶段 4（抖音/小红书/YouTube/yt-dlp 接入）与阶段 5（观测/灰度）未实施；yt-dlp 的 sleep/retries 选项仍待补。
-- `docs/API_USAGE.md` 已补 `cost_tier` 与 `/sessions` 的 HTTP 要点；平台限流细节以 `DISCOVERY_API.md` 为准。
+- 阶段 5（观测/灰度）未实施；`docs/API_USAGE.md` 已补 `cost_tier` 与 `/sessions` 的 HTTP 要点，阶段 4 的环境变量见 §3.3。

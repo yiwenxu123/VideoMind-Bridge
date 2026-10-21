@@ -17,7 +17,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ...utils.platform_detector import detect_platform
 from ..models import CostTier, ExtractOptions, ExtractResult
+from ..platforms.rate_limit import get_platform_rate_limiter
+from ..platforms.ytdlp_options import ytdlp_cookie_args, ytdlp_network_args
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -68,6 +71,19 @@ class YtDlpExtractor(ContentExtractor):
         return self._available
 
     def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
+        platform = detect_platform(url)
+        limiter = get_platform_rate_limiter()
+        if (
+            limiter.enabled
+            and platform != "unknown"
+            and limiter.circuit_state(platform) == "open"
+        ):
+            return ExtractResult(
+                success=False, platform=platform, title="", content="",
+                source="ytdlp", url=url, cost_tier=CostTier.FREE,
+                error=f"{platform} 平台熔断中，跳过 yt-dlp 兜底",
+            )
+
         if not self.is_available():
             return ExtractResult(
                 success=False, platform="ytdlp", title="", content="",
@@ -157,6 +173,8 @@ class YtDlpExtractor(ContentExtractor):
                 "--skip-download",       # 只下载字幕
                 "--print", "after_video:{}",  # JSON 输出元信息
                 "--convert-subs", "srt",  # 统一转为 SRT
+                *ytdlp_network_args(url),
+                *ytdlp_cookie_args(),
                 url,
             ]
 
@@ -170,7 +188,7 @@ class YtDlpExtractor(ContentExtractor):
 
             try:
                 result = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=120.0,
+                    cmd, capture_output=True, text=True, timeout=180.0,
                 )
 
                 if result.returncode != 0:
@@ -246,12 +264,14 @@ class YtDlpExtractor(ContentExtractor):
             _YTDLP_CMD,
             "--dump-json",
             "--skip-download",
+            *ytdlp_network_args(url),
+            *ytdlp_cookie_args(),
             url,
         ]
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=30.0,
+                cmd, capture_output=True, text=True, timeout=60.0,
             )
             if result.returncode == 0:
                 line = result.stdout.strip().split("\n")[0]

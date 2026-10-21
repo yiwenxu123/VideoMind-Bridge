@@ -116,6 +116,8 @@ class PlatformRateLimiter:
     @classmethod
     def from_env(cls) -> PlatformRateLimiter:
         intervals = _intervals_from_env()
+        explicit_max_wait = _env_float("VMB_PLATFORM_MAX_WAIT_SECONDS", 0.0)
+        has_explicit_max_wait = "VMB_PLATFORM_MAX_WAIT_SECONDS" in os.environ
         policies = {
             platform: PlatformPolicy(
                 min_interval_ms=interval,
@@ -123,7 +125,11 @@ class PlatformRateLimiter:
                 max_retries=_env_int("VMB_PLATFORM_MAX_RETRIES", 2),
                 backoff_base_ms=_env_int("VMB_PLATFORM_BACKOFF_BASE_MS", 500),
                 backoff_max_ms=_env_int("VMB_PLATFORM_BACKOFF_MAX_MS", 4000),
-                max_wait_seconds=_env_float("VMB_PLATFORM_MAX_WAIT_SECONDS", 2.0),
+                max_wait_seconds=(
+                    explicit_max_wait
+                    if has_explicit_max_wait
+                    else max(2.0, interval / 1000.0 + 1.0)
+                ),
                 circuit_threshold=max(
                     1,
                     _env_int("VMB_PLATFORM_CIRCUIT_THRESHOLD", 3),

@@ -23,7 +23,23 @@
 
 - `GET /api/v1/sessions`：列出各平台登录态来源、cookie 数量、最近过期时间和健康状态。
 - `POST /api/v1/sessions/bilibili/check`：显式检查 B站登录态；其他平台返回 422。
-- 响应只含脱敏信息，永不返回 cookie 值。配置方式见 [DISCOVERY_API.md](DISCOVERY_API.md) 的环境变量表。
+- 响应只含脱敏信息，永不返回 cookie 值。
+
+配置方式：
+- B站：`VMB_BILIBILI_COOKIE` > `VMB_BILIBILI_SESSDATA` > `VMB_BILIBILI_COOKIES_FILE` > `VMB_COOKIES_FILE`。
+- 抖音：`DOUYIN_COOKIES_FILE`。
+- 小红书：`VMB_XHS_COOKIE` > `VMB_XHS_COOKIES_FILE` > `VMB_COOKIES_FILE`（只取 `xiaohongshu.com` 域）。
+- yt-dlp：`VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`。
+
+### yt-dlp 网络参数
+
+需要限制 yt-dlp 子进程的请求频率时，可设置：
+
+- `VMB_YTDLP_SLEEP_REQUESTS`：默认按平台（B站 1s、抖音 2s、小红书 1.5s、YouTube 0.5s）。
+- `VMB_YTDLP_RETRIES`：默认 3。
+- `VMB_YTDLP_EXTRACTOR_RETRIES`：默认 2。
+- `VMB_YTDLP_SOCKET_TIMEOUT`：默认 30 秒。
+- `VMB_YTDLP_SLEEP_INTERVAL`：默认 0（不额外等待）。
 
 ## 快速开始
 

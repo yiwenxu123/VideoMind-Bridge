@@ -188,12 +188,60 @@ class DouyinSessionProvider:
         path = os.getenv("DOUYIN_COOKIES_FILE", "").strip()
         if not path:
             return "", "none", 0, None, None
-        records = parse_netscape_cookies(path)
+        records = parse_netscape_cookies(path, domain_suffix="douyin.com")
         header = build_cookie_header(records)
         count, expires_at = cookie_summary(records)
+        permission_warning = _cookie_file_warning(path)
         if header:
-            return header, "file", count, expires_at, None
-        return "", "file", 0, None, "no_valid_cookies"
+            return header, "file", count, expires_at, permission_warning
+        return "", "file", 0, None, permission_warning or "no_valid_cookies"
+
+    def headers(self) -> dict[str, str]:
+        header, _, _, _, _ = self._cookie_context()
+        return {"Cookie": header} if header else {}
+
+    def status(self) -> SessionStatus:
+        header, source, count, expires_at, warning = self._cookie_context()
+        return SessionStatus(
+            platform=self.platform,
+            configured=bool(header),
+            source=source,
+            cookie_count=count,
+            expires_at=expires_at,
+            warning=warning,
+        )
+
+    def check(self) -> SessionStatus:
+        return self.status()
+
+    def close(self) -> None:
+        return None
+
+
+class XiaohongshuSessionProvider:
+    platform = "xiaohongshu"
+    supports_check = False
+
+    def _cookie_context(self) -> tuple[str, str, int, str | None, str | None]:
+        raw = os.getenv("VMB_XHS_COOKIE", "").strip()
+        if raw:
+            raw = raw.replace("\r", " ").replace("\n", " ")
+            return raw, "env", raw.count(";") + 1, None, None
+
+        path = (
+            os.getenv("VMB_XHS_COOKIES_FILE", "").strip()
+            or os.getenv("VMB_COOKIES_FILE", "").strip()
+        )
+        if not path:
+            return "", "none", 0, None, None
+
+        records = parse_netscape_cookies(path, domain_suffix="xiaohongshu.com")
+        header = build_cookie_header(records)
+        count, expires_at = cookie_summary(records)
+        permission_warning = _cookie_file_warning(path)
+        if header:
+            return header, "file", count, expires_at, permission_warning
+        return "", "file", 0, None, permission_warning or "no_valid_cookies"
 
     def headers(self) -> dict[str, str]:
         header, _, _, _, _ = self._cookie_context()
@@ -233,6 +281,18 @@ class YtDlpSessionProvider:
 
     def headers(self) -> dict[str, str]:
         return {}
+
+    def cookie_args(self) -> list[str]:
+        """yt-dlp 的 cookies 参数：文件优先，其次浏览器登录态。"""
+        path = os.getenv("VMB_COOKIES_FILE", "").strip()
+        if path:
+            expanded = os.path.expanduser(path)
+            if os.path.exists(expanded):
+                return ["--cookies", expanded]
+        browser = os.getenv("VMB_COOKIES_BROWSER", "").strip()
+        if browser:
+            return ["--cookies-from-browser", browser]
+        return []
 
     def status(self) -> SessionStatus:
         source, configured, count, expires_at, warning = self._context()
@@ -281,7 +341,7 @@ class SessionManager:
             BilibiliSessionProvider(),
             DouyinSessionProvider(),
             YtDlpSessionProvider(),
-            NoneSessionProvider("xiaohongshu"),
+            XiaohongshuSessionProvider(),
             NoneSessionProvider("youtube"),
         ]
 

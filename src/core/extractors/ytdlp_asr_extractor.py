@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from ...utils.platform_detector import detect_platform
 from ..asr import (
     AsrChainError,
     MediaRef,
@@ -37,6 +38,7 @@ from ..asr import (
 )
 from ..media import MediaFetchError, YtDlpMediaFetcher
 from ..models import CostTier, ExtractOptions, ExtractResult
+from ..platforms.rate_limit import get_platform_rate_limiter
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -65,6 +67,19 @@ class YtDlpASRExtractor(ContentExtractor):
         return self._available
 
     def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
+        platform = detect_platform(url)
+        limiter = get_platform_rate_limiter()
+        if (
+            limiter.enabled
+            and platform != "unknown"
+            and limiter.circuit_state(platform) == "open"
+        ):
+            return ExtractResult(
+                success=False, platform=platform, title="", content="",
+                source="ytdlp_asr", url=url, cost_tier=CostTier.CHEAP,
+                error=f"{platform} 平台熔断中，跳过 yt-dlp+ASR 兜底",
+            )
+
         if not self.is_available():
             return ExtractResult(
                 success=False, platform="ytdlp_asr", title="", content="",
