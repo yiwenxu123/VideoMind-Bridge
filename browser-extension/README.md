@@ -1,5 +1,7 @@
 # VideoMind Bridge 浏览器扩展
 
+> **Legacy / 已冻结**：本扩展只对接 v1 任务 API 和 WebSocket，不支持 Gateway Console 的 token 认证。新工作流请使用 `http://127.0.0.1:8787/console`；本扩展计划在过渡期后移除。
+
 浏览器扩展，让你在视频页面一键处理视频到 VideoMind Bridge。
 
 ## 功能特性

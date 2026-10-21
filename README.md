@@ -19,6 +19,9 @@
 > 职责边界: VideoMind Bridge 负责**采集与成本决策**；内容价值的深度评估交给 content-value-evaluator skill
 
 ### v1 (Legacy 扩展模式)
+
+> 状态：Legacy / 冻结。仅保留兼容性，不再作为新功能的默认入口；新工作流请使用 v2 Engine、MCP 或 Gateway Console。
+
 - **视频下载**：支持 Bilibili、YouTube、抖音、小红书等平台
 - **语音转录**：自动生成字幕和时间轴
 - **AI 摘要**：使用 DeepSeek 等国内模型生成智能摘要
@@ -162,6 +165,8 @@ uv run python -m src.cli "URL" --mode download --json
 ```
 
 ## 浏览器扩展
+
+> 状态：Legacy / 已冻结。扩展仍只对接 v1 任务 API 和 WebSocket，不支持 Gateway Console 的 token 认证；新工作流请使用 `/console`。计划在过渡期后移除。
 
 ### 安装方式
 
