@@ -17,6 +17,23 @@ class APIError(BaseModel):
     details: dict[str, Any] | None = Field(None, description="详细错误信息")
 
 
+class SessionStatusResponse(BaseModel):
+    platform: str
+    configured: bool
+    source: str
+    cookie_count: int = 0
+    expires_at: str | None = None
+    valid: bool | None = None
+    last_checked: str | None = None
+    error_code: str | None = None
+    warning: str | None = None
+
+
+class SessionsResponse(BaseModel):
+    schema_version: str
+    sessions: list[SessionStatusResponse] = Field(default_factory=list)
+
+
 class CreatorFeedRequest(BaseModel):
     """创作者作品列表请求。"""
 

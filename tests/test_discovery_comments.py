@@ -11,7 +11,7 @@ import pytest
 
 from src.core.discovery.models import DiscoveryError
 from src.core.discovery.providers.bilibili import BilibiliDiscoveryProvider
-from src.core.discovery.throttle import PlatformThrottle
+from src.core.platforms.bilibili_client import BilibiliApiError
 
 FIXTURES = Path(__file__).parent / "fixtures" / "discovery"
 
@@ -28,6 +28,7 @@ class FakeClient:
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         self.calls.append(("get", path, params or {}))
         response = self.responses[path]
@@ -41,6 +42,7 @@ class FakeClient:
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
         self.calls.append(("wbi", path, params))
         response = self.responses[path]
@@ -54,6 +56,7 @@ class FakeClient:
         *,
         max_redirects: int = 3,
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> str | None:
         self.calls.append(("resolve", url, {}))
         return self.resolved_url
@@ -67,10 +70,7 @@ def _provider(
     responses: dict[str, dict[str, Any]],
 ) -> tuple[BilibiliDiscoveryProvider, FakeClient]:
     client = FakeClient(responses)
-    provider = BilibiliDiscoveryProvider(
-        client=client,
-        throttle=PlatformThrottle({"bilibili": 0}),
-    )
+    provider = BilibiliDiscoveryProvider(client=client)
     return provider, client
 
 
@@ -213,6 +213,7 @@ def test_fetch_comments_total_timeout_returns_partial():
             params: dict[str, Any] | None = None,
             headers: dict[str, str] | None = None,
             timeout: float | None = None,
+            deadline: float | None = None,
         ) -> dict[str, Any]:
             self.calls.append(("get", path, params or {}))
             clock[0] += 10
@@ -221,7 +222,6 @@ def test_fetch_comments_total_timeout_returns_partial():
     client = SlowClient({"/x/v2/reply": payload})
     provider = BilibiliDiscoveryProvider(
         client=client,
-        throttle=PlatformThrottle({"bilibili": 0}),
         clock=lambda: clock[0],
         http_timeout=10,
         total_timeout=5,
@@ -327,3 +327,43 @@ def test_fetch_comments_risk_control_on_top_level_raises():
         )
 
     assert exc_info.value.code == "risk_control"
+
+
+class _BrokenResolveClient(FakeClient):
+    def __init__(self, error: Exception) -> None:
+        super().__init__({})
+        self.error = error
+
+    def resolve_url(
+        self,
+        url: str,
+        *,
+        max_redirects: int = 3,
+        timeout: float | None = None,
+        deadline: float | None = None,
+    ) -> str | None:
+        raise self.error
+
+
+@pytest.mark.parametrize(
+    ("error", "expected_code"),
+    [
+        (BilibiliApiError("风控", error_code="risk_control"), "risk_control"),
+        (BilibiliApiError("不存在", error_code="not_found"), "content_not_found"),
+        (BilibiliApiError("超时", error_code="upstream_error"), "upstream_error"),
+    ],
+)
+def test_b23_resolution_errors_map_to_discovery_errors(error, expected_code):
+    provider = BilibiliDiscoveryProvider(client=_BrokenResolveClient(error))
+
+    with pytest.raises(DiscoveryError) as exc_info:
+        provider.fetch_comments(
+            "https://b23.tv/abc123",
+            limit=2,
+            sort="hot",
+            include_replies=False,
+            max_replies_per_thread=3,
+            include_author=False,
+        )
+
+    assert exc_info.value.code == expected_code

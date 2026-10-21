@@ -15,6 +15,7 @@ from src.core.platforms.bilibili_client import (
     BilibiliClient,
     load_cookie_header,
 )
+from src.core.platforms.rate_limit import PlatformPolicy, PlatformRateLimiter
 
 
 def test_mixin_key_is_deterministic_and_32_chars():
@@ -153,5 +154,38 @@ def test_get_wbi_key_parses_nav_response():
     )
     try:
         assert client.get_wbi_key() == BilibiliClient.mixin_key(img_key + sub_key)
+    finally:
+        client.close()
+
+
+def test_body_risk_code_notifies_limiter_and_opens_circuit():
+    limiter = PlatformRateLimiter(
+        {"bilibili": PlatformPolicy(circuit_threshold=2)}
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"code": -352, "message": "风控校验失败"},
+        )
+
+    client = BilibiliClient(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        limiter=limiter,
+    )
+    try:
+        with pytest.raises(BilibiliApiError) as exc_info:
+            client.get_json("/x/space/wbi/arc/search")
+        assert exc_info.value.error_code == "risk_control"
+        assert limiter.circuit_state("bilibili") == "closed"
+
+        with pytest.raises(BilibiliApiError):
+            client.get_json("/x/space/wbi/arc/search")
+        assert limiter.circuit_state("bilibili") == "open"
+
+        with pytest.raises(BilibiliApiError) as exc_info:
+            client.get_json("/x/space/wbi/arc/search")
+        assert exc_info.value.error_code == "risk_control"
+        assert "熔断" in str(exc_info.value)
     finally:
         client.close()

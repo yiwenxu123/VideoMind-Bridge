@@ -15,7 +15,6 @@ from src.core.discovery.models import (
     DiscoveryError,
 )
 from src.core.discovery.service import DiscoveryService
-from src.core.discovery.throttle import PlatformThrottle
 from src.core.models import CostTier
 
 
@@ -277,33 +276,6 @@ def test_creator_feed_invalid_url_raises():
         service.creator_feed("not-a-url")
 
     assert exc_info.value.code == "invalid_request"
-
-
-def test_creator_feed_throttle_returns_rate_limited(monkeypatch):
-    monkeypatch.setenv("VMB_CREATOR_FEED_CACHE_TTL", "0")
-    now = [0.0]
-    throttle = PlatformThrottle(
-        {"fake": 1000},
-        max_wait_seconds=0.1,
-        clock=lambda: now[0],
-        sleep=lambda seconds: None,
-    )
-    provider = FakeProvider()
-    service = DiscoveryService(
-        providers=[provider],
-        cache=TTLCache(),
-        throttle=throttle,
-    )
-
-    first = service.creator_feed("https://creator.example/creator-1", limit=5)
-    now[0] += 0.2
-    second = service.creator_feed("https://creator.example/creator-1", limit=5)
-
-    assert first.success is True
-    assert second.success is False
-    assert second.error_code == "rate_limited"
-    assert second.retry_after_seconds == 1
-    assert provider.calls == 1
 
 
 @pytest.mark.parametrize("limit", [0, 31, "5", True])

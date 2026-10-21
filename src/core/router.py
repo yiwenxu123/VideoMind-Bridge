@@ -38,8 +38,9 @@ class RouterConfig:
     # 自定义提取器优先级列表 (名称列表)
     priority: list[str] | None = None
 
-    # 结果缓存 (Dict[url, ExtractResult])
+    # 结果缓存 (Dict[url, ExtractResult])；RouterRuntime 关闭此项以自行管理缓存
     cache: dict[str, ExtractResult] = field(default_factory=dict)
+    use_cache: bool = True
 
 
 # 默认提取器优先级 (按提取能力排列)
@@ -87,6 +88,13 @@ class ContentRouter:
                 result[name] = extractor.is_available()
         return result
 
+    def close(self) -> None:
+        """关闭已实例化的提取器及其 HTTP 客户端。"""
+        for extractor in self._extractors.values():
+            extractor.close()
+        self._extractors.clear()
+        self.config.cache.clear()
+
     def extract(
         self,
         url: str,
@@ -106,7 +114,7 @@ class ContentRouter:
         request_id = options.request_id if options else None
 
         # 检查缓存
-        if url in self.config.cache:
+        if self.config.use_cache and url in self.config.cache:
             cached = self.config.cache[url]
             if max_cost is None or _COST_TIER_PRIORITY.get(cached.cost_tier, 99) <= _COST_TIER_PRIORITY.get(max_cost, 99):
                 if request_id:
@@ -159,7 +167,8 @@ class ContentRouter:
 
                 if result.success and result.content.strip() and not result.is_placeholder:
                     # 真成功 (非占位): 缓存并返回
-                    self.config.cache[url] = result
+                    if self.config.use_cache:
+                        self.config.cache[url] = result
                     logger.info(f"✓ 提取成功: {name}")
                     return result
 

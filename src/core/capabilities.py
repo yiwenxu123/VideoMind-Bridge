@@ -11,12 +11,16 @@ from typing import Any
 from .models import SCHEMA_VERSION
 
 
-def capabilities_payload() -> dict[str, Any]:
+def capabilities_payload(
+    extractor_status: dict[str, bool] | None = None,
+) -> dict[str, Any]:
     from ..services.config_manager import ConfigManager
     from .asr import available_transcribers
-    from .router import ContentRouter
 
     cfg = ConfigManager().get_asr_config()
+    if extractor_status is None:
+        from .router import ContentRouter
+        extractor_status = ContentRouter().list_extractors()
     payload: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
         "asr": {
@@ -25,7 +29,7 @@ def capabilities_payload() -> dict[str, Any]:
             "max_cost": cfg.max_cost,
             "backends": [caps.to_dict() for caps in available_transcribers()],
         },
-        "extractors": ContentRouter().list_extractors(),
+        "extractors": extractor_status,
         "platforms": ["bilibili", "youtube", "douyin", "xiaohongshu"],
     }
 

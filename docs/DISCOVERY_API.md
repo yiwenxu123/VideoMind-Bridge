@@ -367,8 +367,9 @@ v1 只接受主页 URL，不接受任意 `creator_id`，避免绕过平台域名
 
 ### 8.3 限流
 
-- 沿用现有 `VMB_RATE_LIMIT_PER_MIN` 每消费者限流。
-- 平台级节流：同一平台上游请求最小间隔默认 1000ms；最多等待 2 秒，否则返回 429 `rate_limited`。
+- 消费者侧沿用 `VMB_RATE_LIMIT_PER_MIN` 每消费者限流。
+- 平台侧统一由 `PlatformRateLimiter` 负责（与 `/extract` 共用）：B站默认最小间隔 1000ms、并发 1；最多等待 2 秒，否则返回 `rate_limited`。
+- 412/-352 不重试并计入熔断；429 按 `Retry-After` 退避；5xx/超时最多重试 2 次。重试与等待都计入单次调用总超时。
 - 评论展开回复时，每次上游请求都计入节流和单次调用上限；达到调用上限时提前返回，不再继续翻页。
 - 超时：单次上游 10 秒；总调用 30 秒；部分成功返回 `partial`。
 
@@ -382,7 +383,8 @@ v1 只接受主页 URL，不接受任意 `creator_id`，避免绕过平台域名
 | `VMB_COMMENTS_CACHE_TTL` | `900` | 秒 |
 | `VMB_DISCOVERY_HTTP_TIMEOUT` | `10` | 单次上游超时（秒） |
 | `VMB_DISCOVERY_TOTAL_TIMEOUT` | `30` | 单次 API 调用总超时（秒） |
-| `VMB_BILIBILI_MIN_INTERVAL_MS` | `1000` | B站上游最小间隔 |
+| `VMB_PLATFORM_RATE_LIMIT_ENABLED` | `1` | 平台级节流/熔断总开关 |
+| `VMB_PLATFORM_INTERVALS_MS` | 内置值 | JSON，覆盖各平台最小间隔；B站默认 1000ms |
 | `VMB_BILIBILI_COOKIES_FILE` | 空 | Netscape cookies.txt；为空时回退 `VMB_COOKIES_FILE` |
 | `VMB_BILIBILI_SESSDATA` | 空 | 直接提供 SESSDATA 值；适合从其他系统导出单条凭证 |
 | `VMB_BILIBILI_COOKIE` | 空 | 完整 Cookie header；优先级最高，适合提供带 `buvid3` 等字段的完整 cookie |

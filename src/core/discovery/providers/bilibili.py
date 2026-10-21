@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import html
-import os
 import re
 import time
 from collections.abc import Callable
@@ -15,12 +14,11 @@ import httpx
 
 from ...models import CostTier
 from ...platforms.bilibili_client import BilibiliApiError, BilibiliClient
+from ...platforms.session import get_session_manager
 from ..base import DiscoveryProvider
 from ..config import (
     COMMENT_TEXT_MAX_CHARS,
     MAX_REPLY_THREADS,
-    bilibili_cookie_header,
-    bilibili_min_interval_ms,
     discovery_http_timeout,
     discovery_total_timeout,
 )
@@ -32,7 +30,6 @@ from ..models import (
     CreatorRef,
     DiscoveryError,
 )
-from ..throttle import PlatformThrottle
 
 _MID_RE = re.compile(r"^/(\d+)")
 _SPACE_MID_RE = re.compile(r"^/space/(\d+)")
@@ -120,17 +117,11 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
     def __init__(
         self,
         client: BilibiliClient | None = None,
-        throttle: PlatformThrottle | None = None,
         *,
         clock: Callable[[], float] = time.monotonic,
         http_timeout: float | None = None,
         total_timeout: float | None = None,
     ) -> None:
-        cookies_file = (
-            os.getenv("VMB_BILIBILI_COOKIES_FILE")
-            or os.getenv("VMB_COOKIES_FILE")
-            or None
-        )
         self._clock = clock
         self._http_timeout = (
             http_timeout if http_timeout is not None else discovery_http_timeout()
@@ -139,12 +130,8 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
             total_timeout if total_timeout is not None else discovery_total_timeout()
         )
         self._client = client or BilibiliClient(
-            cookies_file=cookies_file,
-            cookie_header=bilibili_cookie_header(),
             timeout=self._http_timeout,
-        )
-        self._throttle = throttle or PlatformThrottle(
-            {"bilibili": bilibili_min_interval_ms()}
+            session=get_session_manager().get("bilibili"),
         )
 
     # ── creator feed ─────────────────────────────────────────────
@@ -261,12 +248,27 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
             left = deadline - self._clock()
             if left <= 0:
                 raise DiscoveryError("upstream_error", "评论采集总超时")
-            self._throttle.acquire(self.platform)
-            resolved = self._client.resolve_url(
-                url,
-                max_redirects=3,
-                timeout=max(1.0, min(self._http_timeout, left)),
-            )
+            try:
+                resolved = self._client.resolve_url(
+                    url,
+                    max_redirects=3,
+                    timeout=max(1.0, min(self._http_timeout, left)),
+                    deadline=deadline,
+                )
+            except BilibiliApiError as exc:
+                error_code = exc.error_code or "upstream_error"
+                if error_code == "not_found":
+                    error_code = "content_not_found"
+                raise DiscoveryError(
+                    error_code,
+                    str(exc),
+                    retry_after_seconds=exc.retry_after_seconds,
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise DiscoveryError(
+                    "upstream_error",
+                    f"B站短链解析失败: {exc}",
+                ) from exc
             if not resolved:
                 raise DiscoveryError("content_not_found", "B站短链解析失败")
             resolved_host = (urlsplit(resolved).hostname or "").lower()
@@ -288,6 +290,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                 wbi=True,
                 not_found_code="content_not_found",
                 timeout=max(1.0, min(self._http_timeout, left)),
+                deadline=deadline,
             )
             data = view.get("data")
             if not isinstance(data, dict):
@@ -324,6 +327,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                     },
                     not_found_code="content_not_found",
                     timeout=max(1.0, min(self._http_timeout, left)),
+                    deadline=deadline,
                 )
             except DiscoveryError:
                 if items:
@@ -390,6 +394,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                         },
                         not_found_code="content_not_found",
                         timeout=max(1.0, min(self._http_timeout, left)),
+                        deadline=deadline,
                     )
                 except DiscoveryError as exc:
                     _append_warning(warnings, "reply_fetch_partial")
@@ -462,8 +467,8 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
         headers: dict[str, str] | None = None,
         not_found_code: str,
         timeout: float | None = None,
+        deadline: float | None = None,
     ) -> dict[str, Any]:
-        self._throttle.acquire(self.platform)
         try:
             if wbi:
                 payload = self._client.wbi_get(
@@ -471,6 +476,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                     params,
                     headers=headers,
                     timeout=timeout,
+                    deadline=deadline,
                 )
             else:
                 payload = self._client.get_json(
@@ -478,6 +484,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                     params=params,
                     headers=headers,
                     timeout=timeout,
+                    deadline=deadline,
                 )
         except httpx.TimeoutException as exc:
             raise DiscoveryError("upstream_error", "B站请求超时") from exc
@@ -509,7 +516,14 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
         except httpx.HTTPError as exc:
             raise DiscoveryError("upstream_error", f"B站请求失败: {exc}") from exc
         except BilibiliApiError as exc:
-            raise DiscoveryError("upstream_error", str(exc)) from exc
+            error_code = exc.error_code or "upstream_error"
+            if error_code == "not_found":
+                error_code = not_found_code
+            raise DiscoveryError(
+                error_code,
+                str(exc),
+                retry_after_seconds=exc.retry_after_seconds,
+            ) from exc
 
         code = _as_int(payload.get("code"))
         if code == 0:

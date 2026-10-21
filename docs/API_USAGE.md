@@ -2,6 +2,29 @@
 
 > 创作者作品列表 / 评论采样接口见 [DISCOVERY_API.md](DISCOVERY_API.md)；默认关闭，需显式开启。
 
+## HTTP API 要点
+
+### 提取：请求级成本上限
+
+`POST /api/v1/extract` 与 `POST /api/v1/extract/archive` 支持 `cost_tier`，表示 Router 可接受的最高提取器成本：
+
+```json
+{
+  "url": "https://www.bilibili.com/video/BV...",
+  "cost_tier": "cheap"
+}
+```
+
+- 取值：`free` / `cheap` / `paid` / `expensive` / `premium`；默认 `cheap`。
+- 只有显式提高 `cost_tier` 才会走到付费兜底提取器；非法值返回 400。
+- 同一进程内完整成功结果会短时缓存（默认 600 秒），缓存 key 区分成本与 ASR 选项。
+
+### 登录态状态
+
+- `GET /api/v1/sessions`：列出各平台登录态来源、cookie 数量、最近过期时间和健康状态。
+- `POST /api/v1/sessions/bilibili/check`：显式检查 B站登录态；其他平台返回 422。
+- 响应只含脱敏信息，永不返回 cookie 值。配置方式见 [DISCOVERY_API.md](DISCOVERY_API.md) 的环境变量表。
+
 ## 快速开始
 
 ### 1. 下载视频

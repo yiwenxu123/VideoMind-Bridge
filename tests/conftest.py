@@ -8,6 +8,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 
 @pytest.fixture(autouse=True)
+def disable_platform_rate_limit(monkeypatch):
+    """测试默认关闭平台节流，避免真实 sleep；限流测试自行构造实例。"""
+    monkeypatch.setenv("VMB_PLATFORM_RATE_LIMIT_ENABLED", "0")
+    from src.core.platforms.rate_limit import reset_platform_rate_limiter
+
+    reset_platform_rate_limiter()
+    yield
+    reset_platform_rate_limiter()
+
+
+@pytest.fixture(autouse=True)
 def mock_keyring():
     """全局 mock keyring，阻止模块初始化时访问真实 macOS 钥匙串
 

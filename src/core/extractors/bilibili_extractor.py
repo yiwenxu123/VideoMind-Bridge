@@ -23,6 +23,7 @@ from ..asr import (
 from ..media import HttpMediaFetcher, MediaFetchError, MediaFetchRequest
 from ..models import CostTier, ExtractOptions, ExtractResult
 from ..platforms.bilibili_client import BilibiliClient
+from ..platforms.session import get_session_manager
 from . import register_extractor
 from .base import ContentExtractor
 
@@ -40,7 +41,10 @@ class BilibiliExtractor(ContentExtractor):
     url_pattern = re.compile(r"(bilibili\.com|b23\.tv)")
 
     def __init__(self) -> None:
-        self._bili = BilibiliClient(timeout=30.0)
+        self._bili = BilibiliClient(
+            timeout=30.0,
+            session=get_session_manager().get("bilibili"),
+        )
         self._client = self._bili.client
 
     def is_available(self) -> bool:
@@ -132,11 +136,7 @@ class BilibiliExtractor(ContentExtractor):
 
         try:
             params = {"bvid": bvid}
-            signed = self._bili.sign(params)
-            resp = self._client.get(
-                "https://api.bilibili.com/x/web-interface/view", params=signed
-            )
-            data = resp.json()
+            data = self._bili.wbi_get("/x/web-interface/view", params)
             if data.get("code") != 0:
                 return None
             vdata = data.get("data", {})
@@ -148,11 +148,7 @@ class BilibiliExtractor(ContentExtractor):
                 return None
 
             play_params = {"bvid": bvid, "cid": cid, "fnval": 16, "fourk": 1}
-            signed = self._bili.sign(play_params)
-            resp2 = self._client.get(
-                "https://api.bilibili.com/x/player/playurl", params=signed
-            )
-            pdata = resp2.json()
+            pdata = self._bili.wbi_get("/x/player/playurl", play_params)
             if pdata.get("code") != 0:
                 return None
             dash = pdata.get("data", {}).get("dash") or {}
@@ -282,20 +278,14 @@ class BilibiliExtractor(ContentExtractor):
     def _resolve_b23_url(self, url: str) -> str | None:
         """解析 b23.tv 短链接"""
         try:
-            resp = self._client.get(url, follow_redirects=True)
-            return str(resp.url)
+            return self._bili.resolve_url(url, timeout=10.0)
         except Exception:
             return None
 
     def _get_video_info(self, bvid: str) -> dict[str, Any]:
         """获取视频元信息"""
         params = {"bvid": bvid}
-        signed = self._bili.sign(params)
-        resp = self._client.get(
-            "https://api.bilibili.com/x/web-interface/view",
-            params=signed,
-        )
-        data = resp.json()
+        data = self._bili.wbi_get("/x/web-interface/view", params)
         if data.get("code") != 0:
             raise RuntimeError(f"Bilibili API 返回错误: {data.get('message', 'unknown')}")
 
@@ -311,12 +301,7 @@ class BilibiliExtractor(ContentExtractor):
     def _get_subtitle(self, bvid: str) -> tuple[str, list, str | None]:
         """获取字幕内容"""
         params = {"bvid": bvid}
-        signed = self._bili.sign(params)
-        resp = self._client.get(
-            "https://api.bilibili.com/x/web-interface/view",
-            params=signed,
-        )
-        data = resp.json()
+        data = self._bili.wbi_get("/x/web-interface/view", params)
 
         if data.get("code") != 0:
             raise RuntimeError(
@@ -349,8 +334,7 @@ class BilibiliExtractor(ContentExtractor):
         if subtitle_url.startswith("//") or subtitle_url.startswith("/"):
             subtitle_url = "https:" + subtitle_url
 
-        sub_resp = self._client.get(subtitle_url)
-        sub_data = sub_resp.json()
+        sub_data = self._bili.get_json(subtitle_url)
 
         # 提取字幕文本和片段
         text_parts: list[str] = []

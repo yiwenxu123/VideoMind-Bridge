@@ -78,6 +78,13 @@ class ContentExtractor(ABC):
         """获取此提取器的成本等级"""
         return self._cost_tier
 
+    def close(self) -> None:
+        """释放提取器持有的资源（默认关闭 self._client）。"""
+        client = getattr(self, "_client", None)
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
     def _normalize_url(self, url: str) -> str:
         """标准化 URL (移除追踪参数等)"""
         return url.split("?")[0] if "?" in url else url

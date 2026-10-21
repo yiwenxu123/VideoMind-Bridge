@@ -19,11 +19,9 @@ from .config import (
     MAX_REPLIES_PER_THREAD,
     comments_cache_ttl,
     creator_feed_cache_ttl,
-    platform_min_intervals,
 )
 from .models import CommentsResult, CreatorFeedResult, DiscoveryError
 from .registry import build_default_providers
-from .throttle import PlatformThrottle
 
 logger = logging.getLogger(__name__)
 
@@ -37,13 +35,11 @@ class DiscoveryService:
         self,
         providers: list[DiscoveryProvider] | None = None,
         cache: TTLCache | None = None,
-        throttle: PlatformThrottle | None = None,
     ) -> None:
         self._providers = (
             list(providers) if providers is not None else build_default_providers()
         )
         self._cache = cache or TTLCache()
-        self._throttle = throttle or PlatformThrottle(platform_min_intervals())
 
     def creator_feed(
         self,
@@ -97,19 +93,6 @@ class DiscoveryService:
             cached.cached = True
             cached.request_id = request_id
             return cached
-
-        try:
-            self._throttle.acquire(provider.platform)
-        except DiscoveryError as exc:
-            return self._failure(
-                request_id=request_id,
-                platform=provider.platform,
-                source=provider.source_name,
-                cost_tier=provider.cost_tier(),
-                error_code=exc.code,
-                error=exc.message,
-                retry_after_seconds=exc.retry_after_seconds,
-            )
 
         try:
             result = provider.fetch_creator_feed(url, limit)
@@ -224,20 +207,6 @@ class DiscoveryService:
             cached.cached = True
             cached.request_id = request_id
             return cached
-
-        try:
-            self._throttle.acquire(provider.platform)
-        except DiscoveryError as exc:
-            return self._comments_failure(
-                request_id=request_id,
-                platform=provider.platform,
-                source=provider.source_name,
-                cost_tier=provider.cost_tier(),
-                sort=normalized_sort,
-                error_code=exc.code,
-                error=exc.message,
-                retry_after_seconds=exc.retry_after_seconds,
-            )
 
         try:
             result = provider.fetch_comments(

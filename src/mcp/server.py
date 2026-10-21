@@ -619,15 +619,15 @@ class MCPServer:
         url = args["url"]
         mode = args.get("mode", "quick")
 
-        from src.core import ContentRouter, Prescreener
+        from src.core import Prescreener
 
-        router = ContentRouter()
-        prescreener = Prescreener(router)
+        runtime = self._get_router_runtime()
+        prescreener = Prescreener(runtime.router)
 
         if mode == "full":
             from src.core.models import CostTier
             # 先用 FREE 成本提取元信息
-            quick_result = router.extract(url, max_cost=CostTier.FREE)
+            quick_result = runtime.extract(url, max_cost=CostTier.FREE)
             if quick_result.success and quick_result.title:
                 result = prescreener.prescreen(
                     url,
@@ -660,7 +660,7 @@ class MCPServer:
         max_cost_str = args.get("max_cost")
         min_grade_str = args.get("min_grade", "C")
 
-        from src.core import ContentRouter, HermesFormatter, Prescreener
+        from src.core import HermesFormatter, Prescreener
         from src.core.models import ContentGrade, CostTier
 
         grade_map = {"S": ContentGrade.S, "A": ContentGrade.A, "B": ContentGrade.B, "C": ContentGrade.C, "D": ContentGrade.D}
@@ -673,11 +673,11 @@ class MCPServer:
         min_grade = grade_map.get(min_grade_str, ContentGrade.C)
         max_cost = cost_map.get(max_cost_str) if max_cost_str else None
 
-        router = ContentRouter()
-        prescreener = Prescreener(router)
+        runtime = self._get_router_runtime()
+        prescreener = Prescreener(runtime.router)
 
         # 1. 先用 FREE 成本获取元信息做预筛
-        quick_result = router.extract(url, max_cost=CostTier.FREE)
+        quick_result = runtime.extract(url, max_cost=CostTier.FREE)
         if quick_result.success and quick_result.title:
             prescreen_result = prescreener.prescreen(
                 url,
@@ -704,7 +704,7 @@ class MCPServer:
                         prescreen_result.recommended_cost_tier
                         or cost_map.get(prescreener.recommend_cost_tier(cost_grade), CostTier.FREE)
                     )
-                extract_result = router.extract(url, max_cost=max_cost)
+                extract_result = runtime.extract(url, max_cost=max_cost)
             if extract_result.success and extract_result.content.strip() and not extract_result.is_placeholder:
                 extract_output = HermesFormatter.format_extract_result_full(extract_result)
 
@@ -733,7 +733,7 @@ class MCPServer:
         url = args["url"]
         cost_tier_str = args.get("cost_tier", "cheap")
 
-        from src.core import ContentRouter, HermesFormatter
+        from src.core import HermesFormatter
         from src.core.asr import validate_chain
         from src.core.models import CostTier, ExtractOptions
         from src.services.config_manager import ConfigManager
@@ -763,11 +763,11 @@ class MCPServer:
             else None
         )
 
-        router = ContentRouter()
-        if options is not None:
-            result = router.extract(url, max_cost=max_cost, options=options)
-        else:
-            result = router.extract(url, max_cost=max_cost)
+        result = self._get_router_runtime().extract(
+            url,
+            max_cost=max_cost,
+            options=options,
+        )
         return HermesFormatter.format_extract_result_full(result)
 
     def _call_archive_extract(self, args: dict) -> dict:
@@ -780,15 +780,15 @@ class MCPServer:
 
         from pathlib import Path
 
-        from src.core import ContentRouter, HermesFormatter, Prescreener
+        from src.core import HermesFormatter, Prescreener
         from src.core.archiver import ArchiverConfig, archive_extract_result
         from src.core.models import CostTier
 
-        router = ContentRouter()
-        prescreener = Prescreener(router)
+        runtime = self._get_router_runtime()
+        prescreener = Prescreener(runtime.router)
 
         # 先 FREE 取元信息做成本预筛, 再按推荐成本提取完整内容
-        quick_result = router.extract(url, max_cost=CostTier.FREE)
+        quick_result = runtime.extract(url, max_cost=CostTier.FREE)
         max_cost = CostTier.FREE
         if quick_result.success and quick_result.title:
             ps_result = prescreener.prescreen(
@@ -799,7 +799,7 @@ class MCPServer:
             if ps_result.recommended_cost_tier:
                 max_cost = ps_result.recommended_cost_tier
 
-        result = router.extract(url, max_cost=max_cost)
+        result = runtime.extract(url, max_cost=max_cost)
 
         if not result.success or not result.content.strip() or result.is_placeholder:
             return {
@@ -834,19 +834,32 @@ class MCPServer:
         }
 
     def _call_list_extractors(self, _args: dict) -> dict:
-        from src.core import ContentRouter
-        router = ContentRouter()
-        return router.list_extractors()
+        status: dict[str, bool] = self._get_router_runtime().extractor_status()
+        return status
 
     def _call_capabilities(self, _args: dict) -> dict:
         from src.core.capabilities import capabilities_payload
 
-        return capabilities_payload()
+        return capabilities_payload(
+            extractor_status=self._get_router_runtime().extractor_status()
+        )
+
+    def _get_router_runtime(self) -> Any:
+        from src.core.router_runtime import RouterRuntime
+
+        return self._get_service("router_runtime", RouterRuntime)
 
     def _get_discovery_service(self) -> Any:
         from src.core.discovery.service import DiscoveryService
 
         return self._get_service("discovery", DiscoveryService)
+
+    def close(self) -> None:
+        for service in self._services.values():
+            close = getattr(service, "close", None)
+            if callable(close):
+                close()
+        self._services.clear()
 
     def _call_get_creator_feed(self, args: dict) -> dict:
         from src.core.discovery.config import creator_feed_enabled
@@ -940,7 +953,10 @@ class MCPServer:
 
 def main():
     server = MCPServer()
-    server.run()
+    try:
+        server.run()
+    finally:
+        server.close()
 
 
 if __name__ == "__main__":

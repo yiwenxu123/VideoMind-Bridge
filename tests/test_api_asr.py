@@ -75,11 +75,12 @@ class TestExtractContract:
 
 class TestAsrOverride:
     @mock.patch("src.services.config_manager.ConfigManager.get_asr_config")
-    @mock.patch("src.core.ContentRouter")
-    def test_asr_preferred_backend_is_chain_head(self, MockRouter, mock_cfg, client):
+    def test_asr_preferred_backend_is_chain_head(
+        self, mock_cfg, client, server, monkeypatch
+    ):
         mock_cfg.return_value = AsrConfig(chain=["faster_whisper", "dashscope"])
-        router = MockRouter.return_value
-        router.extract = mock.Mock(return_value=_fake_result())
+        extract = mock.Mock(return_value=_fake_result())
+        monkeypatch.setattr(server._router_runtime, "extract", extract)
 
         resp = client.post(
             "/api/v1/extract",
@@ -96,15 +97,14 @@ class TestAsrOverride:
         assert data["completeness"] == "full"
         assert data["method"] == "asr"
 
-        options = router.extract.call_args.kwargs["options"]
+        options = extract.call_args.kwargs["options"]
         assert options.asr_chain == ["sensevoice", "faster_whisper", "dashscope"]
         assert options.asr_language == "zh"
         assert options.request_id == data["request_id"]
 
-    @mock.patch("src.core.ContentRouter")
-    def test_asr_chain_is_exact(self, MockRouter, client):
-        router = MockRouter.return_value
-        router.extract = mock.Mock(return_value=_fake_result())
+    def test_asr_chain_is_exact(self, client, server, monkeypatch):
+        extract = mock.Mock(return_value=_fake_result())
+        monkeypatch.setattr(server._router_runtime, "extract", extract)
 
         resp = client.post(
             "/api/v1/extract",
@@ -115,7 +115,7 @@ class TestAsrOverride:
         )
 
         assert resp.status_code == 200
-        options = router.extract.call_args.kwargs["options"]
+        options = extract.call_args.kwargs["options"]
         assert options.asr_chain == ["sensevoice", "faster_whisper"]
 
     @pytest.mark.parametrize(

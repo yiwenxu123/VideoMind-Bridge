@@ -1246,3 +1246,13 @@ class TestDiscoveryTools:
         assert kwargs["include_replies"] is True
         assert kwargs["max_replies_per_thread"] == 2
         assert kwargs["include_author"] is False
+
+
+def test_close_releases_cached_services(server):
+    runtime = MagicMock()
+    server._services["router_runtime"] = runtime
+
+    server.close()
+
+    runtime.close.assert_called_once()
+    assert server._services == {}

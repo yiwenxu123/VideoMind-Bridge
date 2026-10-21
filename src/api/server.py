@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from ..core.models import SCHEMA_VERSION
+from ..core.models import SCHEMA_VERSION, CostTier
 from ..models.task import ProcessingMode, TaskStatus, VideoTask
 from ..services.config_manager import ConfigManager
 from ..utils import get_logger
@@ -72,6 +72,19 @@ def _resolve_request_asr_chain(payload: dict) -> list[str] | None:
         return [backend] + [name for name in default_chain if name != backend]
 
     return None
+
+
+def _parse_cost_tier(payload: dict) -> CostTier:
+    raw = payload.get("cost_tier")
+    if raw is None:
+        return CostTier.CHEAP
+    try:
+        return CostTier(str(raw).strip().lower())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="cost_tier 必须是 free/cheap/paid/expensive/premium",
+        ) from exc
 
 
 def _build_extract_options(payload: dict, request_id: str):
@@ -233,6 +246,10 @@ class APIServer:
         # 任务管理器
         self.task_manager = TaskManager()
 
+        # 长生命周期 Router（缓存/提取器/HTTP 连接复用）
+        from ..core.router_runtime import RouterRuntime
+        self._router_runtime = RouterRuntime()
+
         # WebSocket连接管理器
         self.connection_manager = ConnectionManager()
 
@@ -262,9 +279,12 @@ class APIServer:
             self._event_loop = asyncio.get_running_loop()
             await self.task_manager.start()
             logger.info(f"API服务器已启动: http://{self.host}:{self.port}")
-            yield
-            await self.task_manager.stop()
-            logger.info("API服务器已关闭")
+            try:
+                yield
+            finally:
+                await self.task_manager.stop()
+                self._router_runtime.close()
+                logger.info("API服务器已关闭")
 
         app = FastAPI(
             title="VideoMind Bridge API",
@@ -354,6 +374,9 @@ class APIServer:
         # 注册路由
         self._register_routes(app)
 
+        from .session_routes import router as session_router
+        app.include_router(session_router)
+
         # Discovery API 默认关闭；开启后才注册对应路由
         if creator_feed_is_enabled or comments_is_enabled:
             from .discovery_routes import include_discovery_routes
@@ -412,7 +435,9 @@ class APIServer:
             """能力发现：ASR 后端 + 平台提取器（不加载模型）"""
             from ..core.capabilities import capabilities_payload
 
-            return capabilities_payload()
+            return capabilities_payload(
+                extractor_status=self._router_runtime.extractor_status()
+            )
 
         @app.get("/api/v1/config", response_model=ConfigResponse)
         async def get_config():
@@ -436,12 +461,13 @@ class APIServer:
 
             request_id = uuid4().hex
             try:
-                from src.core import ContentRouter
-                from src.core.models import CostTier
-
                 options = _build_extract_options(request, request_id)
-                router = ContentRouter()
-                result = router.extract(url, max_cost=CostTier.CHEAP, options=options)
+                cost_tier = _parse_cost_tier(request)
+                result = self._router_runtime.extract(
+                    url,
+                    max_cost=cost_tier,
+                    options=options,
+                )
                 return _extract_response(result, request_id)
             except HTTPException:
                 raise
@@ -471,12 +497,11 @@ class APIServer:
             try:
                 from pathlib import Path
 
-                from src.core import ContentRouter, HermesFormatter
+                from src.core import HermesFormatter
                 from src.core.archiver import ArchiverConfig, archive_extract_result
-                from src.core.models import CostTier
 
-                router = ContentRouter()
-                result = router.extract(url, max_cost=CostTier.CHEAP)
+                cost_tier = _parse_cost_tier(request)
+                result = self._router_runtime.extract(url, max_cost=cost_tier)
 
                 if not result.success or not result.content.strip():
                     return {

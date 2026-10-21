@@ -14,7 +14,6 @@ MAX_REPLIES_PER_THREAD = 10
 MAX_REPLY_THREADS = 10
 COMMENTS_CACHE_TTL_SECONDS = 900
 COMMENT_TEXT_MAX_CHARS = 2000
-DEFAULT_BILIBILI_MIN_INTERVAL_MS = 1000
 DEFAULT_DISCOVERY_HTTP_TIMEOUT_SECONDS = 10
 DEFAULT_DISCOVERY_TOTAL_TIMEOUT_SECONDS = 30
 CREATOR_FEED_PLATFORMS = ("bilibili",)
@@ -80,18 +79,3 @@ def discovery_total_timeout() -> float:
         return max(1.0, float(raw))
     except ValueError:
         return float(DEFAULT_DISCOVERY_TOTAL_TIMEOUT_SECONDS)
-
-
-def bilibili_min_interval_ms() -> int:
-    raw = os.getenv(
-        "VMB_BILIBILI_MIN_INTERVAL_MS",
-        str(DEFAULT_BILIBILI_MIN_INTERVAL_MS),
-    )
-    try:
-        return max(0, int(raw))
-    except ValueError:
-        return DEFAULT_BILIBILI_MIN_INTERVAL_MS
-
-
-def platform_min_intervals() -> dict[str, int]:
-    return {"bilibili": bilibili_min_interval_ms()}
