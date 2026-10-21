@@ -253,7 +253,9 @@ def test_comments_enabled_returns_structured_result(monkeypatch):
     assert data["returned_count"] == 1
     assert data["top_level_count"] == 1
     assert data["reply_count"] == 0
+    assert data["items"][0]["parent_id"] is None
     assert "author" not in data["items"][0]
+    assert "error" not in data
 
     call = fake.calls[0]
     assert call["kind"] == "comments"

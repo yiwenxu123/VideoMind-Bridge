@@ -11,6 +11,7 @@ import time
 import urllib.parse
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import httpx
 
@@ -139,12 +140,18 @@ class BilibiliClient:
         path: str,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         url = path if path.startswith(("http://", "https://")) else f"{self.BASE_URL}{path}"
         request_headers = dict(self._headers)
         if headers:
             request_headers.update(headers)
-        response = self._client.get(url, params=params, headers=request_headers)
+        response = self._client.get(
+            url,
+            params=params,
+            headers=request_headers,
+            timeout=timeout,
+        )
         response.raise_for_status()
         try:
             data = response.json()
@@ -196,5 +203,36 @@ class BilibiliClient:
         path: str,
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
-        return self.get_json(path, params=self.sign(params), headers=headers)
+        return self.get_json(
+            path,
+            params=self.sign(params),
+            headers=headers,
+            timeout=timeout,
+        )
+
+    def resolve_url(
+        self,
+        url: str,
+        *,
+        max_redirects: int = 3,
+        timeout: float | None = None,
+    ) -> str | None:
+        """解析 b23.tv 等短链；最多跟随 max_redirects 次，不自动接受任意域。"""
+        current = url
+        for _ in range(max_redirects + 1):
+            response = self._client.get(
+                current,
+                headers=self._headers,
+                follow_redirects=False,
+                timeout=timeout,
+            )
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    return None
+                current = urljoin(current, location)
+                continue
+            return str(response.url)
+        return None

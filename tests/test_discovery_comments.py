@@ -20,12 +20,14 @@ class FakeClient:
     def __init__(self, responses: dict[str, dict[str, Any]]) -> None:
         self.responses = responses
         self.calls: list[tuple[str, str, dict[str, Any]]] = []
+        self.resolved_url = "https://www.bilibili.com/video/BV1demo"
 
     def get_json(
         self,
         path: str,
         params: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         self.calls.append(("get", path, params or {}))
         response = self.responses[path]
@@ -38,12 +40,23 @@ class FakeClient:
         path: str,
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         self.calls.append(("wbi", path, params))
         response = self.responses[path]
         if isinstance(response, Exception):
             raise response
         return response
+
+    def resolve_url(
+        self,
+        url: str,
+        *,
+        max_redirects: int = 3,
+        timeout: float | None = None,
+    ) -> str | None:
+        self.calls.append(("resolve", url, {}))
+        return self.resolved_url
 
 
 def _load(name: str) -> dict[str, Any]:
@@ -66,6 +79,7 @@ def test_supports_comments_variants():
 
     assert provider.supports_comments("https://www.bilibili.com/video/BV1demo")
     assert provider.supports_comments("https://m.bilibili.com/video/av123")
+    assert provider.supports_comments("https://b23.tv/abc")
     assert not provider.supports_comments("https://space.bilibili.com/123456")
     assert not provider.supports_comments("https://example.com/video/BV1demo")
 
@@ -151,6 +165,82 @@ def test_fetch_comments_include_author_only_returns_display_name():
     assert payload["items"][0]["author"] == {"display_name": "用户甲"}
     assert "mid" not in json.dumps(payload, ensure_ascii=False)
     assert result.sort == "recent"
+
+
+def test_fetch_comments_resolves_b23_short_link():
+    responses = {
+        "/x/web-interface/view": {"code": 0, "data": {"aid": 123}},
+        "/x/v2/reply": _load("bilibili_comments.json"),
+    }
+    provider, client = _provider(responses)
+
+    result = provider.fetch_comments(
+        "https://b23.tv/abc",
+        limit=2,
+        sort="hot",
+        include_replies=False,
+        max_replies_per_thread=3,
+        include_author=False,
+    )
+
+    assert result.success is True
+    assert client.calls[0][0] == "resolve"
+    assert client.calls[1][1] == "/x/web-interface/view"
+    assert client.calls[2][1] == "/x/v2/reply"
+
+
+def test_fetch_comments_total_timeout_returns_partial():
+    clock = [0.0]
+    replies = [
+        {
+            "rpid": 30000 + i,
+            "root": 0,
+            "parent": 0,
+            "like": 1,
+            "ctime": 1760000000,
+            "rcount": 0,
+            "content": {"message": f"评论{i}"},
+            "member": {"uname": "用户"},
+        }
+        for i in range(20)
+    ]
+    payload = {"code": 0, "data": {"page": {"count": 40}, "replies": replies}}
+
+    class SlowClient(FakeClient):
+        def get_json(
+            self,
+            path: str,
+            params: dict[str, Any] | None = None,
+            headers: dict[str, str] | None = None,
+            timeout: float | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append(("get", path, params or {}))
+            clock[0] += 10
+            return self.responses[path]
+
+    client = SlowClient({"/x/v2/reply": payload})
+    provider = BilibiliDiscoveryProvider(
+        client=client,
+        throttle=PlatformThrottle({"bilibili": 0}),
+        clock=lambda: clock[0],
+        http_timeout=10,
+        total_timeout=5,
+    )
+
+    result = provider.fetch_comments(
+        "https://www.bilibili.com/video/av456",
+        limit=30,
+        sort="hot",
+        include_replies=False,
+        max_replies_per_thread=3,
+        include_author=False,
+    )
+
+    assert result.success is True
+    assert len(result.items) == 20
+    assert result.completeness == "partial"
+    assert "total_timeout" in result.warnings
+    assert len(client.calls) == 1
 
 
 def test_fetch_comments_av_url_skips_view_request():

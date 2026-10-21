@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import uuid4
 
 from fastapi import APIRouter, FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 
 from ..core.discovery.config import comments_enabled, creator_feed_enabled
 from ..core.discovery.models import DiscoveryError
@@ -49,9 +50,8 @@ def creator_feed(request: CreatorFeedRequest) -> CreatorFeedResponse:
 @comments_router.post(
     "/comments",
     response_model=CommentsResponse,
-    response_model_exclude_none=True,
 )
-def comments(request: CommentsRequest) -> CommentsResponse:
+def comments(request: CommentsRequest) -> JSONResponse:
     try:
         result = get_discovery_service().comments(
             str(request.url),
@@ -65,7 +65,8 @@ def comments(request: CommentsRequest) -> CommentsResponse:
         )
     except DiscoveryError as exc:
         raise HTTPException(status_code=400, detail=exc.message) from exc
-    return CommentsResponse(**result.to_dict())
+    # 保留 parent_id:null 等契约字段；JSONResponse 不走 exclude_none 序列化
+    return JSONResponse(content=result.to_dict())
 
 
 def include_discovery_routes(app: FastAPI) -> None:

@@ -32,6 +32,7 @@ class FakeClient:
         path: str,
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         self.calls.append((path, params))
         self.headers = headers
@@ -192,6 +193,7 @@ class RaisingClient:
         path: str,
         params: dict[str, Any],
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         request = httpx.Request(
             "GET",

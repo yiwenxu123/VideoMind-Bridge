@@ -5,6 +5,8 @@ from __future__ import annotations
 import html
 import os
 import re
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
@@ -19,6 +21,8 @@ from ..config import (
     MAX_REPLY_THREADS,
     bilibili_cookie_header,
     bilibili_min_interval_ms,
+    discovery_http_timeout,
+    discovery_total_timeout,
 )
 from ..models import (
     CommentItem,
@@ -117,15 +121,27 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
         self,
         client: BilibiliClient | None = None,
         throttle: PlatformThrottle | None = None,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        http_timeout: float | None = None,
+        total_timeout: float | None = None,
     ) -> None:
         cookies_file = (
             os.getenv("VMB_BILIBILI_COOKIES_FILE")
             or os.getenv("VMB_COOKIES_FILE")
             or None
         )
+        self._clock = clock
+        self._http_timeout = (
+            http_timeout if http_timeout is not None else discovery_http_timeout()
+        )
+        self._total_timeout = (
+            total_timeout if total_timeout is not None else discovery_total_timeout()
+        )
         self._client = client or BilibiliClient(
             cookies_file=cookies_file,
             cookie_header=bilibili_cookie_header(),
+            timeout=self._http_timeout,
         )
         self._throttle = throttle or PlatformThrottle(
             {"bilibili": bilibili_min_interval_ms()}
@@ -224,7 +240,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
     # ── comments ─────────────────────────────────────────────────
 
     def supports_comments(self, url: str) -> bool:
-        return self._extract_video_ids(url) is not None
+        return self._is_b23_url(url) or self._extract_video_ids(url) is not None
 
     def fetch_comments(
         self,
@@ -239,16 +255,39 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
         if sort not in {"hot", "recent"}:
             raise DiscoveryError("invalid_request", "sort 必须是 hot 或 recent")
 
+        deadline = self._clock() + self._total_timeout
+
+        if self._is_b23_url(url):
+            left = deadline - self._clock()
+            if left <= 0:
+                raise DiscoveryError("upstream_error", "评论采集总超时")
+            self._throttle.acquire(self.platform)
+            resolved = self._client.resolve_url(
+                url,
+                max_redirects=3,
+                timeout=max(1.0, min(self._http_timeout, left)),
+            )
+            if not resolved:
+                raise DiscoveryError("content_not_found", "B站短链解析失败")
+            resolved_host = (urlsplit(resolved).hostname or "").lower()
+            if resolved_host not in {"www.bilibili.com", "bilibili.com", "m.bilibili.com"}:
+                raise DiscoveryError("content_not_found", "B站短链未指向视频页")
+            url = resolved
+
         video = self._extract_video_ids(url)
         if video is None:
             raise DiscoveryError("invalid_request", "无法从 URL 解析 B站视频 ID")
         bvid, aid = video
         if aid is None:
+            left = deadline - self._clock()
+            if left <= 0:
+                raise DiscoveryError("upstream_error", "评论采集总超时")
             view = self._request_json(
                 "/x/web-interface/view",
                 {"bvid": bvid},
                 wbi=True,
                 not_found_code="content_not_found",
+                timeout=max(1.0, min(self._http_timeout, left)),
             )
             data = view.get("data")
             if not isinstance(data, dict):
@@ -269,17 +308,28 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
         top_level_returned = 0
 
         for page_number in range(1, max_pages + 1):
-            payload = self._request_json(
-                "/x/v2/reply",
-                {
-                    "type": "1",
-                    "oid": str(aid),
-                    "sort": sort_value,
-                    "pn": str(page_number),
-                    "ps": str(_COMMENT_PAGE_SIZE),
-                },
-                not_found_code="content_not_found",
-            )
+            left = deadline - self._clock()
+            if left <= 0:
+                _append_warning(warnings, "total_timeout")
+                break
+            try:
+                payload = self._request_json(
+                    "/x/v2/reply",
+                    {
+                        "type": "1",
+                        "oid": str(aid),
+                        "sort": sort_value,
+                        "pn": str(page_number),
+                        "ps": str(_COMMENT_PAGE_SIZE),
+                    },
+                    not_found_code="content_not_found",
+                    timeout=max(1.0, min(self._http_timeout, left)),
+                )
+            except DiscoveryError:
+                if items:
+                    _append_warning(warnings, "page_fetch_partial")
+                    break
+                raise
             data = payload.get("data")
             if not isinstance(data, dict):
                 raise DiscoveryError("upstream_error", "B站评论结构异常")
@@ -312,6 +362,9 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
             if len(items) >= limit or len(replies) < _COMMENT_PAGE_SIZE:
                 break
 
+        if not items and "total_timeout" in warnings:
+            raise DiscoveryError("upstream_error", "评论采集总超时")
+
         if include_replies and len(items) < limit:
             top_level_items = [item for item in items if not item.is_reply]
             threads = [item for item in top_level_items if item.reply_count > 0]
@@ -320,6 +373,10 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
 
             for top in threads[:MAX_REPLY_THREADS]:
                 if len(items) >= limit:
+                    break
+                left = deadline - self._clock()
+                if left <= 0:
+                    _append_warning(warnings, "total_timeout")
                     break
                 try:
                     payload = self._request_json(
@@ -332,6 +389,7 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                             "ps": str(max_replies_per_thread),
                         },
                         not_found_code="content_not_found",
+                        timeout=max(1.0, min(self._http_timeout, left)),
                     )
                 except DiscoveryError as exc:
                     _append_warning(warnings, "reply_fetch_partial")
@@ -375,6 +433,8 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
                 "replies_truncated",
                 "reply_threads_truncated",
                 "reply_fetch_partial",
+                "total_timeout",
+                "page_fetch_partial",
             )
         ):
             has_more = True
@@ -401,13 +461,24 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
         wbi: bool = False,
         headers: dict[str, str] | None = None,
         not_found_code: str,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         self._throttle.acquire(self.platform)
         try:
             if wbi:
-                payload = self._client.wbi_get(path, params, headers=headers)
+                payload = self._client.wbi_get(
+                    path,
+                    params,
+                    headers=headers,
+                    timeout=timeout,
+                )
             else:
-                payload = self._client.get_json(path, params=params, headers=headers)
+                payload = self._client.get_json(
+                    path,
+                    params=params,
+                    headers=headers,
+                    timeout=timeout,
+                )
         except httpx.TimeoutException as exc:
             raise DiscoveryError("upstream_error", "B站请求超时") from exc
         except httpx.HTTPStatusError as exc:
@@ -477,6 +548,15 @@ class BilibiliDiscoveryProvider(DiscoveryProvider):
             match = _SPACE_MID_RE.match(path)
             return match.group(1) if match else None
         return None
+
+    def _is_b23_url(self, url: str) -> bool:
+        parsed = self._parse_url(url)
+        if parsed is None:
+            return False
+        return (
+            (parsed.hostname or "").lower() == "b23.tv"
+            and bool(parsed.path and parsed.path != "/")
+        )
 
     def _extract_video_ids(self, url: str) -> tuple[str | None, int | None] | None:
         parsed = self._parse_url(url)

@@ -208,7 +208,7 @@ v1 只接受主页 URL，不接受任意 `creator_id`，避免绕过平台域名
 
 | 字段 | 类型 | 必填 | 默认 | 约束 |
 |---|---|---|---|---|
-| `url` | string | 是 | — | 内容 URL；必须命中平台域名白名单 |
+| `url` | string | 是 | — | 内容 URL；支持 B站标准视频链接与 `b23.tv` 短链，最终域名必须在平台白名单内 |
 | `limit` | int | 否 | 20 | 1–50；总数，包含回复 |
 | `sort` | string | 否 | `hot` | `hot` / `recent` |
 | `include_replies` | bool | 否 | false | 是否展开一层二级回复 |
@@ -278,6 +278,7 @@ v1 只接受主页 URL，不接受任意 `creator_id`，避免绕过平台域名
 - `limit` 是**总条数**上限，一级评论和二级回复共同占用。
 - 默认按热度取一级评论；`sort=recent` 时按时间。
 - `include_replies=true` 时，按一级评论顺序展开，最多 10 个 thread；每个 thread 最多 `max_replies_per_thread` 条回复；总数达到 `limit` 即停止。
+- 短链解析最多 3 次跳转；解析失败或最终域名不是 B站时返回 `content_not_found`。
 - 只展开一层，不递归二级以下回复。
 - 不做全量翻页；`has_more=true` 只表示平台还有更多，客户端不能据此无限拉取。
 - `limit` 是上限而非保证：当上游调用预算或总超时耗尽时，可能返回少于 `limit` 条，并置 `completeness=partial`、`has_more=true`。

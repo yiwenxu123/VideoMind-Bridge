@@ -15,6 +15,8 @@ MAX_REPLY_THREADS = 10
 COMMENTS_CACHE_TTL_SECONDS = 900
 COMMENT_TEXT_MAX_CHARS = 2000
 DEFAULT_BILIBILI_MIN_INTERVAL_MS = 1000
+DEFAULT_DISCOVERY_HTTP_TIMEOUT_SECONDS = 10
+DEFAULT_DISCOVERY_TOTAL_TIMEOUT_SECONDS = 30
 CREATOR_FEED_PLATFORMS = ("bilibili",)
 COMMENTS_PLATFORMS = ("bilibili",)
 
@@ -56,6 +58,28 @@ def bilibili_cookie_header() -> str | None:
         return raw
     sessdata = os.getenv("VMB_BILIBILI_SESSDATA", "").strip()
     return f"SESSDATA={sessdata}" if sessdata else None
+
+
+def discovery_http_timeout() -> float:
+    raw = os.getenv(
+        "VMB_DISCOVERY_HTTP_TIMEOUT",
+        str(DEFAULT_DISCOVERY_HTTP_TIMEOUT_SECONDS),
+    )
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return float(DEFAULT_DISCOVERY_HTTP_TIMEOUT_SECONDS)
+
+
+def discovery_total_timeout() -> float:
+    raw = os.getenv(
+        "VMB_DISCOVERY_TOTAL_TIMEOUT",
+        str(DEFAULT_DISCOVERY_TOTAL_TIMEOUT_SECONDS),
+    )
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return float(DEFAULT_DISCOVERY_TOTAL_TIMEOUT_SECONDS)
 
 
 def bilibili_min_interval_ms() -> int:
