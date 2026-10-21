@@ -41,6 +41,42 @@
 - `VMB_YTDLP_SOCKET_TIMEOUT`：默认 30 秒。
 - `VMB_YTDLP_SLEEP_INTERVAL`：默认 0（不额外等待）。
 
+### 平台指标
+
+`GET /api/v1/metrics` 返回进程内平台请求计数：
+
+```json
+{
+  "schema_version": "1.0",
+  "enabled": true,
+  "platforms": {
+    "bilibili": {
+      "requests_total": 120,
+      "success_total": 117,
+      "failure_total": 3,
+      "retries_total": 1,
+      "risk_control_total": 3,
+      "risk_control_signals_total": 3,
+      "rate_limited_total": 0,
+      "upstream_error_total": 0,
+      "auth_required_total": 0,
+      "not_found_total": 0,
+      "client_error_total": 0,
+      "circuit_open_total": 1,
+      "circuit_rejected_total": 0,
+      "latency_ms_avg": 412.5,
+      "latency_ms_max": 1200.0,
+      "circuit": "closed"
+    }
+  }
+}
+```
+
+- 指标只在当前进程内累计，重启清零；不落库。
+- `latency_ms_*` 是一次逻辑请求的总耗时，包含节流等待、退避和重试。
+- 不包含 URL、cookie、请求头或响应正文。
+- `VMB_LOG_JSON=1` 可将日志切换为单行 JSON，便于采集。
+
 ## 快速开始
 
 ### 1. 下载视频

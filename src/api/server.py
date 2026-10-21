@@ -377,6 +377,9 @@ class APIServer:
         from .session_routes import router as session_router
         app.include_router(session_router)
 
+        from .metrics_routes import router as metrics_router
+        app.include_router(metrics_router)
+
         # Discovery API 默认关闭；开启后才注册对应路由
         if creator_feed_is_enabled or comments_is_enabled:
             from .discovery_routes import include_discovery_routes

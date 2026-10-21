@@ -178,6 +178,10 @@ def test_body_risk_code_notifies_limiter_and_opens_circuit():
             client.get_json("/x/space/wbi/arc/search")
         assert exc_info.value.error_code == "risk_control"
         assert limiter.circuit_state("bilibili") == "closed"
+        metrics = limiter.metrics_snapshot()["bilibili"]
+        assert metrics["risk_control_signals_total"] == 1
+        assert metrics["risk_control_total"] == 1
+        assert metrics["failure_total"] == 1
 
         with pytest.raises(BilibiliApiError):
             client.get_json("/x/space/wbi/arc/search")
@@ -187,5 +191,10 @@ def test_body_risk_code_notifies_limiter_and_opens_circuit():
             client.get_json("/x/space/wbi/arc/search")
         assert exc_info.value.error_code == "risk_control"
         assert "熔断" in str(exc_info.value)
+        metrics = limiter.metrics_snapshot()["bilibili"]
+        assert metrics["requests_total"] == 2
+        assert metrics["risk_control_signals_total"] == 2
+        assert metrics["circuit_open_total"] == 1
+        assert metrics["circuit_rejected_total"] == 1
     finally:
         client.close()

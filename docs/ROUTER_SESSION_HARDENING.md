@@ -1,6 +1,6 @@
 # Router 生命周期与平台会话加固方案
 
-> 状态：阶段 1–4 已实施（2026-10-21）；阶段 5 未实施。实现差异见 §8。
+> 状态：阶段 1–5 已实施（2026-10-21）；阶段 5 的正式灰度未单独执行。
 > 范围：第 1 项（Router 生命周期 + `/extract` 成本透传）与第 2 项（统一会话健康 + 平台级限流/退避）
 > 目标：减少重复初始化与连接泄漏，让成本兜底真正可达，并降低 412/-352/429 的触发率。
 
@@ -276,8 +276,9 @@ class PlatformRateLimiter:
   - `execute(..., deadline=...)` 每次请求/退避前检查剩余时间；
   - 评论 discovery 继续使用 `VMB_DISCOVERY_TOTAL_TIMEOUT`，重试/等待都算在预算内。
 - 观测：
-  - 结构化日志：`platform_request platform=... op=... status=... latency_ms=... retry=... error_code=...`
-  - 不记录 cookie/响应正文；可选计数器：成功、风控、429、重试、熔断。
+  - 结构化日志：`platform_request`（outcome/status/latency/retries/error_code）、`platform_request_retry`、`platform_risk_signal`、`platform_circuit_open`、`platform_circuit_rejected`。
+  - 不记录 URL、cookie、请求头或响应正文；`VMB_LOG_JSON=1` 可切换为单行 JSON 日志。
+  - `GET /api/v1/metrics`：每平台请求、成功/失败、重试、风控、限流、熔断与延迟计数；进程内计数，重启清零。
 
 **接线**
 - Bilibili：`BilibiliClient` 的所有请求（nav/view/playurl/reply/space）走 limiter；删除 discovery 中重复的 `PlatformThrottle`（service 与 provider 不再双重等待）。
@@ -340,7 +341,7 @@ class PlatformRateLimiter:
 | 2 | SessionManager + B站接入 + `/sessions` 状态 + 测试 | 已完成 |
 | 3 | PlatformRateLimiter + B站接入 + 删除 discovery 重复 throttle + 测试 | 已完成 |
 | 4 | 抖音/小红书/YouTube 直连接入 + yt-dlp 网络参数/会话 + 测试 | 已完成（2026-10-21） |
-| 5 | 观测、灰度、文档、全量回归 | 未实施 |
+| 5 | 观测、灰度、文档、全量回归 | 观测/文档/回归已完成；正式灰度按需 |
 
 **回滚**
 - `cost_tier` 默认 cheap，旧调用方无感。
@@ -382,9 +383,11 @@ class PlatformRateLimiter:
 - 阶段 4：`XiaohongshuSessionProvider`（`VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE` / `VMB_COOKIES_FILE`）；抖音改用 SessionManager 的 Cookie；`YtDlpSessionProvider.cookie_args()` 成为 yt-dlp cookies 参数唯一来源。
 - 阶段 4：yt-dlp 命令注入 `--sleep-requests`、`--retries`、`--extractor-retries`、`--socket-timeout`；平台熔断打开时 yt-dlp/yt-dlp+ASR 直接跳过。
 - 阶段 4：平台最大等待按间隔自动放大（`max(2s, interval+1s)`），避免抖音 2s 间隔在并发请求下误报 `rate_limited`。
+- 阶段 5：`PlatformRateLimiter` 内置平台计数（请求/成功/失败/重试/风控/限流/超时/熔断/延迟），新增 `GET /api/v1/metrics`；新增 `platform_request*` 结构化日志与可选 `VMB_LOG_JSON=1` JSON 格式；日志不包含 URL、cookie、请求头或响应正文。
 
 **与草案的差异**
 - 限流器公开接口为 `execute()` + `notify_risk_control()`，没有单独的 `acquire()`/`record_failure()`。
 - `SessionStatus` 为普通 dataclass；B站 `check()` 的错误码为 `auth_required` / `risk_control` / `upstream_error`。
 - 提取缓存默认 TTL 600 秒、容量 256，可由 `VMB_EXTRACT_CACHE_TTL` / `VMB_EXTRACT_CACHE_MAX_ENTRIES` 调整。
-- 阶段 5（观测/灰度）未实施；`docs/API_USAGE.md` 已补 `cost_tier` 与 `/sessions` 的 HTTP 要点，阶段 4 的环境变量见 §3.3。
+- 阶段 5 的正式灰度未单独执行；指标为进程内计数，重启清零，不引入 Prometheus/Redis。
+- `docs/API_USAGE.md` 已补 `cost_tier`、`/sessions`、`/metrics` 与阶段 4 环境变量。

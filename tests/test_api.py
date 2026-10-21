@@ -241,15 +241,23 @@ class TestCancelTask:
         if cancel_resp.status_code == 200:
             assert cancel_resp.json()["success"] is True
 
-    def test_cancel_completed_task_returns_400(self, client):
+    def test_cancel_completed_task_returns_400(self, client, server, monkeypatch):
         """取消已完成（失败）的任务应返回 400"""
+        def fail_download(*args, **kwargs):
+            raise RuntimeError("download disabled in test")
+
+        monkeypatch.setattr(
+            server.task_manager._download_service,
+            "download",
+            fail_download,
+        )
         create_resp = client.post(
             "/api/v1/tasks",
             json={"url": self.VALID_URL, "mode": "transcribe_only"},
         )
         task_id = create_resp.json()["id"]
 
-        # 轮询等待任务结束（URL 不存在会快速失败）
+        # 轮询等待任务结束（下载被 mock 为立即失败）
         terminal_states = {"completed", "failed", "cancelled"}
         for _ in range(15):
             time.sleep(1)

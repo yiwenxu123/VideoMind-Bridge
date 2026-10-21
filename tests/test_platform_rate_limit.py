@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import random
 from typing import Any
 
@@ -226,3 +227,128 @@ def test_from_env_respects_explicit_max_wait(monkeypatch):
     limiter = PlatformRateLimiter.from_env()
 
     assert limiter._policy("douyin").max_wait_seconds == 7.0
+
+
+def test_metrics_snapshot_counts_success_and_latency():
+    limiter, clock = _limiter(PlatformPolicy())
+
+    def func() -> str:
+        clock.sleep(0.25)
+        return "ok"
+
+    limiter.execute("bilibili", func)
+    metrics = limiter.metrics_snapshot()["bilibili"]
+
+    assert metrics["requests_total"] == 1
+    assert metrics["success_total"] == 1
+    assert metrics["failure_total"] == 0
+    assert metrics["retries_total"] == 0
+    assert metrics["latency_ms_avg"] == 250.0
+    assert metrics["circuit"] == "closed"
+
+
+def test_metrics_count_risk_outcomes_and_circuit_rejections():
+    limiter, _ = _limiter(
+        PlatformPolicy(max_retries=0, circuit_threshold=2)
+    )
+
+    def fail() -> str:
+        raise _status_error(412)
+
+    for _ in range(2):
+        with pytest.raises(PlatformRequestError):
+            limiter.execute("bilibili", fail)
+
+    with pytest.raises(PlatformRequestError):
+        limiter.execute("bilibili", fail)
+
+    metrics = limiter.metrics_snapshot()["bilibili"]
+    assert metrics["requests_total"] == 2
+    assert metrics["failure_total"] == 2
+    assert metrics["risk_control_total"] == 2
+    assert metrics["circuit_open_total"] == 1
+    assert metrics["circuit_rejected_total"] == 1
+    assert metrics["circuit"] == "open"
+
+
+def test_metrics_count_retries_and_final_success():
+    limiter, _ = _limiter(PlatformPolicy(max_retries=1))
+    calls: list[int] = []
+
+    def func() -> str:
+        calls.append(1)
+        if len(calls) == 1:
+            raise _status_error(429, {"Retry-After": "1"})
+        return "ok"
+
+    limiter.execute("bilibili", func)
+    metrics = limiter.metrics_snapshot()["bilibili"]
+
+    assert metrics["requests_total"] == 1
+    assert metrics["success_total"] == 1
+    assert metrics["retries_total"] == 1
+    assert metrics["rate_limited_total"] == 0
+
+
+def test_metrics_map_client_error_code():
+    class ClientError(RuntimeError):
+        error_code = "risk_control"
+        status_code = 200
+
+    limiter, _ = _limiter(PlatformPolicy(max_retries=0))
+
+    with pytest.raises(ClientError):
+        limiter.execute("bilibili", lambda: (_ for _ in ()).throw(ClientError()))
+
+    metrics = limiter.metrics_snapshot()["bilibili"]
+    assert metrics["requests_total"] == 1
+    assert metrics["failure_total"] == 1
+    assert metrics["risk_control_total"] == 1
+
+
+def test_metrics_count_body_risk_signals():
+    limiter, _ = _limiter(PlatformPolicy(circuit_threshold=2))
+
+    limiter.notify_risk_control("bilibili")
+
+    metrics = limiter.metrics_snapshot()["bilibili"]
+    assert metrics["risk_control_signals_total"] == 1
+    assert metrics["circuit"] == "closed"
+
+
+def test_structured_log_has_platform_fields_without_url(caplog):
+    limiter, _ = _limiter(PlatformPolicy())
+
+    with caplog.at_level(
+        logging.INFO,
+        logger="src.core.platforms.rate_limit",
+    ):
+        limiter.execute("bilibili", lambda: "ok")
+
+    record = next(
+        item
+        for item in caplog.records
+        if item.getMessage().startswith("platform_request ")
+    )
+    assert record.platform == "bilibili"
+    assert record.outcome == "success"
+    assert record.error_code is None
+    assert "https://" not in record.getMessage()
+    assert "SESSDATA" not in record.getMessage()
+
+
+def test_structured_log_marks_risk_and_circuit_open(caplog):
+    limiter, _ = _limiter(
+        PlatformPolicy(max_retries=0, circuit_threshold=1)
+    )
+
+    with caplog.at_level(
+        logging.WARNING,
+        logger="src.core.platforms.rate_limit",
+    ):
+        with pytest.raises(PlatformRequestError):
+            limiter.execute("bilibili", lambda: (_ for _ in ()).throw(_status_error(412)))
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("outcome=risk_control" in message for message in messages)
+    assert any("platform_circuit_open" in message for message in messages)

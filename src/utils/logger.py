@@ -1,8 +1,10 @@
 """统一日志模块"""
 
+import json
 import logging
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 LOG_LEVELS = {
@@ -16,13 +18,70 @@ LOG_LEVELS = {
 _LOG_LEVEL_NAME = os.getenv("VIDEOMIND_LOG_LEVEL", "INFO").upper()
 _LOG_LEVEL = LOG_LEVELS.get(_LOG_LEVEL_NAME, logging.INFO)
 
+_STANDARD_LOG_ATTRS = {
+    "args",
+    "asctime",
+    "created",
+    "exc_info",
+    "exc_text",
+    "filename",
+    "funcName",
+    "levelname",
+    "levelno",
+    "lineno",
+    "message",
+    "module",
+    "msecs",
+    "msg",
+    "name",
+    "pathname",
+    "process",
+    "processName",
+    "relativeCreated",
+    "stack_info",
+    "taskName",
+    "thread",
+    "threadName",
+}
+
 _initialized = False
+
+
+class JsonFormatter(logging.Formatter):
+    """输出单行 JSON；``extra`` 中的字段会并入顶层。"""
+
+    def format(self, record: logging.LogRecord) -> str:
+        payload: dict[str, object] = {
+            "timestamp": datetime.fromtimestamp(
+                record.created,
+                tz=UTC,
+            ).isoformat(timespec="milliseconds"),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        for key, value in record.__dict__.items():
+            if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
+                payload[key] = value
+        if record.exc_info:
+            payload["exception"] = self.formatException(record.exc_info)
+        return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _json_logs_enabled() -> bool:
+    return os.getenv("VMB_LOG_JSON", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
 
 def setup_logging(
     level: int = logging.INFO,
     log_file: Path | None = None,
-    format_string: str | None = None
+    format_string: str | None = None,
+    json_logs: bool | None = None,
 ) -> None:
     """
     配置全局日志系统
@@ -31,11 +90,15 @@ def setup_logging(
         level: 日志级别 (默认 INFO)
         log_file: 日志文件路径 (默认 None，不写入文件)
         format_string: 自定义格式字符串
+        json_logs: 输出 JSON 日志；None 时读取 ``VMB_LOG_JSON``
     """
     if format_string is None:
         format_string = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
-    formatter = logging.Formatter(format_string)
+    use_json = _json_logs_enabled() if json_logs is None else json_logs
+    formatter: logging.Formatter = (
+        JsonFormatter() if use_json else logging.Formatter(format_string)
+    )
 
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
