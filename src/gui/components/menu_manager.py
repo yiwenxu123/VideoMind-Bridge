@@ -1,11 +1,10 @@
 """菜单栏管理组件"""
 
 
-from typing import cast
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QAction
-from PySide6.QtWidgets import QMenuBar, QWidget
+from PySide6.QtWidgets import QMenuBar
 
 from ...utils import get_logger
 
@@ -31,7 +30,7 @@ class MenuManager(QObject):
         Returns:
             QMenuBar: 配置好的菜单栏
         """
-        menubar = QMenuBar(cast(QWidget | None, self._parent))
+        menubar = QMenuBar(self._parent)
 
         # 文件菜单
         self._setup_file_menu(menubar)

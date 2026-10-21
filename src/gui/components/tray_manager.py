@@ -140,7 +140,7 @@ class TrayManager(QObject):
 
     def is_available(self) -> bool:
         """检查系统是否支持托盘图标"""
-        return QSystemTrayIcon.isSystemTrayAvailable()
+        return bool(QSystemTrayIcon.isSystemTrayAvailable())
 
     def is_visible(self) -> bool:
         """检查托盘图标是否可见"""

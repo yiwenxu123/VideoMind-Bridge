@@ -308,11 +308,11 @@ class URLInputWidget(QWidget):
         """获取单个 URL"""
         if self.batch_button.isChecked():
             # 批量模式下返回第一行
-            text = self.batch_input.toPlainText().strip()
+            text = str(self.batch_input.toPlainText()).strip()
             if text:
-                return text.split('\n')[0].strip()
+                return str(text.split('\n')[0]).strip()
             return ""
-        return self.single_input.text().strip()
+        return str(self.single_input.text()).strip()
 
     def get_urls(self) -> list:
         """获取所有 URL（批量模式）"""
@@ -356,7 +356,7 @@ class URLInputWidget(QWidget):
 
     def is_batch_mode(self) -> bool:
         """是否批量模式"""
-        return self.batch_button.isChecked()
+        return bool(self.batch_button.isChecked())
 
     def get_valid_urls(self) -> list:
         """获取有效的视频平台 URL"""
