@@ -278,7 +278,7 @@ v1 只接受主页 URL，不接受任意 `creator_id`，避免绕过平台域名
 - `limit` 是**总条数**上限，一级评论和二级回复共同占用。
 - 默认按热度取一级评论；`sort=recent` 时按时间。
 - `include_replies=true` 时，按一级评论顺序展开，最多 10 个 thread；每个 thread 最多 `max_replies_per_thread` 条回复；总数达到 `limit` 即停止。
-- 短链解析最多 3 次跳转；解析失败或最终域名不是 B站时返回 `content_not_found`。
+- 短链解析最多 3 次跳转；解析失败或最终域名不是 B站时返回 `content_not_found`。`https://b23.tv/BV...` 已实测可解析。
 - 只展开一层，不递归二级以下回复。
 - 不做全量翻页；`has_more=true` 只表示平台还有更多，客户端不能据此无限拉取。
 - `limit` 是上限而非保证：当上游调用预算或总超时耗尽时，可能返回少于 `limit` 条，并置 `completeness=partial`、`has_more=true`。
@@ -333,7 +333,9 @@ v1 只接受主页 URL，不接受任意 `creator_id`，避免绕过平台域名
 | 小红书 | 计划中 | 计划中 | `x-s` / `xsec_token` + cookie | paid/premium | 后续 |
 | 公众号 | 不支持 | 不支持 | — | — | 否 |
 
-> **B站实测（2026-10-20）**：空间接口在无登录态下会返回 HTTP 412 或 `code=-352`；请通过 `VMB_BILIBILI_COOKIES_FILE` / `VMB_BILIBILI_SESSDATA` / `VMB_BILIBILI_COOKIE` 提供有效登录态。评论接口 `/x/v2/reply` 实测可无登录采样（3 条一级 + 6 条二级）。另测：从 RSSHub 服务器导出的完整 cookie 在本机直连空间接口仍返回 `-352`，疑似与出口 IP/指纹绑定；遇到风控应停止重试，VMB 不会自动绕过验证码或切换账号。
+> **B站实测（2026-10-20）**：空间接口在无登录态下会返回 HTTP 412 或 `code=-352`；请通过 `VMB_BILIBILI_COOKIES_FILE` / `VMB_BILIBILI_SESSDATA` / `VMB_BILIBILI_COOKIE` 提供有效登录态。评论接口 `/x/v2/reply` 实测可无登录采样（3 条一级 + 6 条二级）。
+>
+> **2026-10-21 追加**：从 RSSHub 同出口 IP 发起空间接口请求（完整 cookie，含 `SESSDATA`/`buvid3`）仍返回 `-352`。说明不仅是出口 IP 绑定，creator feed 暂不可用；继续使用 RSSHub/人工巡检，不再重试或尝试绕过。
 
 - v1 每个平台/功能只配置**一个 provider**，不做多 provider 自动降级，避免风控时放大请求。
 - 需要签名/cookie 的平台，先通过独立 provider 接入并单独评估维护成本，不把 Playwright 作为默认依赖。
