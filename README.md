@@ -68,6 +68,19 @@ pm2 start ecosystem.config.cjs
 pm2 save
 ```
 
+### Gateway Console
+
+启动 API 后打开：
+
+```text
+http://127.0.0.1:8787/console
+```
+
+控制台包含：概览、平台健康、提取/归档、公开评论采样、会话状态、指标和能力探测。
+如果配置了 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS`，在右上角「设置 Token」填入即可。
+
+旧版 v1 工作站仍保留在 `http://127.0.0.1:8787/legacy`，用于过渡；新操作请使用 Gateway Console。
+
 ## 使用
 
 ### v2 Engine (CLI, 主入口)
@@ -130,6 +143,8 @@ python main.py
 python main.py --api
 # 或指定端口
 python main.py --api --port 9000
+# Gateway Console: http://127.0.0.1:8787/console
+# 旧版工作站: http://127.0.0.1:8787/legacy
 # API 文档: http://127.0.0.1:8787/docs
 ```
 

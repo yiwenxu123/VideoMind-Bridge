@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..core.models import SCHEMA_VERSION, CostTier
@@ -404,13 +404,39 @@ class APIServer:
 
         @app.get("/")
         async def root():
-            """Web UI 首页"""
+            """默认入口：Gateway Console。"""
+            return RedirectResponse(url="/console", status_code=302)
+
+        @app.get("/console")
+        @app.get("/console/")
+        async def console():
+            """Gateway 控制台（只读观测 + 提取/评论操作）。"""
             from pathlib import Path as _Path
-            web_dir = _Path(__file__).resolve().parent.parent.parent / "web"
-            index = web_dir / "index.html"
+            index = (
+                _Path(__file__).resolve().parent.parent.parent
+                / "web"
+                / "console"
+                / "index.html"
+            )
             if index.is_file():
                 return FileResponse(str(index))
-            return JSONResponse(content={"message": "Web UI 未找到, 请从项目根目录启动"})
+            return JSONResponse(
+                content={"message": "Gateway Console 未找到"},
+                status_code=404,
+            )
+
+        @app.get("/legacy")
+        @app.get("/legacy/")
+        async def legacy_ui():
+            """旧版 v1 工作站；保留一段时间供过渡使用。"""
+            from pathlib import Path as _Path
+            index = _Path(__file__).resolve().parent.parent.parent / "web" / "index.html"
+            if index.is_file():
+                return FileResponse(str(index))
+            return JSONResponse(
+                content={"message": "旧版 Web UI 未找到"},
+                status_code=404,
+            )
 
         @app.get("/health", response_model=dict)
         async def health():

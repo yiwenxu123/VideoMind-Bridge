@@ -384,6 +384,7 @@ class PlatformRateLimiter:
 - 阶段 4：yt-dlp 命令注入 `--sleep-requests`、`--retries`、`--extractor-retries`、`--socket-timeout`；平台熔断打开时 yt-dlp/yt-dlp+ASR 直接跳过。
 - 阶段 4：平台最大等待按间隔自动放大（`max(2s, interval+1s)`），避免抖音 2s 间隔在并发请求下误报 `rate_limited`。
 - 阶段 5：`PlatformRateLimiter` 内置平台计数（请求/成功/失败/重试/风控/限流/超时/熔断/延迟），新增 `GET /api/v1/metrics`；新增 `platform_request*` 结构化日志与可选 `VMB_LOG_JSON=1` JSON 格式；日志不包含 URL、cookie、请求头或响应正文。
+- Gateway Console：`GET /console` 提供概览、平台健康、提取/归档、评论采样、会话、指标和能力面板；`/` 跳转控制台，旧版 v1 工作站保留在 `/legacy`。控制台只读展示会话状态与平台指标，不展示 cookie 值。
 
 **与草案的差异**
 - 限流器公开接口为 `execute()` + `notify_risk_control()`，没有单独的 `acquire()`/`record_failure()`。

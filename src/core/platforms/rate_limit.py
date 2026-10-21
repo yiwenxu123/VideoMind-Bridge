@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -158,6 +159,8 @@ class PlatformRateLimiter:
         self._last_request: dict[str, float] = {}
         self._failures: dict[str, int] = {}
         self._circuit_until: dict[str, float] = {}
+        self._last_error: dict[str, str] = {}
+        self._last_error_at: dict[str, str] = {}
         self._metrics: dict[str, PlatformMetrics] = {
             platform: PlatformMetrics() for platform in self._policies
         }
@@ -316,6 +319,10 @@ class PlatformRateLimiter:
                 metrics.success_total += 1
             else:
                 metrics.failure_total += 1
+                self._last_error[platform] = error_code or "error"
+                self._last_error_at[platform] = datetime.now(UTC).isoformat(
+                    timespec="seconds"
+                )
                 field = {
                     "risk_control": "risk_control_total",
                     "rate_limited": "rate_limited_total",
@@ -458,20 +465,23 @@ class PlatformRateLimiter:
             )
 
     def metrics_snapshot(self) -> dict[str, dict[str, Any]]:
-        """返回进程内平台请求计数与熔断状态（重启清零）。"""
+        """返回进程内平台请求计数、健康状态与熔断状态（重启清零）。"""
         with self._lock:
             now = self._clock()
-            return {
-                platform: {
+            snapshot: dict[str, dict[str, Any]] = {}
+            for platform, metrics in self._metrics.items():
+                until = self._circuit_until.get(platform, 0.0)
+                snapshot[platform] = {
                     **metrics.to_dict(),
-                    "circuit": (
-                        "open"
-                        if self._circuit_until.get(platform, 0.0) > now
-                        else "closed"
+                    "circuit": "open" if until > now else "closed",
+                    "failure_streak": self._failures.get(platform, 0),
+                    "cooldown_remaining_s": (
+                        max(0, math.ceil(until - now)) if until > now else 0
                     ),
+                    "last_error_code": self._last_error.get(platform),
+                    "last_error_at": self._last_error_at.get(platform),
                 }
-                for platform, metrics in self._metrics.items()
-            }
+            return snapshot
 
     def execute(
         self,

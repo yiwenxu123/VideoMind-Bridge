@@ -12,7 +12,7 @@ uv sync --extra dev             # 服务端/CLI/MCP 依赖（含 dev: ruff/mypy/
 uv sync --extra dev --extra gui # 需要桌面 GUI 时追加 PySide6
 uv run python -m src.cli <url>  # CLI 模式
 python main.py                  # GUI 模式
-python main.py --api            # API 服务 (端口 8787)
+python main.py --api            # API 服务 (端口 8787; 控制台 /console)
 python main.py --mcp            # MCP Server (stdio JSON-RPC)
 pm2 start ecosystem.config.cjs  # 本机 PM2 常驻 API 服务
 pytest tests/ -v                # 运行测试

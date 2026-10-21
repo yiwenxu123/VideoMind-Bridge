@@ -26,6 +26,20 @@ body {
   line-height: 1.6;
 }
 
+.legacy-banner {
+  padding: 9px 16px;
+  background: #fff7ed;
+  border-bottom: 1px solid #fed7aa;
+  color: #9a3412;
+  font-size: 13px;
+  text-align: center;
+}
+
+.legacy-banner a {
+  color: #c2410c;
+  font-weight: 600;
+}
+
 #app {
   max-width: 680px;
   margin: 0 auto;

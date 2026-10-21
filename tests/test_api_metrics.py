@@ -20,6 +20,9 @@ def test_metrics_endpoint_returns_platform_counters():
     bilibili = platforms["bilibili"]
     assert bilibili["requests_total"] == 0
     assert bilibili["success_total"] == 0
+    assert bilibili["failure_streak"] == 0
+    assert bilibili["cooldown_remaining_s"] == 0
+    assert bilibili["last_error_code"] is None
     assert bilibili["circuit"] == "closed"
     assert "SESSDATA" not in response.text
     assert "cookie" not in response.text.lower()

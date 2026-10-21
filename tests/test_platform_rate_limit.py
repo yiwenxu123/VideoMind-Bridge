@@ -352,3 +352,23 @@ def test_structured_log_marks_risk_and_circuit_open(caplog):
     messages = [record.getMessage() for record in caplog.records]
     assert any("outcome=risk_control" in message for message in messages)
     assert any("platform_circuit_open" in message for message in messages)
+
+
+def test_metrics_snapshot_exposes_health_fields():
+    limiter, _ = _limiter(
+        PlatformPolicy(max_retries=0, circuit_threshold=2, circuit_cooldown_seconds=30)
+    )
+
+    with pytest.raises(PlatformRequestError):
+        limiter.execute("bilibili", lambda: (_ for _ in ()).throw(_status_error(412)))
+
+    metrics = limiter.metrics_snapshot()["bilibili"]
+    assert metrics["failure_streak"] == 1
+    assert metrics["cooldown_remaining_s"] == 0
+    assert metrics["last_error_code"] == "risk_control"
+    assert metrics["last_error_at"] is not None
+
+    limiter.execute("bilibili", lambda: "ok")
+    metrics = limiter.metrics_snapshot()["bilibili"]
+    assert metrics["failure_streak"] == 0
+    assert metrics["last_error_code"] == "risk_control"
