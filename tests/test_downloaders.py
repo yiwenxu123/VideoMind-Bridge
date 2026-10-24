@@ -11,6 +11,9 @@
 from __future__ import annotations
 
 import builtins
+import os
+import time
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -966,6 +969,114 @@ def test_ytdlp_build_options_output_template():
     opts = DownloadOptions(output_dir=Path("/tmp"))
     built = d._build_options(opts, Path("/tmp/.temp/test"), None)
     assert "/tmp/.temp/test" in built["outtmpl"]
+
+
+def test_ytdlp_build_options_enables_resume():
+    """重试/重跑必须保留 .part 并续传，不能强制覆盖。"""
+    d = _RealYtdlpDownloader()
+    opts = DownloadOptions(output_dir=Path("/tmp"))
+    built = d._build_options(opts, Path("/tmp/.temp"), None)
+    assert built["overwrites"] is False
+    assert built["continuedl"] is True
+
+
+def test_ytdlp_temp_dir_stable_across_days(tmp_path):
+    """跨天重跑必须复用同一临时目录，否则 .part 无法续传。"""
+    captured: list[dict] = []
+
+    class _FakeYDL:
+        def __init__(self, opts):
+            captured.append(opts)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def extract_info(self, url, download=True):  # noqa: ARG002
+            return None
+
+    url = "https://www.youtube.com/watch?v=xxx"
+    other_url = "https://www.youtube.com/watch?v=yyy"
+    downloader = _RealYtdlpDownloader()
+    options = DownloadOptions(output_dir=tmp_path)
+
+    with patch("yt_dlp.YoutubeDL", _FakeYDL), patch(
+        "src.services.downloaders.ytdlp.datetime"
+    ) as mock_datetime:
+        mock_datetime.now.return_value = datetime(2026, 10, 24)
+        downloader.download(url, options)
+        mock_datetime.now.return_value = datetime(2026, 10, 25)
+        downloader.download(url, options)
+
+    assert captured[0]["outtmpl"] == captured[1]["outtmpl"]
+    assert str(tmp_path / ".temp") in captured[0]["outtmpl"]
+    assert "2026-10-24" not in captured[0]["outtmpl"]
+    assert "2026-10-25" not in captured[0]["outtmpl"]
+    assert downloader._url_key(url) != downloader._url_key(other_url)
+
+
+def _make_temp_dir(root: Path, name: str, age_days: float) -> Path:
+    """创建带过期 mtime 的临时目录，模拟放弃的下载任务。"""
+    path = root / name
+    path.mkdir(parents=True)
+    part = path / "video.mp4.part"
+    part.write_bytes(b"partial")
+    ts = time.time() - age_days * 86400
+    os.utime(part, (ts, ts))
+    os.utime(path, (ts, ts))
+    return path
+
+
+def test_ytdlp_download_prunes_stale_temp_dirs(tmp_path):
+    """下载前清理超过保留期的临时目录，保留近期目录。"""
+    root = tmp_path / ".temp"
+    stale = _make_temp_dir(root, "stale", age_days=8)
+    fresh = _make_temp_dir(root, "fresh", age_days=1)
+
+    opts = DownloadOptions(output_dir=tmp_path)
+    with patch("yt_dlp.YoutubeDL", return_value=_make_mock_ydl(None)):
+        _RealYtdlpDownloader().download("https://youtube.com/watch?v=xxx", opts)
+
+    assert not stale.exists()
+    assert fresh.exists()
+
+
+def test_ytdlp_prune_keeps_recently_active_dir(tmp_path):
+    """目录时间戳很旧但仍有新写入时，不应被清理。"""
+    root = tmp_path / ".temp"
+    active = _make_temp_dir(root, "active", age_days=30)
+    (active / "resume.mp4.part").write_bytes(b"fresh")
+    old = time.time() - 30 * 86400
+    os.utime(active, (old, old))
+
+    keep = _make_temp_dir(root, "keep", age_days=30)
+    _RealYtdlpDownloader._prune_stale_temp_dirs(root, keep)
+
+    assert active.exists()
+    assert keep.exists()
+
+
+def test_ytdlp_process_result_ignores_partial_files(tmp_path):
+    """残留的 .part 不应被当成本次下载产物移入输出目录。"""
+    d = _RealYtdlpDownloader()
+    temp_dir = tmp_path / ".temp"
+    temp_dir.mkdir()
+    (temp_dir / "Video.mp4").write_bytes(b"complete")
+    (temp_dir / "Video.mp4.part").write_bytes(b"partial")
+
+    opts = DownloadOptions(output_dir=tmp_path / "out")
+    result = d._process_result(
+        {"title": "Video", "webpage_url": "https://youtube.com/watch?v=xxx"},
+        opts,
+        temp_dir,
+    )
+
+    output_dir = tmp_path / "out" / datetime.now().strftime("%Y-%m-%d") / "Video"
+    assert (output_dir / "Video.mp4").exists()
+    assert not (output_dir / "Video.mp4.part").exists()
+    assert result.video_path == output_dir / "Video.mp4"
 
 
 # ---------- download ----------

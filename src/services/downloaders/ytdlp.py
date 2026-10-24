@@ -4,7 +4,10 @@
 """
 
 import contextlib
+import shutil
+import time
 from datetime import datetime
+from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +38,8 @@ class YtdlpDownloader(DownloaderBase):
         "facebook", "vimeo", "reddit", "weibo", "zhihu",
         "douyin", "xiaohongshu",
     }
+
+    TEMP_RETENTION_DAYS = 7
 
     def __init__(self):
         self._ytdlp_version: str | None = None
@@ -88,8 +93,9 @@ class YtdlpDownloader(DownloaderBase):
         try:
             options.output_dir.mkdir(parents=True, exist_ok=True)
 
-            date_str = datetime.now().strftime("%Y-%m-%d")
-            temp_dir = options.output_dir / date_str / ".temp"
+            # 按 URL 固定临时目录：跨天/进程重启后仍可复用 .part 续传
+            temp_dir = options.output_dir / ".temp" / self._url_key(url)
+            self._prune_stale_temp_dirs(options.output_dir / ".temp", temp_dir)
             temp_dir.mkdir(parents=True, exist_ok=True)
 
             ytdlp_opts = self._build_options(options, temp_dir, progress_callback)
@@ -159,6 +165,38 @@ class YtdlpDownloader(DownloaderBase):
             logger.error(f"获取元数据失败: {e}")
             return None
 
+    @staticmethod
+    def _url_key(url: str) -> str:
+        return sha256(url.encode("utf-8")).hexdigest()[:16]
+
+    @classmethod
+    def _prune_stale_temp_dirs(cls, root: Path, keep: Path) -> None:
+        """删除超过保留期的下载临时目录（保留 keep 及仍在写入的目录）。"""
+        cutoff = time.time() - cls.TEMP_RETENTION_DAYS * 86400
+        try:
+            candidates = list(root.iterdir())
+        except OSError:
+            return
+
+        for path in candidates:
+            if path == keep or not path.is_dir():
+                continue
+            try:
+                if cls._newest_mtime(path) >= cutoff:
+                    continue
+            except OSError:
+                continue
+            shutil.rmtree(path, ignore_errors=True)
+            logger.info(f"已清理过期下载临时目录: {path}")
+
+    @staticmethod
+    def _newest_mtime(path: Path) -> float:
+        newest = path.stat().st_mtime
+        for child in path.rglob("*"):
+            with contextlib.suppress(OSError):
+                newest = max(newest, child.stat().st_mtime)
+        return newest
+
     def _build_options(
         self,
         options: DownloadOptions,
@@ -178,7 +216,9 @@ class YtdlpDownloader(DownloaderBase):
             "quiet": True,
             "no_warnings": True,
             "noprogress": True,
-            "overwrites": True,
+            # overwrites=True 会丢弃 .part，重试/重跑只能从零开始
+            "overwrites": False,
+            "continuedl": True,
             "writesubtitles": bool(options.subtitle_languages),
             "subtitleslangs": options.subtitle_languages or ["all"],
             "writethumbnail": False,
@@ -245,10 +285,9 @@ class YtdlpDownloader(DownloaderBase):
         video_path: Path | None = None
 
         for file_path in downloaded_files:
-            if file_path.is_file():
+            if file_path.is_file() and file_path.suffix not in {".part", ".ytdl"}:
                 target_path = output_dir / file_path.name
 
-                import shutil
                 shutil.move(str(file_path), str(target_path))
 
                 if file_path.suffix.lower() in [".m4a", ".mp3", ".opus", ".webm"] and audio_path is None:
@@ -266,7 +305,6 @@ class YtdlpDownloader(DownloaderBase):
             description=info.get("description", ""),
         )
 
-        import shutil
         with contextlib.suppress(Exception):
             shutil.rmtree(temp_dir)
 
