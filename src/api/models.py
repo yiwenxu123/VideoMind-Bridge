@@ -4,10 +4,11 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, field_validator
 
 from ..core.models import CostTier
 from ..models.task import ExportTarget, ProcessingMode, TaskStatus
+from ..services.local_media import is_local_media_path, is_remote_url
 
 
 class APIError(BaseModel):
@@ -169,7 +170,7 @@ class CommentsResponse(BaseModel):
 
 class TaskCreateRequest(BaseModel):
     """创建任务请求"""
-    url: HttpUrl = Field(..., description="视频链接")
+    url: str = Field(..., description="视频链接或本地媒体文件路径")
     mode: ProcessingMode = Field(default=ProcessingMode.FULL, description="处理模式")
     targets: list[ExportTarget] = Field(
         default=[ExportTarget.LOCAL],
@@ -184,6 +185,14 @@ class TaskCreateRequest(BaseModel):
         default=False,
         description="AI服务不可用时是否降级为转录存档模式"
     )
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url_or_local_media(cls, value: str) -> str:
+        value = value.strip()
+        if is_remote_url(value) or is_local_media_path(value):
+            return value
+        raise ValueError("url 必须是 http(s) 链接或受支持的本地媒体文件")
 
     class Config:
         json_schema_extra = {

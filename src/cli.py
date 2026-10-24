@@ -28,6 +28,7 @@ from src.models.task import ExportContext, ExportTarget, Highlight, ProcessingMo
 from src.services.ai_service import AIService
 from src.services.download_service import DownloadService
 from src.services.export_orchestrator import ExportOrchestrator
+from src.services.local_media import is_remote_url
 from src.services.transcribe_service import TranscribeService
 from src.utils.media_utils import generate_srt
 
@@ -43,6 +44,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 示例:
   # 完整处理（下载视频+音频、转录、AI摘要、导出）
   %(prog)s "https://bilibili.com/video/BV1xx" --mode full --model small
+
+  # 处理本地文件（跳过下载，适合视频号等无法直接链接下载的素材）
+  %(prog)s ~/Downloads/video.mp4 --targets obsidian
 
   # 仅转录（不下载视频，只下载音频）
   %(prog)s "https://bilibili.com/video/BV1xx" --mode transcribe --model tiny
@@ -703,6 +707,10 @@ def main() -> int:
     if args.config_set:
         return _run_config_set(args.config_set[0], args.config_set[1], json_output=args.json_output)
 
+    # 本地媒体文件没有可提取的 URL，直接走 v1: 跳过下载 → 转录 → 摘要 → 导出
+    if args.url and not is_remote_url(args.url) and Path(args.url).expanduser().is_file():
+        return _process_single(args, start_time)
+
     # v2 提取引擎为默认路径 (成本感知路由, 无需下载/转录, Agent 友好):
     # 仅当显式请求 v1 专属参数时才走旧版 下载→转录→摘要 流程
     v1_requested = (
@@ -739,9 +747,12 @@ def main() -> int:
 
 
 def _process_single(args: argparse.Namespace, start_time: float) -> int:
-    """处理单个视频链接"""
+    """处理单个视频链接或本地媒体文件"""
     use_json = args.json_output
     use_quiet = args.quiet or use_json
+    source_is_local = bool(
+        args.url and not is_remote_url(args.url) and Path(args.url).expanduser().is_file()
+    )
 
     out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None  # noqa: SIM115
     def _write_json(data: dict) -> None:
@@ -833,7 +844,9 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
                     elapsed=time.time() - start_time,
                 ))
             else:
-                console.print(f"[red]✗ 下载失败: {e}[/red]")
+                console.print(
+                    f"[red]✗ {'读取本地文件失败' if source_is_local else '下载失败'}: {e}[/red]"
+                )
             return 1
 
         if processing_mode == ProcessingMode.DOWNLOAD_ONLY:
@@ -845,7 +858,11 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
                     elapsed=elapsed,
                 ))
             else:
-                console.print("\n[green]✓ 下载完成![/green]")
+                console.print(
+                    "\n[green]✓ 本地文件已就绪![/green]"
+                    if source_is_local
+                    else "\n[green]✓ 下载完成![/green]"
+                )
                 if video_path:
                     console.print(f"  [dim]视频: {video_path}[/dim]")
                 console.print(f"  [dim]音频: {audio_path}[/dim]")
@@ -947,7 +964,17 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
     if video_path and highlights:
         try:
             from src.exporters.html_player_exporter import HTMLPlayerExporter
-            html_exporter = HTMLPlayerExporter()
+            player_output_dir = next(
+                (
+                    r.output_path
+                    for r in export_results_list
+                    if r.target == ExportTarget.LOCAL and r.success and r.output_path
+                ),
+                None,
+            )
+            if source_is_local and player_output_dir is None:
+                player_output_dir = output_dir
+            html_exporter = HTMLPlayerExporter(output_dir=player_output_dir)
             html_result = html_exporter.export(export_context)
             if html_result.success and not use_quiet:
                 console.print(f"[green]✓ HTML播放器:[/green] {html_result.output_path}")

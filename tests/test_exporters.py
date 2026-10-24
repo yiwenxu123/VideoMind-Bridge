@@ -305,6 +305,30 @@ def test_local_exporter_export_audio_only(tmp_path):
     mock_copy.assert_called_once()
 
 
+def test_local_exporter_preserves_local_video_suffix(tmp_path):
+    """本地视频作为音频输入时，导出不得改成 .m4a。"""
+    output_path = tmp_path / "output"
+    local_video = tmp_path / "source_clip.mp4"
+    local_video.write_bytes(b"mp4")
+
+    context = ExportContext(
+        task_id=uuid4(),
+        video_metadata=VideoMetadata(
+            title="本地素材", author="本地文件", duration=0,
+            platform="local", url=str(local_video),
+        ),
+        audio_path=local_video,
+        config={},
+    )
+
+    with patch("src.exporters.local_exporter.shutil.copy2") as mock_copy:
+        result = LocalExporter(output_path=output_path, organize_by="flat").export(context)
+
+    assert result.success is True
+    dest = Path(mock_copy.call_args.args[1])
+    assert dest.name == "本地素材.mp4"
+
+
 def test_local_exporter_export_no_media(tmp_path):
     """export 成功导出 - 无媒体文件，只有文本"""
     output_path = tmp_path / "output"
@@ -694,6 +718,30 @@ def test_obsidian_exporter_export_transcribe_mode(tmp_path):
     assert "仅包含语音转录文本" in content
 
 
+def test_obsidian_exporter_preserves_local_video_suffix(tmp_path):
+    """本地视频作为音频输入时，附件必须保留 .mp4 后缀。"""
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    local_video = tmp_path / "local_clip.mp4"
+    local_video.write_bytes(b"mp4")
+
+    context = ExportContext(
+        task_id=uuid4(),
+        video_metadata=VideoMetadata(
+            title="本地素材", author="本地文件", duration=0,
+            platform="local", url=str(local_video),
+        ),
+        audio_path=local_video,
+        config={},
+    )
+
+    result = ObsidianExporter(vault_path=vault).export(context)
+
+    assert result.success is True
+    assert any(p.name == "本地素材.mp4" for p in vault.rglob("*.mp4"))
+    assert not any(p.suffix == ".m4a" for p in vault.rglob("*"))
+
+
 def test_obsidian_exporter_export_video_symlink_fallback_to_copy(tmp_path):
     """export 符号链接失败时回退到复制"""
     vault = tmp_path / "vault"
@@ -1006,6 +1054,32 @@ def test_html_player_exporter_extract_subtitles(tmp_path):
     assert subtitles[0]["text"] == "Hello"
     assert subtitles[0]["start_formatted"] == "00:00"
     assert subtitles[1]["start_formatted"] == "00:05"
+
+
+def test_html_player_exporter_respects_output_dir(tmp_path):
+    """指定输出目录时，player.html 不写进源文件所在目录。"""
+    source_dir = tmp_path / "source"
+    source_dir.mkdir()
+    video_path = source_dir / "local.mp4"
+    video_path.write_bytes(b"data")
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    context = ExportContext(
+        task_id=uuid4(),
+        video_metadata=VideoMetadata(
+            title="本地播放器", author="本地文件", duration=0,
+            platform="local", url=str(video_path),
+        ),
+        video_path=video_path,
+        config={},
+    )
+
+    result = HTMLPlayerExporter(output_dir=output_dir).export(context)
+
+    assert result.success is True
+    assert result.output_path == output_dir / "player.html"
+    assert not (source_dir / "player.html").exists()
 
 
 def test_html_player_exporter_export_success(tmp_path):

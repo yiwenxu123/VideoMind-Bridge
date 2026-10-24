@@ -1,12 +1,15 @@
-"""CLI 模块测试 — 参数解析和纯逻辑函数
+"""CLI 模块测试 — 参数解析、纯逻辑函数和输入路由
 
-只测试 argparse 解析和辅助函数, 不运行 CLI 主流程。
+不运行真实的下载/转录流程。
 """
 
 
+import sys
+from unittest.mock import patch
+
 import pytest
 
-from src.cli import format_duration, parse_args, parse_targets
+from src.cli import format_duration, main, parse_args, parse_targets
 from src.models.task import ExportTarget
 
 # ============================================================
@@ -430,3 +433,34 @@ def test_v2_cost_tier_choices():
         args = parse_args(["--cost-tier", tier])
         assert args.cost_tier in valid_tiers
     print(f"  ✓ 有效 cost-tier: {valid_tiers}")
+
+
+class TestInputRouting:
+    """本地文件必须走 v1，远程链接保持 v2 默认路径。"""
+
+    def test_local_file_routes_to_v1(self, tmp_path):
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"x")
+
+        with (
+            patch.object(sys, "argv", ["videomind", str(media)]),
+            patch("src.cli._process_single", return_value=0) as process,
+            patch("src.cli.run_v2_extraction") as v2,
+        ):
+            assert main() == 0
+
+        process.assert_called_once()
+        v2.assert_not_called()
+
+    def test_remote_url_keeps_v2_default(self):
+        url = "https://www.youtube.com/watch?v=xxx"
+
+        with (
+            patch.object(sys, "argv", ["videomind", url]),
+            patch("src.cli._process_single") as process,
+            patch("src.cli.run_v2_extraction", return_value=0) as v2,
+        ):
+            assert main() == 0
+
+        v2.assert_called_once()
+        process.assert_not_called()

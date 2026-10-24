@@ -97,11 +97,11 @@ class MCPServer:
         tools = [
                 {
                     "name": "videomind_process",
-                    "description": "[DEPRECATED] 完整处理视频：下载→转录→AI摘要→导出 (v1 扩展模式, 推荐使用 smart_extract + archive_extract)",
+                    "description": "[DEPRECATED] 完整处理视频：下载→转录→AI摘要→导出 (v1 扩展模式, 推荐使用 smart_extract + archive_extract)。也支持本地媒体文件路径",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "url": {"type": "string", "description": "视频链接"},
+                            "url": {"type": "string", "description": "视频链接或本地媒体文件路径（mp4/m4a 等）"},
                             "mode": {
                                 "type": "string",
                                 "enum": ["full", "download", "transcribe"],
@@ -127,11 +127,11 @@ class MCPServer:
                 },
                 {
                     "name": "videomind_download",
-                    "description": "[DEPRECATED] 仅下载视频/音频 (v1 扩展模式)",
+                    "description": "[DEPRECATED] 仅下载视频/音频 (v1 扩展模式)。传入本地文件路径时直接返回该文件",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "url": {"type": "string", "description": "视频链接"},
+                            "url": {"type": "string", "description": "视频链接或本地媒体文件路径"},
                             "keep_video": {
                                 "type": "boolean",
                                 "description": "是否保留视频文件（默认 true）",
@@ -561,7 +561,9 @@ class MCPServer:
         url = args["url"]
         download_service = DownloadService(OUTPUT_DIR)
         supported = download_service.is_supported(url)
-        platform = download_service._detect_platform(url)
+        from src.services.local_media import is_local_media_path
+
+        platform = "local" if is_local_media_path(url) else download_service._detect_platform(url)
 
         return {
             "url": url,

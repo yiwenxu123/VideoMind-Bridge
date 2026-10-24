@@ -17,7 +17,9 @@ from fastapi.staticfiles import StaticFiles
 from ..core.models import SCHEMA_VERSION, CostTier
 from ..models.task import ProcessingMode, TaskStatus, VideoTask
 from ..services.config_manager import ConfigManager
+from ..services.local_media import is_remote_url, resolve_allowed_local_media_path
 from ..utils import get_logger
+from ..utils.exceptions import ValidationError
 from .models import (
     ConfigResponse,
     KeyGroup,
@@ -474,7 +476,7 @@ class APIServer:
             ai_enabled = self.task_manager.is_ai_available()
             return ConfigResponse(
                 default_output_dir=str(self.task_manager.output_dir),
-                supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu"],
+                supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu", "local"],
                 supported_ai_providers=["deepseek", "zhipu", "moonshot", "minimax", "doubao", "ollama"],
                 supported_export_targets=["local", "obsidian", "notion"],
                 ai_enabled=ai_enabled,
@@ -771,6 +773,17 @@ class APIServer:
         async def create_task(request: TaskCreateRequest):
             """创建新任务"""
             try:
+                if is_remote_url(request.url):
+                    task_url = request.url
+                else:
+                    try:
+                        task_url = str(resolve_allowed_local_media_path(request.url))
+                    except ValidationError as e:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=e.message,
+                        )
+
                 # 检查 AI 配置
                 if (
                     request.mode == ProcessingMode.FULL
@@ -787,7 +800,7 @@ class APIServer:
                         )
 
                 task = await self.task_manager.create_task(
-                    url=str(request.url),
+                    url=task_url,
                     mode=request.mode,
                     targets=set(request.targets),
                     ai_provider=request.ai_provider,
@@ -803,6 +816,8 @@ class APIServer:
                 )
 
                 return self._task_to_response(task)
+            except HTTPException:
+                raise
             except Exception as e:
                 logger.error(f"创建任务失败: {e}")
                 raise HTTPException(

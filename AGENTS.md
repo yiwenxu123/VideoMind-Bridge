@@ -11,6 +11,7 @@ Python 3.11+ monorepo。uv 驱动。
 uv sync --extra dev             # 服务端/CLI/MCP 依赖（含 dev: ruff/mypy/pytest）
 uv sync --extra dev --extra gui # 需要桌面 GUI 时追加 PySide6
 uv run python -m src.cli <url>  # CLI 模式
+uv run python -m src.cli /path/to/video.mp4 --targets obsidian  # 本地文件（跳过下载）
 python main.py                  # GUI 模式
 python main.py --api            # API 服务 (端口 8787; 控制台 /console)
 python main.py --mcp            # MCP Server (stdio JSON-RPC)
@@ -110,6 +111,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **`--prescreen` 复用提取**: 仅真成功（有内容、非占位）结果被复用；失败/占位时允许二次高成本提取
 - **API 鉴权**: 默认绑定 127.0.0.1。设置 `VIDEOMIND_API_TOKEN`（admin）或 `VMB_CONSUMER_TOKENS`（JSON 多消费者）后，`/api/v1/*` 需携带 `Authorization: Bearer <token>`；`VMB_RATE_LIMIT_PER_MIN` 可开启每消费者每分钟限流（0=关闭）。带非白名单 Origin 的浏览器请求被 403 拒绝（防 CSRF）
 - **Discovery API**: `VMB_ENABLE_CREATOR_FEED=1` 开启 `/api/v1/creator/feed`，`VMB_ENABLE_COMMENTS=1` 开启 `/api/v1/comments`（默认都不注册路由）；MCP 同步出现 `get_creator_feed` / `get_comments`。B站空间接口对无登录态请求常返回 HTTP 412 / `code=-352`，可用 `VMB_BILIBILI_COOKIES_FILE`（Netscape cookies.txt）或 `VMB_BILIBILI_SESSDATA` / `VMB_BILIBILI_COOKIE` 提供登录态；评论接口实测可无登录采样。cookie 可能绑定出口 IP/指纹，换机器仍可能 `risk_control`；VMB 不绕过验证码。回归脚本：`scripts/check_discovery_links.py`
+- **本地文件摄入**: CLI 传本地视频/音频路径时跳过下载，直接转录/摘要/导出（平台标记 `local`）；MCP `videomind_process` / `videomind_download` 同样支持。API `POST /api/v1/tasks` 也接受本地路径，但文件必须位于 `VMB_LOCAL_MEDIA_DIRS`（路径分隔符分隔）内，未配置时禁用。
 - **平台请求治理**: 平台自有 HTTP 请求走 `PlatformRateLimiter`（B站/抖音/小红书/YouTube），本地网关、第三方 API 和 CDN 下载不套平台 limiter；yt-dlp 通过 `VMB_YTDLP_SLEEP_REQUESTS`、`VMB_YTDLP_RETRIES` 等参数节流，平台熔断时跳过 yt-dlp 兜底。小红书可选 `VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE`；抖音用 `DOUYIN_COOKIES_FILE`。`GET /api/v1/metrics` 返回进程内平台计数，`VMB_LOG_JSON=1` 开启 JSON 日志。
 - **GUI 使用 PySide6**: 已移到 `gui` extra；服务端/CLI/MCP 不需要安装，GUI 测试在缺依赖时自动跳过
 - **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)

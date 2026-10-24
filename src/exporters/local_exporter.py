@@ -98,7 +98,7 @@ class LocalExporter(BaseExporter):
         # 2. 只有在没有视频文件时，才复制音频文件
         # 注意：视频文件已经包含音频，不需要单独复制音频文件
         elif context.audio_path and context.audio_path.exists():
-            audio_dest = output_dir / f"{safe_title}.m4a"
+            audio_dest = output_dir / f"{safe_title}{context.audio_path.suffix.lower()}"
             # 避免源文件和目标文件相同
             if context.audio_path.resolve() != audio_dest.resolve():
                 try:
@@ -237,7 +237,7 @@ class LocalExporter(BaseExporter):
         lines.extend([
             "## 文件列表",
             f"- 视频: `{meta.title}.mp4`" if context.video_path else "- 视频: (未下载)",
-            f"- 音频: `{meta.title}.m4a`",
+            f"- 音频: `{meta.title}{context.audio_path.suffix}`" if context.audio_path else "- 音频: (无)",
             f"- 字幕: `{meta.title}.srt`",
             f"- 转录: `{meta.title}_transcript.txt`",
             f"- 时间轴: `{meta.title}_highlights.json`",

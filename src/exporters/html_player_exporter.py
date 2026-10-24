@@ -30,8 +30,8 @@ class HTMLPlayerExporter(BaseExporter):
     name = "HTML 播放器"
     icon = "🎬"
 
-    def __init__(self):
-        pass
+    def __init__(self, output_dir: Path | None = None):
+        self._output_dir = Path(output_dir) if output_dir else None
 
     def validate_config(self) -> tuple[bool, str]:
         """验证配置 - 此导出器无需特殊配置"""
@@ -44,10 +44,10 @@ class HTMLPlayerExporter(BaseExporter):
         输出文件:
         - player.html: 独立的播放器页面
         """
-        output_dir: Path | None = None
-        if context.video_path:
+        output_dir: Path | None = self._output_dir
+        if output_dir is None and context.video_path:
             output_dir = context.video_path.parent
-        elif context.audio_path:
+        elif output_dir is None and context.audio_path:
             output_dir = context.audio_path.parent
         if not output_dir:
             return ExportResult(

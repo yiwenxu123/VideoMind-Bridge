@@ -13,6 +13,12 @@ from ..utils import get_logger
 from ..utils.exceptions import DownloadError, UnsupportedPlatformError
 from ..utils.platform_detector import detect_platform as _detect_platform_impl
 from .downloaders import DownloaderRouter, DownloadOptions
+from .local_media import (
+    VIDEO_EXTENSIONS,
+    is_local_media_path,
+    is_remote_url,
+    resolve_local_media_path,
+)
 
 logger = get_logger(__name__)
 
@@ -30,7 +36,8 @@ class DownloadResult:
 class DownloadService:
     """视频下载服务
 
-    使用 yt-dlp 下载器支持 YouTube、Bilibili、抖音、小红书等多平台。
+    使用 yt-dlp 下载器支持 YouTube、Bilibili、抖音、小红书等多平台；
+    传入本地视频/音频路径时跳过下载，直接进入后续处理。
     """
 
     MAX_RETRIES = 3
@@ -54,7 +61,7 @@ class DownloadService:
         下载视频和/或音频（带重试机制）
 
         Args:
-            url: 视频链接
+            url: 视频链接或本地媒体文件路径
             download_video: True 时下载完整视频，False 时仅下载音频
             video_quality: 视频质量 (best/worst/720p/1080p等)
             progress_callback: 进度回调函数 (status, percent) -> None
@@ -66,6 +73,10 @@ class DownloadService:
         Raises:
             DownloadError: 下载失败时抛出
         """
+        local_path = Path(url).expanduser()
+        if not is_remote_url(url) and local_path.is_file():
+            return self._load_local_media(local_path, download_video, progress_callback)
+
         last_error = None
 
         for attempt in range(self.MAX_RETRIES):
@@ -96,6 +107,31 @@ class DownloadService:
             error_code="DOWNLOAD_FAILED",
             details={"url": url, "retries": self.MAX_RETRIES}
         ) from last_error
+
+    def _load_local_media(
+        self,
+        path: Path,
+        download_video: bool,
+        progress_callback: ProgressCallback | None,
+    ) -> DownloadResult:
+        """把本地媒体文件直接作为处理输入，不做复制或下载。"""
+        media_path = resolve_local_media_path(str(path))
+        if progress_callback:
+            progress_callback("正在读取本地文件...", 100)
+
+        is_video = media_path.suffix.lower() in VIDEO_EXTENSIONS
+        metadata = VideoMetadata(
+            title=media_path.stem,
+            author="本地文件",
+            duration=0,
+            platform="local",
+            url=str(media_path),
+        )
+        return DownloadResult(
+            video_path=media_path if (download_video and is_video) else None,
+            audio_path=media_path,
+            metadata=metadata,
+        )
 
     def _do_download(
         self,
@@ -154,8 +190,8 @@ class DownloadService:
         return self._router.get_supported_platforms()
 
     def is_supported(self, url: str) -> bool:
-        """检查是否支持该 URL"""
-        return self._router.is_supported(url)
+        """检查是否支持该 URL 或本地媒体文件"""
+        return is_local_media_path(url) or self._router.is_supported(url)
 
     def get_metadata(self, url: str) -> VideoMetadata | None:
         """获取视频元数据（不下载）"""

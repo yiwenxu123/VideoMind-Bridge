@@ -19,6 +19,7 @@
 import sys
 import time
 from pathlib import Path
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -144,6 +145,67 @@ class TestCreateTask:
         data = resp.json()
         assert data["mode"] == "full"
         assert "local" in data["targets"]
+
+
+class TestLocalMediaTask:
+    """POST /api/v1/tasks 的本地文件入口需要显式目录白名单。"""
+
+    def test_rejects_without_allowlist(self, client, server, tmp_path, monkeypatch):
+        monkeypatch.delenv("VMB_LOCAL_MEDIA_DIRS", raising=False)
+        monkeypatch.setattr(server.task_manager, "_execute_task", AsyncMock())
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"x")
+
+        resp = client.post(
+            "/api/v1/tasks",
+            json={"url": str(media), "mode": "transcribe_only"},
+        )
+
+        assert resp.status_code == 400
+        assert "VMB_LOCAL_MEDIA_DIRS" in resp.json()["detail"]
+
+    def test_accepts_path_inside_allowlist(self, client, server, tmp_path, monkeypatch):
+        monkeypatch.setenv("VMB_LOCAL_MEDIA_DIRS", str(tmp_path))
+        monkeypatch.setattr(server.task_manager, "_execute_task", AsyncMock())
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"x")
+
+        resp = client.post(
+            "/api/v1/tasks",
+            json={"url": str(media), "mode": "transcribe_only"},
+        )
+
+        assert resp.status_code == 201
+        assert resp.json()["url"] == str(media.resolve())
+
+    def test_rejects_path_outside_allowlist(self, client, server, tmp_path, monkeypatch):
+        allowed = tmp_path / "allowed"
+        allowed.mkdir()
+        monkeypatch.setenv("VMB_LOCAL_MEDIA_DIRS", str(allowed))
+        monkeypatch.setattr(server.task_manager, "_execute_task", AsyncMock())
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"x")
+
+        resp = client.post(
+            "/api/v1/tasks",
+            json={"url": str(media), "mode": "transcribe_only"},
+        )
+
+        assert resp.status_code == 400
+        assert "允许目录" in resp.json()["detail"]
+
+    def test_rejects_unsupported_suffix(self, client, server, tmp_path, monkeypatch):
+        monkeypatch.setenv("VMB_LOCAL_MEDIA_DIRS", str(tmp_path))
+        monkeypatch.setattr(server.task_manager, "_execute_task", AsyncMock())
+        notes = tmp_path / "notes.txt"
+        notes.write_bytes(b"x")
+
+        resp = client.post(
+            "/api/v1/tasks",
+            json={"url": str(notes), "mode": "transcribe_only"},
+        )
+
+        assert resp.status_code == 422
 
 
 # ── Get Task ─────────────────────────────────────────────────────

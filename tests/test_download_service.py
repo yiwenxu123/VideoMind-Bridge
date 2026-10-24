@@ -6,7 +6,7 @@ import pytest
 
 from src.models.task import VideoMetadata
 from src.services.download_service import DownloadResult, DownloadService
-from src.utils.exceptions import DownloadError
+from src.utils.exceptions import DownloadError, ValidationError
 
 
 class TestDownloadServiceInit:
@@ -215,6 +215,52 @@ class TestVideoMetadata:
         assert metadata.author == '测试上传者'
         assert metadata.duration == 600
         assert metadata.platform == 'bilibili'
+
+
+class TestDownloadServiceLocalMedia:
+    """本地媒体文件直接进入处理链，不经过下载器。"""
+
+    def test_local_video_skips_router(self, tmp_path):
+        media = tmp_path / "clip.mp4"
+        media.write_bytes(b"x")
+        service = DownloadService(tmp_path / "out")
+        events: list[tuple[str, float]] = []
+
+        with patch.object(service._router, "download") as router_download:
+            result = service.download(
+                str(media),
+                download_video=True,
+                progress_callback=lambda status, percent: events.append((status, percent)),
+            )
+
+        router_download.assert_not_called()
+        assert result.audio_path == media.resolve()
+        assert result.video_path == media.resolve()
+        assert result.metadata.platform == "local"
+        assert result.metadata.title == "clip"
+        assert result.metadata.author == "本地文件"
+        assert result.metadata.url == str(media.resolve())
+        assert events == [("正在读取本地文件...", 100)]
+
+    def test_local_audio_has_no_video_path(self, tmp_path):
+        media = tmp_path / "voice.m4a"
+        media.write_bytes(b"x")
+        service = DownloadService(tmp_path / "out")
+
+        result = service.download(str(media), download_video=True)
+
+        assert result.audio_path == media.resolve()
+        assert result.video_path is None
+
+    def test_local_unsupported_suffix_raises(self, tmp_path):
+        media = tmp_path / "notes.txt"
+        media.write_bytes(b"x")
+        service = DownloadService(tmp_path / "out")
+
+        with pytest.raises(ValidationError) as exc:
+            service.download(str(media))
+
+        assert exc.value.error_code == "INVALID_PATH"
 
 
 if __name__ == "__main__":

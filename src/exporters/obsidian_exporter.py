@@ -123,18 +123,18 @@ class ObsidianExporter(BaseExporter):
         # 2. 只有在没有视频文件时，才处理音频文件（转录模式）
         # 注意：视频文件已经包含音频，不需要单独链接音频文件
         elif context.audio_path and context.audio_path.exists():
-            audio_dest = attachments_dir / f"{safe_title}.m4a"
+            audio_dest = attachments_dir / f"{safe_title}{context.audio_path.suffix.lower()}"
             # 尝试创建符号链接，失败则复制
             success, msg = safe_create_symlink(context.audio_path, audio_dest)
             if success:
                 logger.info(msg)
-                audio_filename = f"Attachments/{safe_title}/{safe_title}.m4a"
+                audio_filename = f"Attachments/{safe_title}/{audio_dest.name}"
             else:
                 logger.warning(f"符号链接失败: {msg}，尝试复制")
                 success, msg = safe_copy_file(context.audio_path, audio_dest)
                 if success:
                     logger.info(msg)
-                    audio_filename = f"Attachments/{safe_title}/{safe_title}.m4a"
+                    audio_filename = f"Attachments/{safe_title}/{audio_dest.name}"
                 else:
                     logger.error(f"复制音频失败: {msg}")
 

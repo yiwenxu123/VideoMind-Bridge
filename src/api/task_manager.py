@@ -23,6 +23,7 @@ from ..services.ai_service import AIService, SummaryResult
 from ..services.config_manager import get_config_manager
 from ..services.download_service import DownloadResult, DownloadService
 from ..services.export_orchestrator import ExportOrchestrator
+from ..services.local_media import is_local_media_path
 from ..services.task_database import get_task_database
 from ..services.transcribe_service import TranscribeService, TranscriptResult
 from ..utils import get_logger
@@ -333,7 +334,9 @@ class TaskManager:
             return
 
         task.status = TaskStatus.DOWNLOADING
-        task.current_step = "正在下载视频..."
+        task.current_step = (
+            "正在读取本地文件..." if is_local_media_path(task.url) else "正在下载视频..."
+        )
         task.progress = 10.0
         task.updated_at = datetime.now()
         self._notify_task_update(task)
