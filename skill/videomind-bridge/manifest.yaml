@@ -21,7 +21,7 @@ requirements:
     - ffmpeg
   env: []
 
-primaryEnv: COZE_API_KEY
+primaryEnv: DEEPSEEK_API_KEY
 
 platforms:
   - darwin

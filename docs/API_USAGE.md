@@ -27,11 +27,22 @@
 - `POST /api/v1/sessions/bilibili/check`：显式检查 B站登录态；其他平台返回 422。
 - 响应只含脱敏信息，永不返回 cookie 值。
 
-配置方式：
-- B站：`VMB_BILIBILI_COOKIE` > `VMB_BILIBILI_SESSDATA` > `VMB_BILIBILI_COOKIES_FILE` > `VMB_COOKIES_FILE`。
-- 抖音：`DOUYIN_COOKIES_FILE`。
-- 小红书：`VMB_XHS_COOKIE` > `VMB_XHS_COOKIES_FILE` > `VMB_COOKIES_FILE`（只取 `xiaohongshu.com` 域）。
-- yt-dlp：`VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`。
+配置方式（所有消费方经 `SessionManager.resolve()` 统一解析，优先级从高到低）：
+- B站：`VMB_BILIBILI_COOKIE` > `VMB_BILIBILI_SESSDATA` > keyring `bilibili:cookies` > `VMB_BILIBILI_COOKIES_FILE` > keyring `bilibili:cookies_file` > `VMB_COOKIES_FILE`。
+- 抖音：`DOUYIN_COOKIES_FILE` > keyring `douyin:cookies_file`。
+- 小红书：`VMB_XHS_COOKIE` > keyring `xiaohongshu:cookies` > `VMB_XHS_COOKIES_FILE` > keyring `xiaohongshu:cookies_file` > `VMB_COOKIES_FILE`（只取 `xiaohongshu.com` 域）。
+- yt-dlp：`VMB_COOKIES_FILE` > keyring `ytdlp:cookies_file` > `VMB_COOKIES_BROWSER` / keyring `ytdlp:browser`。
+
+登录态管理端点（多消费者模式下仅 admin token 可用；key 形如 `bilibili:cookies_file`、`ytdlp:browser`，全量清单见响应中的 `settings`）：
+
+```
+PUT    /api/v1/sessions/settings/{key}    body: {"value": "<cookies 文件路径 | cookie header | 浏览器名>"}
+DELETE /api/v1/sessions/settings/{key}
+```
+
+- `*:cookies_file` 类键要求路径真实存在，否则 400；值存入系统密钥环。
+- MCP 等价入口：`configure` 工具的 `session:<platform>:<field>` 键（`action=set/get/delete`）。
+- `POST /api/v1/parse` 不接受请求体传入的 cookies 路径，登录态只来自上述服务端解析。
 
 ### yt-dlp 网络参数
 

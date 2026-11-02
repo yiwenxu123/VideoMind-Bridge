@@ -139,14 +139,13 @@ def _download_to_media(url: str, media_dir: Path, name_prefix: str,
         return None
 
 
-def parse_audio_source(url: str, cookie_browser: str | None = None,
-                       cookies_file: str | None = None) -> dict[str, Any]:
+def parse_audio_source(url: str, cookie_browser: str | None = None) -> dict[str, Any]:
     """解析并下载视频音频到中转目录
 
     Args:
         url: 视频链接 (B站/抖音/小红书/YouTube 等)
-        cookie_browser: 浏览器名 (chrome/safari/firefox), 可选
-        cookies_file: cookies.txt 路径, 可选
+        cookie_browser: 浏览器名 (chrome/safari/firefox), 可选; 未提供时回退
+            SessionManager 统一解析的登录态 (env/keyring), 不接受客户端传入路径
 
     Returns:
         {
@@ -201,8 +200,15 @@ def parse_audio_source(url: str, cookie_browser: str | None = None,
     }
     if cookie_browser:
         ydl_opts["cookiesfrombrowser"] = (cookie_browser,)
-    if cookies_file:
-        ydl_opts["cookiefile"] = cookies_file
+    else:
+        # 登录态统一由 SessionManager 解析 (env/keyring), 不接受客户端传入路径
+        from ..core.platforms.session import get_session_manager
+
+        resolved = get_session_manager().resolve("ytdlp")
+        if resolved.cookies_file:
+            ydl_opts["cookiefile"] = resolved.cookies_file
+        elif resolved.cookies_browser:
+            ydl_opts["cookiesfrombrowser"] = (resolved.cookies_browser,)
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:

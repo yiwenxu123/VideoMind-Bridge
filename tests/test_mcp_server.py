@@ -839,6 +839,7 @@ class TestCallConfigure:
             "apify": {"label": "Tikhub", "all_configured": False, "keys": []},
         }
         mock_config.EXTRACTOR_GROUPS = {"tikhub": {}, "apify": {}}
+        mock_config.list_session_settings_status.return_value = {}
 
         server.handle_message({
             "jsonrpc": "2.0", "id": 60, "method": "tools/call",

@@ -51,12 +51,13 @@ def comments_cache_ttl() -> int:
 
 
 def bilibili_cookie_header() -> str | None:
-    """完整 Cookie header 优先；否则由 SESSDATA 拼装。"""
-    raw = os.getenv("VMB_BILIBILI_COOKIE", "").strip()
-    if raw:
-        return raw
-    sessdata = os.getenv("VMB_BILIBILI_SESSDATA", "").strip()
-    return f"SESSDATA={sessdata}" if sessdata else None
+    """B 站 Cookie header —— 统一由 SessionManager 解析 (env/keyring/cookies 文件)。"""
+    from ..platforms.session import get_session_manager
+
+    provider = get_session_manager().get("bilibili")
+    if provider is None:
+        return None
+    return provider.headers().get("Cookie") or None
 
 
 def discovery_http_timeout() -> float:

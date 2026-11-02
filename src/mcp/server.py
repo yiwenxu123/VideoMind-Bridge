@@ -585,11 +585,15 @@ class MCPServer:
             if not key or not value:
                 return {"success": False, "error": "set 模式需要 key 和 value 参数", "action": "set"}
 
+            if key.startswith("session:"):
+                return self._set_session_setting(config_mgr, key, value)
+
             valid_names = set(config_mgr.EXTRACTOR_PROVIDERS.keys())
             if key not in valid_names:
+                valid = sorted(valid_names) + sorted(config_mgr.SESSION_KEYS.keys())
                 return {
                     "success": False,
-                    "error": f"未知配置键: {key}。有效键名: {', '.join(sorted(valid_names))}",
+                    "error": f"未知配置键: {key}。有效键名: {', '.join(valid)}",
                     "action": "set",
                 }
 
@@ -599,6 +603,23 @@ class MCPServer:
 
             logger.info(f"MCP configure set: {key}")
             return {"success": True, "action": "set", "key": key, "message": f"{key} 已设置"}
+
+        if action == "delete":
+            key = args.get("key", "")
+            if not key:
+                return {"success": False, "error": "delete 模式需要 key 参数", "action": "delete"}
+            if key.startswith("session:"):
+                ok = config_mgr.delete_session_setting(key.removeprefix("session:"))
+            elif key in config_mgr.EXTRACTOR_PROVIDERS:
+                ok = config_mgr.delete_extractor_key(key)
+            else:
+                return {"success": False, "error": f"未知配置键: {key}", "action": "delete"}
+            return {
+                "success": bool(ok),
+                "action": "delete",
+                "key": key,
+                "message": f"{key} 已删除" if ok else f"{key} 删除失败 (可能不存在)",
+            }
 
         # get 模式
         key_status = config_mgr.list_extractor_key_status()
@@ -613,8 +634,36 @@ class MCPServer:
                 ),
                 "total_extractors": total_extractors,
                 "extractor_keys": key_status,
+                "session_settings": config_mgr.list_session_settings_status(),
             },
         }
+
+    @staticmethod
+    def _set_session_setting(config_mgr, key: str, value: str) -> dict:
+        """设置平台登录态 (session:<platform>:<field>)。
+
+        cookies_file 类键要求路径真实存在; 其余原样入密钥环。
+        """
+        session_key = key.removeprefix("session:")
+        if session_key not in config_mgr.SESSION_KEYS:
+            valid = ", ".join(f"session:{k}" for k in sorted(config_mgr.SESSION_KEYS))
+            return {"success": False, "error": f"未知会话键: {key}。有效键名: {valid}", "action": "set"}
+
+        if session_key.endswith(":cookies_file"):
+            expanded = Path(value.strip()).expanduser()
+            if not expanded.is_file():
+                return {
+                    "success": False,
+                    "error": f"cookies 文件不存在: {expanded}",
+                    "action": "set",
+                }
+            value = str(expanded)
+
+        if not config_mgr.set_session_setting(session_key, value):
+            return {"success": False, "error": f"设置失败: {key}", "action": "set"}
+
+        logger.info(f"MCP configure set: {key}")
+        return {"success": True, "action": "set", "key": key, "message": f"{key} 已设置"}
 
     def _call_prescreen_video(self, args: dict) -> dict:
         """执行内容预筛"""

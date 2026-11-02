@@ -189,6 +189,49 @@ class ConfigManager:
             }
         return result
 
+    # ── 平台登录态 (session) 管理 ────────────────────────────────
+
+    SESSION_KEYS: dict[str, dict[str, str]] = {
+        "bilibili:cookies": {"label": "B站 Cookie header"},
+        "bilibili:cookies_file": {"label": "B站 cookies.txt 路径"},
+        "douyin:cookies_file": {"label": "抖音 cookies.txt 路径"},
+        "xiaohongshu:cookies": {"label": "小红书 Cookie header"},
+        "xiaohongshu:cookies_file": {"label": "小红书 cookies.txt 路径"},
+        "ytdlp:cookies_file": {"label": "通用 cookies.txt 路径 (yt-dlp 兜底链)"},
+        "ytdlp:browser": {"label": "借用浏览器登录态 (chrome/edge/firefox...)"},
+    }
+
+    def _session_keyring_name(self, key: str) -> str:
+        """会话设置在密钥环中的命名空间"""
+        return f"session_{key.replace(':', '__')}"
+
+    def get_session_setting(self, key: str) -> str | None:
+        """获取会话设置 (仅密钥环; env 优先级更高, 由 session provider 处理)"""
+        value = CredentialManager.get_api_key(self._session_keyring_name(key))
+        return value.strip() if value else None
+
+    def set_session_setting(self, key: str, value: str) -> bool:
+        """设置会话设置 (保存到密钥环)"""
+        if key not in self.SESSION_KEYS:
+            return False
+        if not value or not value.strip():
+            return False
+        return CredentialManager.save_api_key(self._session_keyring_name(key), value.strip())
+
+    def delete_session_setting(self, key: str) -> bool:
+        """删除会话设置"""
+        return CredentialManager.delete_api_key(self._session_keyring_name(key))
+
+    def list_session_settings_status(self) -> dict[str, Any]:
+        """列出所有会话设置及其配置状态"""
+        return {
+            key: {
+                "label": info["label"],
+                "configured": self.get_session_setting(key) is not None,
+            }
+            for key, info in self.SESSION_KEYS.items()
+        }
+
     def save(self) -> bool:
         """保存配置到 YAML 文件"""
         try:

@@ -6,7 +6,9 @@
 import asyncio
 import os
 import time
+import urllib.parse
 from contextlib import asynccontextmanager, suppress
+from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -36,6 +38,43 @@ from .models import (
 from .task_manager import TaskManager
 
 logger = get_logger(__name__)
+
+# 本机放行主机名 (精确匹配, 不做前缀/子串匹配)
+_LOCAL_ORIGINS = {"127.0.0.1", "localhost", "::1"}
+# 浏览器扩展 Origin 无可仿冒主机位, 按 scheme 放行 (兼容任意扩展 ID)
+_EXTENSION_SCHEMES = {"chrome-extension", "moz-extension", "safari-web-extension"}
+
+
+def _is_allowed_origin(origin: str) -> bool:
+    """Origin 精确校验。
+
+    修复历史缺陷: 旧实现用 origin.startswith("http://127.0.0.1") 前缀匹配,
+    http://127.0.0.1.evil.com 这类仿冒源可绕过 CSRF 防线。
+    """
+    if not origin:
+        return True  # 非浏览器客户端不带 Origin
+    try:
+        parsed = urllib.parse.urlsplit(origin)
+    except ValueError:
+        return False
+    scheme = parsed.scheme.lower()
+    if scheme in _EXTENSION_SCHEMES:
+        return True
+    if scheme not in ("http", "https"):
+        return False
+    host = (parsed.hostname or "").lower()  # hostname 已去除 IPv6 方括号
+    return host in _LOCAL_ORIGINS
+
+
+def _require_admin_consumer(request: Request) -> None:
+    """配置面写操作的角色检查: 多消费者模式下仅 admin 可用。
+
+    consumer 由鉴权中间件写入 request.state; 未启用鉴权 (本地模式) 时放行。
+    """
+    if not getattr(request.state, "vmb_auth_enabled", False):
+        return
+    if getattr(request.state, "consumer", None) != "admin":
+        raise HTTPException(status_code=403, detail="该操作需要 admin token")
 
 
 def _resolve_request_asr_chain(payload: dict) -> list[str] | None:
@@ -218,15 +257,6 @@ class APIServer:
     DEFAULT_HOST = "127.0.0.1"
     DEFAULT_PORT = 8787
 
-    # 允许的浏览器 Origin (前缀匹配, 兼容任意浏览器扩展 ID)
-    ALLOWED_ORIGINS = [
-        "chrome-extension://",
-        "moz-extension://",
-        "http://127.0.0.1",
-        "http://localhost",
-        "http://[::1]",
-    ]
-
     def __init__(self, host: str | None = None, port: int | None = None):
         """
         初始化API服务器
@@ -295,7 +325,6 @@ class APIServer:
             lifespan=lifespan,
         )
 
-        allowed_origins = self.ALLOWED_ORIGINS
         from ..core.discovery.config import comments_enabled, creator_feed_enabled
         creator_feed_is_enabled = creator_feed_enabled()
         comments_is_enabled = comments_enabled()
@@ -304,12 +333,10 @@ class APIServer:
         async def security_middleware(request, call_next):
             started = time.perf_counter()
             consumer = None
+            request.state.vmb_auth_enabled = self._auth.enabled
             origin = request.headers.get("origin", "")
 
-            is_allowed = (
-                not origin or
-                any(origin.startswith(allowed) for allowed in allowed_origins)
-            )
+            is_allowed = _is_allowed_origin(origin)
 
             # 默认关闭的 Discovery 端点显式返回 404，避免被 OPTIONS 通配路由变成 405
             request_path = request.url.path.rstrip("/")
@@ -582,7 +609,6 @@ class APIServer:
             result = parse_audio_source(
                 url,
                 cookie_browser=body.get("cookie_browser"),
-                cookies_file=body.get("cookies_file") or os.environ.get("VMB_COOKIES_FILE"),
             )
 
             if not result.get("success"):
@@ -613,8 +639,9 @@ class APIServer:
             return {"groups": {k: KeyGroup(**v) for k, v in groups.items()}}
 
         @app.put("/api/v1/keys")
-        async def set_key(request: KeyUpdateRequest):
+        async def set_key(request: KeyUpdateRequest, http_request: Request):
             """设置提取器 API Key"""
+            _require_admin_consumer(http_request)
             config_mgr = ConfigManager()
             ok = config_mgr.set_extractor_key(request.name, request.value)
             if not ok:
@@ -623,8 +650,9 @@ class APIServer:
             return {"success": True, "name": request.name}
 
         @app.delete("/api/v1/keys/{name}")
-        async def delete_key(name: str):
+        async def delete_key(name: str, http_request: Request):
             """删除提取器 API Key"""
+            _require_admin_consumer(http_request)
             valid_names = set(ConfigManager().EXTRACTOR_PROVIDERS.keys())
             if name not in valid_names:
                 raise HTTPException(
@@ -637,6 +665,43 @@ class APIServer:
                 raise HTTPException(status_code=500, detail="删除失败")
             logger.info(f"提取器 Key 已删除: {name}")
             return {"success": True, "name": name}
+
+        # 平台登录态 (session) 管理: 写操作仅 admin (只读视图见 session_routes GET /sessions)
+        @app.put("/api/v1/sessions/settings/{key}")
+        async def set_session(key: str, http_request: Request, body: dict):
+            """设置平台登录态 (key 形如 bilibili:cookies_file / ytdlp:browser)"""
+            _require_admin_consumer(http_request)
+            config_mgr = ConfigManager()
+            if key not in config_mgr.SESSION_KEYS:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"未知会话键: {key}，有效值: {', '.join(sorted(config_mgr.SESSION_KEYS))}",
+                )
+            value = str(body.get("value") or "").strip()
+            if not value:
+                raise HTTPException(status_code=400, detail="value 不能为空")
+            if key.endswith(":cookies_file"):
+                expanded = Path(value).expanduser()
+                if not expanded.is_file():
+                    raise HTTPException(status_code=400, detail=f"cookies 文件不存在: {expanded}")
+                value = str(expanded)
+            if not config_mgr.set_session_setting(key, value):
+                raise HTTPException(status_code=500, detail="设置失败")
+            logger.info(f"会话设置已更新: {key}")
+            return {"success": True, "key": key}
+
+        @app.delete("/api/v1/sessions/settings/{key}")
+        async def delete_session(key: str, http_request: Request):
+            """删除平台登录态设置"""
+            _require_admin_consumer(http_request)
+            config_mgr = ConfigManager()
+            if key not in config_mgr.SESSION_KEYS:
+                raise HTTPException(status_code=400, detail=f"未知会话键: {key}")
+            ok = config_mgr.delete_session_setting(key)
+            if not ok:
+                raise HTTPException(status_code=404, detail="设置不存在或删除失败")
+            logger.info(f"会话设置已删除: {key}")
+            return {"success": True, "key": key}
 
         # 设置 API
         @app.get("/api/v1/settings", response_model=SettingsResponse)
@@ -667,8 +732,9 @@ class APIServer:
             )
 
         @app.put("/api/v1/settings")
-        async def update_settings(request: SettingsUpdateRequest):
+        async def update_settings(request: SettingsUpdateRequest, http_request: Request):
             """更新设置"""
+            _require_admin_consumer(http_request)
             config_mgr = ConfigManager()
             changed = []
 
@@ -743,8 +809,9 @@ class APIServer:
             return {"success": True, "updated": changed}
 
         @app.post("/api/v1/settings/test-ai")
-        async def test_ai_connection():
+        async def test_ai_connection(http_request: Request):
             """测试 AI 连接"""
+            _require_admin_consumer(http_request)
             config_mgr = ConfigManager()
             api_key = config_mgr.get_api_key()
             cfg = config_mgr.config
@@ -885,12 +952,7 @@ class APIServer:
             """WebSocket连接，用于实时接收任务进度更新"""
             origin = websocket.headers.get("origin", "")
 
-            is_allowed = (
-                not origin or
-                any(origin.startswith(allowed) for allowed in self.ALLOWED_ORIGINS)
-            )
-
-            if not is_allowed:
+            if not _is_allowed_origin(origin):
                 logger.warning(f"WebSocket 连接被拒绝，Origin: {origin}")
                 await websocket.close(code=1008)
                 return

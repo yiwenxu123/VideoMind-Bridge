@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import threading
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Protocol
 
@@ -37,6 +37,32 @@ class SessionStatus:
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
+
+
+@dataclass
+class SessionResolution:
+    """统一解析结果: 平台自有请求用 cookie_header, yt-dlp 链用 cookies_file/browser。"""
+
+    platform: str
+    source: str = "none"
+    cookie_header: str | None = None
+    cookies_file: str | None = None
+    cookies_browser: str | None = None
+    ytdlp_args: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+
+
+def _stored_session(key: str) -> str | None:
+    """从密钥环读取会话设置 (ConfigManager 统一管理)。
+
+    core 可独立导入: 服务层不可用时静默跳过, 只依赖 env。
+    """
+    try:
+        from ...services.config_manager import get_config_manager
+
+        return get_config_manager().get_session_setting(key)
+    except Exception:
+        return None
 
 
 class SessionCheckUnsupported(RuntimeError):
@@ -78,6 +104,7 @@ class BilibiliSessionProvider:
         self._http = http_client
 
     def _cookie_context(self) -> tuple[str, str, int, str | None, str | None]:
+        # 优先级: 平台专用 env → 密钥环存储 → 通用 cookies 文件
         raw = os.getenv("VMB_BILIBILI_COOKIE", "").strip()
         if raw:
             count = raw.count(";") + 1
@@ -87,8 +114,13 @@ class BilibiliSessionProvider:
         if sessdata:
             return f"SESSDATA={sessdata}", "env", 1, None, None
 
+        stored_raw = _stored_session("bilibili:cookies")
+        if stored_raw:
+            return stored_raw, "keyring", stored_raw.count(";") + 1, None, None
+
         path = (
             os.getenv("VMB_BILIBILI_COOKIES_FILE", "").strip()
+            or _stored_session("bilibili:cookies_file")
             or os.getenv("VMB_COOKIES_FILE", "").strip()
         )
         if not path:
@@ -185,7 +217,11 @@ class DouyinSessionProvider:
     supports_check = False
 
     def _cookie_context(self) -> tuple[str, str, int, str | None, str | None]:
-        path = os.getenv("DOUYIN_COOKIES_FILE", "").strip()
+        path = (
+            os.getenv("DOUYIN_COOKIES_FILE", "").strip()
+            or _stored_session("douyin:cookies_file")
+            or ""
+        )
         if not path:
             return "", "none", 0, None, None
         records = parse_netscape_cookies(path, domain_suffix="douyin.com")
@@ -223,13 +259,19 @@ class XiaohongshuSessionProvider:
     supports_check = False
 
     def _cookie_context(self) -> tuple[str, str, int, str | None, str | None]:
+        # 优先级: 平台专用 env → 密钥环存储 → 通用 cookies 文件
         raw = os.getenv("VMB_XHS_COOKIE", "").strip()
         if raw:
             raw = raw.replace("\r", " ").replace("\n", " ")
             return raw, "env", raw.count(";") + 1, None, None
 
+        stored_raw = _stored_session("xiaohongshu:cookies")
+        if stored_raw:
+            return stored_raw, "keyring", stored_raw.count(";") + 1, None, None
+
         path = (
             os.getenv("VMB_XHS_COOKIES_FILE", "").strip()
+            or _stored_session("xiaohongshu:cookies_file")
             or os.getenv("VMB_COOKIES_FILE", "").strip()
         )
         if not path:
@@ -270,12 +312,21 @@ class YtDlpSessionProvider:
     supports_check = False
 
     def _context(self) -> tuple[str, bool, int, str | None, str | None]:
-        path = os.getenv("VMB_COOKIES_FILE", "").strip()
+        path = (
+            os.getenv("VMB_COOKIES_FILE", "").strip()
+            or _stored_session("ytdlp:cookies_file")
+            or ""
+        ).strip()
         if path:
             records = parse_netscape_cookies(path)
             count, expires_at = cookie_summary(records)
             return "file", bool(records), count, expires_at, None
-        if os.getenv("VMB_COOKIES_BROWSER", "").strip():
+        browser = (
+            os.getenv("VMB_COOKIES_BROWSER", "").strip()
+            or _stored_session("ytdlp:browser")
+            or ""
+        ).strip()
+        if browser:
             return "browser", True, 0, None, "browser_cookie_source"
         return "none", False, 0, None, None
 
@@ -284,12 +335,20 @@ class YtDlpSessionProvider:
 
     def cookie_args(self) -> list[str]:
         """yt-dlp 的 cookies 参数：文件优先，其次浏览器登录态。"""
-        path = os.getenv("VMB_COOKIES_FILE", "").strip()
+        path = (
+            os.getenv("VMB_COOKIES_FILE", "").strip()
+            or _stored_session("ytdlp:cookies_file")
+            or ""
+        ).strip()
         if path:
             expanded = os.path.expanduser(path)
             if os.path.exists(expanded):
                 return ["--cookies", expanded]
-        browser = os.getenv("VMB_COOKIES_BROWSER", "").strip()
+        browser = (
+            os.getenv("VMB_COOKIES_BROWSER", "").strip()
+            or _stored_session("ytdlp:browser")
+            or ""
+        ).strip()
         if browser:
             return ["--cookies-from-browser", browser]
         return []
@@ -350,6 +409,33 @@ class SessionManager:
             if provider.platform == platform:
                 return provider
         return None
+
+    def resolve(self, platform: str) -> SessionResolution:
+        """统一解析入口: 所有登录态消费方都应经过这里。
+
+        - cookie_header: 平台自有 HTTP 请求 (bilibili/douyin/xiaohongshu) 用;
+        - cookies_file / cookies_browser / ytdlp_args: yt-dlp 下载与兜底链用。
+        """
+        provider = self.get(platform)
+        if provider is None:
+            return SessionResolution(platform=platform)
+
+        headers = provider.headers()
+        status = provider.status()
+        resolution = SessionResolution(
+            platform=platform,
+            source=status.source,
+            cookie_header=headers.get("Cookie") or None,
+            warnings=[status.warning] if status.warning else [],
+        )
+        if isinstance(provider, YtDlpSessionProvider):
+            resolution.ytdlp_args = provider.cookie_args()
+            for i, arg in enumerate(resolution.ytdlp_args):
+                if arg == "--cookies" and i + 1 < len(resolution.ytdlp_args):
+                    resolution.cookies_file = resolution.ytdlp_args[i + 1]
+                elif arg == "--cookies-from-browser" and i + 1 < len(resolution.ytdlp_args):
+                    resolution.cookies_browser = resolution.ytdlp_args[i + 1]
+        return resolution
 
     def statuses(self) -> list[SessionStatus]:
         return [provider.status() for provider in self._providers]
