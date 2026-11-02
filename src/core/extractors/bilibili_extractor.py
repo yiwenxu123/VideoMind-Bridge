@@ -7,9 +7,9 @@
 from __future__ import annotations
 
 import re
-import time
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -237,7 +237,7 @@ class BilibiliExtractor(ContentExtractor):
         """
         import tempfile
 
-        dest = Path(tempfile.gettempdir()) / f"vmb_bili_{int(time.time() * 1000)}.m4s"
+        dest = Path(tempfile.gettempdir()) / f"vmb_bili_{uuid4().hex}.m4s"
         request = MediaFetchRequest(
             url=audio_url,
             dest=dest,

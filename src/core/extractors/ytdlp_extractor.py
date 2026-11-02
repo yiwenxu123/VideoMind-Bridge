@@ -103,6 +103,8 @@ class YtDlpExtractor(ContentExtractor):
 
         title = metadata.get("title", "未知视频")
         duration = metadata.get("duration", 0)
+        # 结果平台优先取 URL 解析值; dump-json 无 platform 字段, 兜底为 ytdlp
+        result_platform = platform if platform != "unknown" else "ytdlp"
 
         if not content:
             # 降级到纯元信息 (标记占位: 非完整内容, 路由层据此继续降级)
@@ -113,7 +115,7 @@ class YtDlpExtractor(ContentExtractor):
             )
             return ExtractResult(
                 success=True,
-                platform=metadata.get("platform", "video"),
+                platform=result_platform,
                 title=title,
                 content=content,
                 source="ytdlp",
@@ -129,7 +131,7 @@ class YtDlpExtractor(ContentExtractor):
 
         return ExtractResult(
             success=True,
-            platform=metadata.get("platform", "video"),
+            platform=result_platform,
             title=title,
             content=content,
             source="ytdlp",
@@ -139,6 +141,8 @@ class YtDlpExtractor(ContentExtractor):
             language=language,
             segments=segments,
             metadata=metadata,
+            completeness="full",
+            method="subtitle",
         )
 
     def _try_extract(self, url: str) -> tuple[str, list, str | None, dict[str, Any]]:
@@ -171,7 +175,9 @@ class YtDlpExtractor(ContentExtractor):
             cmd = [
                 _YTDLP_CMD,
                 "--skip-download",       # 只下载字幕
-                "--print", "after_video:{}",  # JSON 输出元信息
+                "--dump-json",           # JSON 输出元信息
+                "--quiet",
+                "--no-warnings",
                 "--convert-subs", "srt",  # 统一转为 SRT
                 *ytdlp_network_args(url),
                 *ytdlp_cookie_args(),

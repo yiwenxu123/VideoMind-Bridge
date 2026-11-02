@@ -86,6 +86,8 @@ class YouTubeExtractor(ContentExtractor):
                 language=language or "en",
                 segments=segments,
                 metadata={"video_id": video_id},
+                completeness="full",
+                method="subtitle",
             )
 
         except Exception as e:

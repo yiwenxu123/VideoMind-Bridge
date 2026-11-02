@@ -148,11 +148,13 @@ class ApifyExtractor(ContentExtractor):
             text_parts.append(transcript)
         duration = item.get("duration") or item.get("length", 0)
 
+        content = "\n\n".join(text_parts) if text_parts else ""
+        placeholder = not content
         return ExtractResult(
             success=True,
             platform=platform,
             title=title or "未获取到标题",
-            content="\n\n".join(text_parts) if text_parts else "Apify 返回了空内容",
+            content=content or "Apify 返回了空内容",
             source="apify",
             url=url,
             cost_tier=self._cost_tier,
@@ -162,6 +164,9 @@ class ApifyExtractor(ContentExtractor):
                 "api_provider": "apify",
                 "actor_id": _ACTOR_MAP.get(platform),
             },
+            is_placeholder=placeholder,
+            completeness="none" if placeholder else "unknown",
+            error="Apify 未返回正文内容" if placeholder else None,
         )
 
 

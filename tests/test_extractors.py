@@ -830,3 +830,156 @@ def test_xhs_video_html_detection():
     assert XiaohongshuExtractor._is_video_html('"type":"video"') is True
     assert XiaohongshuExtractor._is_video_html('"noteType":1') is True
     assert XiaohongshuExtractor._is_video_html('"type":"normal"') is False
+
+
+# ---------------- 元信息与 completeness 契约 (批次A) ----------------
+
+_SRT_CONTENT = (
+    "1\n00:00:01,000 --> 00:00:03,000\n你好世界\n\n"
+    "2\n00:00:03,500 --> 00:00:05,000\n第二句\n"
+)
+
+
+def _fake_ytdlp_extract_run(metadata: dict, tmp_dir, recorded_cmds: list,
+                            write_srt: bool = True):
+    """构造伪装的 subprocess.run: 解析 --output 目录, 写入 SRT 并返回 dump-json stdout"""
+    import json as _json
+    from pathlib import Path
+
+    def _run(cmd, **kwargs):
+        recorded_cmds.append(list(cmd))
+        if "--output" in cmd:
+            out_dir = Path(cmd[cmd.index("--output") + 1]).parent
+            if write_srt:
+                (out_dir / "abc.en.srt").write_text(_SRT_CONTENT, encoding="utf-8")
+        return mock.Mock(returncode=0, stdout=_json.dumps(metadata) + "\n", stderr="")
+
+    return _run
+
+
+def test_ytdlp_extract_parses_dump_json_metadata(tmp_path):
+    """回归: --dump-json 元信息应填充 title/duration (旧 --print after_video:{} 恒为空)"""
+    from src.core.extractors.ytdlp_extractor import YtDlpExtractor
+
+    ext = YtDlpExtractor()
+    ext._available = True
+    cmds: list = []
+    meta = {"id": "abc", "title": "测试视频标题", "duration": 120, "description": "简介"}
+    with mock.patch("subprocess.run",
+                    side_effect=_fake_ytdlp_extract_run(meta, tmp_path, cmds)):
+        result = ext.extract("https://www.youtube.com/watch?v=abc12345678")
+
+    assert result.success is True
+    assert result.title == "测试视频标题"
+    assert result.duration_seconds == 120.0
+    assert result.content == "你好世界\n第二句"
+
+
+def test_ytdlp_extract_success_sets_completeness_full(tmp_path):
+    """字幕提取成功应标记 completeness=full, 使 RouterRuntime 缓存可命中"""
+    from src.core.extractors.ytdlp_extractor import YtDlpExtractor
+
+    ext = YtDlpExtractor()
+    ext._available = True
+    meta = {"id": "abc", "title": "T", "duration": 60}
+    with mock.patch("subprocess.run",
+                    side_effect=_fake_ytdlp_extract_run(meta, tmp_path, [])):
+        result = ext.extract("https://www.bilibili.com/video/BV1xx411c7mD")
+
+    assert result.completeness == "full"
+    assert result.method == "subtitle"
+    assert result.platform == "bilibili"
+
+
+def test_ytdlp_extract_command_uses_dump_json(tmp_path):
+    """防回归: 子进程命令应使用 --dump-json 而非失效的 after_video:{} 模板"""
+    from src.core.extractors.ytdlp_extractor import YtDlpExtractor
+
+    ext = YtDlpExtractor()
+    ext._available = True
+    meta = {"id": "abc", "title": "T", "duration": 60}
+    recorded: list = []
+    with mock.patch("subprocess.run",
+                    side_effect=_fake_ytdlp_extract_run(meta, tmp_path, recorded)):
+        ext.extract("https://www.youtube.com/watch?v=abc12345678")
+
+    cmd = recorded[0]
+    assert "--dump-json" in cmd
+    assert "after_video:{}" not in cmd
+
+
+def test_ytdlp_extract_placeholder_keeps_metadata(tmp_path):
+    """无字幕时占位结果的元信息也应正确 (旧 bug: 标题恒为'未知视频')"""
+    from src.core.extractors.ytdlp_extractor import YtDlpExtractor
+
+    ext = YtDlpExtractor()
+    ext._available = True
+    meta = {"id": "abc", "title": "只有元信息", "duration": 33}
+    with mock.patch("subprocess.run",
+                    side_effect=_fake_ytdlp_extract_run(meta, tmp_path, [],
+                                                        write_srt=False)):
+        result = ext.extract("https://www.youtube.com/watch?v=abc12345678")
+
+    assert result.success is True
+    assert result.is_placeholder is True
+    assert result.title == "只有元信息"
+    assert result.duration_seconds == 33.0
+    assert result.completeness != "full"
+
+
+def test_apify_empty_content_marks_placeholder():
+    """Apify 空内容不得被当作完整成功结果 (旧 bug: 哨兵文案进入缓存)"""
+    ext = ApifyExtractor()
+    result = ext._parse_result([{"title": "T"}], "https://youtube.com/watch?v=x", "youtube")
+    assert result.is_placeholder is True
+    assert result.completeness == "none"
+    assert result.error
+
+    ok = ext._parse_result([{"title": "T", "description": "正文"}],
+                           "https://youtube.com/watch?v=x", "youtube")
+    assert ok.is_placeholder is False
+    assert ok.completeness != "none"
+
+
+def test_youtube_success_sets_completeness_full():
+    """YouTube 字幕成功路径应标记 completeness=full (缓存契约对齐)"""
+    resp = mock.Mock(status_code=200)
+    resp.json.return_value = [{"text": "hello", "start": 0, "duration": 2}]
+    client = mock.Mock()
+    client.get.return_value = resp
+    limiter = mock.Mock()
+    limiter.enabled = False
+
+    ext = YouTubeExtractor(client=client, limiter=limiter)
+    result = ext.extract("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+    assert result.success is True
+    assert result.completeness == "full"
+    assert result.method == "subtitle"
+
+
+def test_router_runtime_caches_full_result():
+    """completeness=full 的结果进缓存, 第二次调用不触达 router"""
+    from src.core.router_runtime import RouterRuntime
+
+    calls = {"n": 0}
+
+    class _StubRouter:
+        def extract(self, url, *, max_cost=None, options=None):
+            calls["n"] += 1
+            return ExtractResult(
+                success=True, platform="youtube", title="T",
+                content="正文", source="youtube", url=url,
+                cost_tier=CostTier.FREE, completeness="full",
+            )
+
+        def list_extractors(self):
+            return {}
+
+        def close(self):
+            return None
+
+    runtime = RouterRuntime(router=_StubRouter(), cache_ttl=60)
+    runtime.extract("https://www.youtube.com/watch?v=x#frag")
+    runtime.extract("https://www.youtube.com/watch?v=x")
+    assert calls["n"] == 1
