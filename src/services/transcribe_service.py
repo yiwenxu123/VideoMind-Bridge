@@ -12,7 +12,7 @@ from faster_whisper import WhisperModel
 
 from ..models.task import TranscriptSegment
 from ..utils import get_logger
-from ..utils.exceptions import TranscribeError
+from ..utils.exceptions import OperationCancelledError, TranscribeError
 from ..utils.retry import is_retryable_error
 
 logger = get_logger(__name__)
@@ -169,7 +169,8 @@ class TranscribeService:
         self,
         audio_path: Path,
         language: str | None = "zh",
-        progress_callback: ProgressCallback | None = None
+        progress_callback: ProgressCallback | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> TranscriptResult:
         """
         转录音频（带重试机制）
@@ -178,18 +179,23 @@ class TranscribeService:
             audio_path: 音频文件路径
             language: 语言代码，None 表示自动检测
             progress_callback: 进度回调
+            cancel_event: 取消令牌, 置位后在每个转录片段边界中断
 
         Returns:
             TranscriptResult: 转录结果
 
         Raises:
             TranscribeError: 转录失败时抛出
+            OperationCancelledError: 取消时抛出
         """
+        if cancel_event is not None and cancel_event.is_set():
+            raise OperationCancelledError("转录已取消")
+
         last_error = None
 
         for attempt in range(self.MAX_RETRIES):
             try:
-                return self._do_transcribe(audio_path, language, progress_callback)
+                return self._do_transcribe(audio_path, language, progress_callback, cancel_event)
             except TranscribeError as e:
                 last_error = e
 
@@ -222,7 +228,8 @@ class TranscribeService:
         self,
         audio_path: Path,
         language: str | None = "zh",
-        progress_callback: ProgressCallback | None = None
+        progress_callback: ProgressCallback | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> TranscriptResult:
         """
         实际执行转录（内部方法）
@@ -231,6 +238,7 @@ class TranscribeService:
             audio_path: 音频文件路径
             language: 语言代码，None 表示自动检测
             progress_callback: 进度回调
+            cancel_event: 取消令牌
 
         Returns:
             TranscriptResult: 转录结果
@@ -283,15 +291,16 @@ class TranscribeService:
         if progress_callback:
             progress_callback(f"检测到语言: {info.language} ({info.language_probability:.0%})", 20)
 
-        # 收集结果
+        # 收集结果 (逐段消费生成器: 支持片段边界取消与真实进度)
         segments: list[TranscriptSegment] = []
         full_text_parts: list[str] = []
         formatted_parts: list[str] = []
+        total_duration = float(getattr(info, "duration", 0) or 0)
 
-        segment_list = list(segments_iter)
-        total_segments = len(segment_list)
+        for segment in segments_iter:
+            if cancel_event is not None and cancel_event.is_set():
+                raise OperationCancelledError("转录已取消")
 
-        for i, segment in enumerate(segment_list):
             seg = TranscriptSegment(
                 start=segment.start,
                 end=segment.end,
@@ -304,10 +313,10 @@ class TranscribeService:
             timestamp = self._format_time(segment.start)
             formatted_parts.append(f"[{timestamp}] {segment.text.strip()}")
 
-            # 进度回调
-            if progress_callback and total_segments > 0:
-                progress_percent = 20 + (i + 1) / total_segments * 75
-                progress_callback(f"转录中... {i+1}/{total_segments}", progress_percent)
+            # 进度回调: 按音频时间估算真实进度 (转录早期即可渐进更新)
+            if progress_callback and total_duration > 0:
+                progress_percent = 20 + min(segment.end / total_duration, 1.0) * 75
+                progress_callback(f"转录中... {segment.end:.0f}/{total_duration:.0f}s", progress_percent)
 
         if progress_callback:
             progress_callback("转录完成", 100)

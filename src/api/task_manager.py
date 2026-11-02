@@ -6,6 +6,7 @@
 
 import asyncio
 import contextlib
+import threading
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -27,6 +28,7 @@ from ..services.local_media import is_local_media_path
 from ..services.task_database import get_task_database
 from ..services.transcribe_service import TranscribeService, TranscriptResult
 from ..utils import get_logger
+from ..utils.exceptions import OperationCancelledError
 
 logger = get_logger(__name__)
 
@@ -57,6 +59,10 @@ class TaskManager:
 
         self._tasks: dict[UUID, VideoTask] = {}
         self._task_callbacks: dict[UUID, list[Callable]] = {}
+        # 取消令牌: cancel/delete 置位后, executor 线程在下载/转录检查点真实中断
+        self._cancel_events: dict[UUID, threading.Event] = {}
+        # 已删除任务: 防止 executor 收尾时把删除的任务复活写回数据库
+        self._deleted_tasks: set[UUID] = set()
 
         self._download_service: DownloadService = DownloadService(self.output_dir)
         self._transcribe_service: TranscribeService = TranscribeService()
@@ -104,6 +110,10 @@ class TaskManager:
         # 取消所有活跃任务
         for task_id in list(self._tasks.keys()):
             await self.cancel_task(task_id)
+
+        # 置位全部取消令牌, 让 executor 线程中的下载/转录尽快退出
+        for cancel_event in self._cancel_events.values():
+            cancel_event.set()
 
         # 停止工作线程
         if self._worker_task:
@@ -165,6 +175,7 @@ class TaskManager:
 
         # 保存任务
         self._tasks[task.id] = task
+        self._cancel_events[task.id] = threading.Event()
         await self._task_queue.put(task.id)
 
         logger.info(f"任务已创建: {task.id}")
@@ -226,6 +237,11 @@ class TaskManager:
         if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
             return False
 
+        # 先置位取消令牌: executor 线程在下一个下载/转录检查点真实中断
+        cancel_event = self._cancel_events.get(task_id)
+        if cancel_event is not None:
+            cancel_event.set()
+
         task.status = TaskStatus.CANCELLED
         task.updated_at = datetime.now()
         task.current_step = "已取消"
@@ -248,9 +264,15 @@ class TaskManager:
         if not task:
             return False
 
-        # 如果任务正在运行，先取消
+        # 如果任务正在运行，先取消（同时中断 executor 中的下载/转录）
         if task.status not in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
             await self.cancel_task(task_id)
+
+        # 打上墓碑标记: executor 收尾时不得把该任务复活写回数据库
+        self._deleted_tasks.add(task_id)
+        cancel_event = self._cancel_events.pop(task_id, None)
+        if cancel_event is not None:
+            cancel_event.set()
 
         del self._tasks[task_id]
         if task_id in self._task_callbacks:
@@ -331,6 +353,7 @@ class TaskManager:
             return
 
         if task.status == TaskStatus.CANCELLED:
+            self._cancel_events.pop(task_id, None)
             return
 
         task.status = TaskStatus.DOWNLOADING
@@ -402,12 +425,23 @@ class TaskManager:
                 task.updated_at = datetime.now()
                 logger.info(f"任务完成: {task_id}")
 
+        except OperationCancelledError as e:
+            # 取消/超时是主动中止, 保持 CANCELLED 终态而非 FAILED
+            logger.info(f"任务已中断: {task_id}: {e}")
+            task.status = TaskStatus.CANCELLED
+            task.current_step = "已取消（超时）" if e.error_code == "TIMEOUT" else "已取消"
+            task.error_msg = str(e)
+            task.updated_at = datetime.now()
+
         except Exception as e:
             logger.error(f"任务执行失败: {task_id}, 错误: {e}")
             task.status = TaskStatus.FAILED
             task.error_msg = str(e)
             task.current_step = f"失败: {e}"
             task.updated_at = datetime.now()
+
+        finally:
+            self._cancel_events.pop(task_id, None)
 
         self._notify_task_update(task)
 
@@ -421,6 +455,7 @@ class TaskManager:
                 download_video=False,
                 progress_callback=lambda _status, percent: self._update_download_progress(task, percent),
                 cookies_from_browser=getattr(task, 'cookies_from_browser', None),
+                cancel_event=self._cancel_events.get(task.id),
             )
 
         result = await loop.run_in_executor(None, do_download)
@@ -455,7 +490,7 @@ class TaskManager:
 
     async def _transcribe_audio(
         self,
-        _task: VideoTask,
+        task: VideoTask,
         audio_path: Path,
     ) -> list:
         """转录音频"""
@@ -466,6 +501,7 @@ class TaskManager:
                 return self._transcribe_service.transcribe(
                     audio_path,
                     language="zh",
+                    cancel_event=self._cancel_events.get(task.id),
                 )
 
             result = await loop.run_in_executor(None, do_transcribe)
@@ -548,6 +584,9 @@ class TaskManager:
 
     def _save_task_to_db(self, task: VideoTask) -> None:
         """保存任务到数据库"""
+        if task.id in self._deleted_tasks:
+            logger.debug(f"任务已删除, 跳过写库: {task.id}")
+            return
         try:
             task_history = TaskHistory(
                 id=str(task.id),

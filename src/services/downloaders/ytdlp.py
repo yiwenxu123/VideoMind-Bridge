@@ -5,6 +5,7 @@
 
 import contextlib
 import shutil
+import threading
 import time
 from datetime import datetime
 from hashlib import sha256
@@ -15,6 +16,7 @@ import yt_dlp
 
 from ...models.task import VideoMetadata
 from ...utils import get_logger, sanitize_filename
+from ...utils.exceptions import OperationCancelledError
 from .base import (
     DownloaderBase,
     DownloaderCapability,
@@ -90,6 +92,21 @@ class YtdlpDownloader(DownloaderBase):
     ) -> DownloadResult:
         logger.info(f"yt-dlp 开始下载: {url}")
 
+        # 取消令牌: 优先用调用方传入的事件; 仅配置了 timeout 时自建
+        cancel_event = options.cancel_event
+        timeout_timer: threading.Timer | None = None
+        if cancel_event is None and options.timeout > 0:
+            cancel_event = threading.Event()
+        if cancel_event is not None and options.timeout > 0:
+            timeout_timer = threading.Timer(options.timeout, cancel_event.set)
+            timeout_timer.daemon = True
+            timeout_timer.start()
+
+        if cancel_event is not None and cancel_event.is_set():
+            if timeout_timer is not None:
+                timeout_timer.cancel()
+            raise OperationCancelledError(f"下载已取消: {url}")
+
         try:
             options.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -98,7 +115,7 @@ class YtdlpDownloader(DownloaderBase):
             self._prune_stale_temp_dirs(options.output_dir / ".temp", temp_dir)
             temp_dir.mkdir(parents=True, exist_ok=True)
 
-            ytdlp_opts = self._build_options(options, temp_dir, progress_callback)
+            ytdlp_opts = self._build_options(options, temp_dir, progress_callback, cancel_event)
 
             with yt_dlp.YoutubeDL(ytdlp_opts) as ydl:
                 info = ydl.extract_info(url, download=True)
@@ -112,6 +129,14 @@ class YtdlpDownloader(DownloaderBase):
 
                 return self._process_result(info, options, temp_dir)
 
+        except yt_dlp.utils.DownloadCancelled as e:
+            was_timeout = timeout_timer is not None and timeout_timer.finished.is_set()
+            if was_timeout:
+                raise OperationCancelledError(
+                    f"下载超时 (>{options.timeout}s): {url}",
+                    error_code="TIMEOUT",
+                ) from e
+            raise OperationCancelledError(f"下载已取消: {url}") from e
         except yt_dlp.utils.DownloadError as e:
             error_msg = str(e)
             logger.error(f"yt-dlp 下载失败: {error_msg}")
@@ -137,6 +162,9 @@ class YtdlpDownloader(DownloaderBase):
                 error_message=str(e),
                 error_code="UNKNOWN_ERROR"
             )
+        finally:
+            if timeout_timer is not None:
+                timeout_timer.cancel()
 
     def get_metadata(self, url: str) -> VideoMetadata | None:
         try:
@@ -201,10 +229,23 @@ class YtdlpDownloader(DownloaderBase):
         self,
         options: DownloadOptions,
         temp_dir: Path,
-        progress_callback: ProgressCallback | None
+        progress_callback: ProgressCallback | None,
+        cancel_event: threading.Event | None = None,
     ) -> dict:
+        height_cap = {"480p": 480, "720p": 720, "1080p": 1080}.get(options.video_quality)
         if options.keep_video:
-            format_spec = f"bestvideo[ext={options.video_format}]+bestaudio[ext={options.audio_format}]/best"
+            if options.video_quality == "worst":
+                format_spec = (
+                    f"worstvideo[ext={options.video_format}]+worstaudio[ext={options.audio_format}]/worst"
+                )
+            elif height_cap is not None:
+                format_spec = (
+                    f"bestvideo[ext={options.video_format}][height<={height_cap}]"
+                    f"+bestaudio[ext={options.audio_format}]/"
+                    f"bestvideo[ext={options.video_format}]+bestaudio[ext={options.audio_format}]/best"
+                )
+            else:
+                format_spec = f"bestvideo[ext={options.video_format}]+bestaudio[ext={options.audio_format}]/best"
         else:
             format_spec = f"bestaudio[ext={options.audio_format}]/bestaudio/best"
 
@@ -242,14 +283,25 @@ class YtdlpDownloader(DownloaderBase):
         if options.proxy:
             opts["proxy"] = options.proxy
 
-        if progress_callback:
+        if progress_callback or cancel_event is not None:
             opts["progress_hooks"] = [
-                lambda d: self._progress_hook(d, progress_callback)
+                lambda d, _cb=progress_callback, _ev=cancel_event: self._progress_hook(d, _cb, _ev)
             ]
 
         return opts
 
-    def _progress_hook(self, data: dict, callback: ProgressCallback) -> None:
+    def _progress_hook(
+        self,
+        data: dict,
+        callback: ProgressCallback | None,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise yt_dlp.utils.DownloadCancelled("下载已取消")
+
+        if callback is None:
+            return
+
         status = data.get("status")
 
         if status == "downloading":

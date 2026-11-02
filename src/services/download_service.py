@@ -3,6 +3,7 @@
 使用下载器路由自动选择最佳下载器。
 """
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -56,6 +57,8 @@ class DownloadService:
         video_quality: str = "best",
         progress_callback: ProgressCallback | None = None,
         cookies_from_browser: str | None = None,
+        cancel_event: threading.Event | None = None,
+        timeout: int | None = None,
     ) -> DownloadResult:
         """
         下载视频和/或音频（带重试机制）
@@ -66,12 +69,15 @@ class DownloadService:
             video_quality: 视频质量 (best/worst/720p/1080p等)
             progress_callback: 进度回调函数 (status, percent) -> None
             cookies_from_browser: 从浏览器读取 cookies（chrome/safari/firefox）
+            cancel_event: 取消令牌，置位后下载在下一个进度检查点中断
+            timeout: 下载超时秒数（None/0 表示不限）
 
         Returns:
             DownloadResult: 下载结果
 
         Raises:
             DownloadError: 下载失败时抛出
+            OperationCancelledError: 取消或超时时抛出（.part 保留, 同 URL 重跑可续传）
         """
         local_path = Path(url).expanduser()
         if not is_remote_url(url) and local_path.is_file():
@@ -84,6 +90,8 @@ class DownloadService:
                 return self._do_download(
                     url, download_video, video_quality, progress_callback,
                     cookies_from_browser=cookies_from_browser,
+                    cancel_event=cancel_event,
+                    timeout=timeout,
                 )
             except UnsupportedPlatformError:
                 raise
@@ -140,17 +148,32 @@ class DownloadService:
         video_quality: str,
         progress_callback: ProgressCallback | None,
         cookies_from_browser: str | None = None,
+        cancel_event: threading.Event | None = None,
+        timeout: int | None = None,
     ) -> DownloadResult:
         """实际执行下载"""
 
         if progress_callback:
             progress_callback("正在选择下载器...", 2)
 
+        # 登录态回退: 任务未显式指定 cookies 时, 走 SessionManager 统一解析
+        session_cookies_file: str | None = None
+        session_cookies_browser: str | None = None
+        if not cookies_from_browser:
+            from ..core.platforms.session import get_session_manager
+
+            resolved = get_session_manager().resolve("ytdlp")
+            session_cookies_file = resolved.cookies_file
+            session_cookies_browser = resolved.cookies_browser
+
         options = DownloadOptions(
             output_dir=self.output_dir,
             keep_video=download_video,
             video_quality=video_quality,
-            cookies_from_browser=cookies_from_browser,
+            cookies_file=Path(session_cookies_file) if session_cookies_file else None,
+            cookies_from_browser=cookies_from_browser or session_cookies_browser,
+            cancel_event=cancel_event,
+            timeout=timeout or 0,
         )
 
         result = self._router.download(url, options, progress_callback)

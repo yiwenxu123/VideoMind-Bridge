@@ -3,6 +3,7 @@
 定义所有下载器必须实现的接口。
 """
 
+import threading
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -49,8 +50,9 @@ class DownloadOptions:
     cookies_file: Path | None = None                 # Cookies 文件路径
     cookies_from_browser: str | None = None          # 浏览器名称（chrome/safari/firefox）
     proxy: str | None = None                         # 代理地址
-    timeout: int = 300                                  # 超时时间（秒）
+    timeout: int = 0                                    # 下载超时（秒, 0=不限; 到时置位 cancel_event）
     retries: int = 3                                    # 重试次数
+    cancel_event: threading.Event | None = None      # 取消令牌 (用户取消或超时共享同一事件)
 
 
 ProgressCallback = Callable[[str, float], None]

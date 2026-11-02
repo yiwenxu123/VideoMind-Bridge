@@ -224,7 +224,7 @@ def test_download_options_defaults():
     assert opts.cookies_file is None
     assert opts.cookies_from_browser is None
     assert opts.proxy is None
-    assert opts.timeout == 300
+    assert opts.timeout == 0  # 0 = 不限; --timeout/API 传入时生效
     assert opts.retries == 3
 
 

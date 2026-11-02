@@ -1,5 +1,6 @@
 """后台处理工作线程 - 执行视频处理任务"""
 
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -90,6 +91,8 @@ class ProcessingWorker(QThread):
         self._should_stop = False  # 安全停止标志
         self._is_paused = False    # 暂停标志
         self._pause_event = None   # 暂停事件（用于线程同步）
+        # 取消令牌: 传递给下载/转录服务, 在进度检查点真实中断（而非等步骤间隙）
+        self._cancel_event = threading.Event()
 
         # 初始化服务
         self.download_service = DownloadService(config.output_dir)
@@ -111,6 +114,7 @@ class ProcessingWorker(QThread):
         """取消任务"""
         self._is_cancelled = True
         self._should_stop = True
+        self._cancel_event.set()
         self.requestInterruption()
         # 如果处于暂停状态，恢复执行以便退出
         self._is_paused = False
@@ -245,7 +249,8 @@ class ProcessingWorker(QThread):
             self.config.url,
             download_video=self.config.download_video,
             video_quality=self.config.video_quality,
-            progress_callback=self._create_progress_callback(task_id, 0, 1.0)
+            progress_callback=self._create_progress_callback(task_id, 0, 1.0),
+            cancel_event=self._cancel_event,
         )
 
         # 下载完成后检查是否需要停止
@@ -282,7 +287,8 @@ class ProcessingWorker(QThread):
         download_result = self.download_service.download(
             self.config.url,
             download_video=False,
-            progress_callback=self._create_progress_callback(task_id, 0, ProgressWeights.DOWNLOAD)
+            progress_callback=self._create_progress_callback(task_id, 0, ProgressWeights.DOWNLOAD),
+            cancel_event=self._cancel_event,
         )
 
         self._check_should_stop(task_id, "下载")
@@ -300,7 +306,8 @@ class ProcessingWorker(QThread):
                 task_id,
                 int(ProgressWeights.DOWNLOAD * 100),
                 ProgressWeights.TRANSCRIBE
-            )
+            ),
+            cancel_event=self._cancel_event,
         )
 
         self._check_should_stop(task_id, "转录")
@@ -366,7 +373,8 @@ class ProcessingWorker(QThread):
             self.config.url,
             download_video=self.config.download_video,
             video_quality=self.config.video_quality,
-            progress_callback=self._create_progress_callback(task_id, 0, 0.2)
+            progress_callback=self._create_progress_callback(task_id, 0, 0.2),
+            cancel_event=self._cancel_event,
         )
 
         self._check_should_stop(task_id, "下载")
@@ -379,7 +387,8 @@ class ProcessingWorker(QThread):
         transcript_result = self.transcribe_service.transcribe(
             download_result.audio_path,
             language="zh",
-            progress_callback=self._create_progress_callback(task_id, 20, 0.4)
+            progress_callback=self._create_progress_callback(task_id, 20, 0.4),
+            cancel_event=self._cancel_event,
         )
 
         self._check_should_stop(task_id, "转录")

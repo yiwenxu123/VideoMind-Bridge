@@ -42,6 +42,13 @@ class UnsupportedPlatformError(VideoMindError):
         super().__init__(message, error_code, details)
 
 
+class OperationCancelledError(VideoMindError):
+    """主动中断（用户取消或超时）——语义上是中止而非失败"""
+
+    def __init__(self, message: str = "操作已取消", error_code: str = "CANCELLED", details: dict | None = None):
+        super().__init__(message, error_code, details)
+
+
 class TranscribeError(VideoMindError):
     """转录相关错误"""
 

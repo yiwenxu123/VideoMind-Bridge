@@ -15,6 +15,7 @@ VideoMind Bridge - CLI 入口
 import argparse
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,7 @@ from src.services.download_service import DownloadService
 from src.services.export_orchestrator import ExportOrchestrator
 from src.services.local_media import is_remote_url
 from src.services.transcribe_service import TranscribeService
+from src.utils.exceptions import OperationCancelledError
 from src.utils.media_utils import generate_srt
 
 console = Console()
@@ -755,6 +757,14 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
     )
 
     out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None  # noqa: SIM115
+
+    # --timeout: 整体超时令牌, 下载与转录共享; 到时在各自的取消检查点中断
+    cancel_event = threading.Event()
+    if getattr(args, "timeout", 0) and args.timeout > 0:
+        timeout_timer = threading.Timer(args.timeout, cancel_event.set)
+        timeout_timer.daemon = True
+        timeout_timer.start()
+
     def _write_json(data: dict) -> None:
         text = json.dumps(data, ensure_ascii=False, indent=2)
         if out_file:
@@ -824,6 +834,7 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
                 download_video=args.keep_video,
                 video_quality=args.video_quality,
                 cookies_from_browser=args.cookie_browser,
+                cancel_event=cancel_event,
             )
             video_path = result.video_path
             audio_path = result.audio_path
@@ -836,6 +847,18 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
                 if video_path:
                     console.print(f"  [dim]视频: {video_path.name}[/dim]")
                 console.print(f"  [dim]音频: {audio_path.name}[/dim]")
+        except OperationCancelledError as e:
+            action = "读取本地文件" if source_is_local else "下载"
+            if use_json:
+                _write_json(_build_json_result(
+                    success=False, url=args.url, mode=args.mode,
+                    error=str(e), error_step="download",
+                    elapsed=time.time() - start_time,
+                ))
+            else:
+                reason = "超时" if e.error_code == "TIMEOUT" else "已取消"
+                console.print(f"[yellow]⏹ {action}{reason}: {e.message}[/yellow]")
+            return 1
         except Exception as e:
             if use_json:
                 _write_json(_build_json_result(
@@ -872,11 +895,24 @@ def _process_single(args: argparse.Namespace, start_time: float) -> int:
             transcript_result = transcribe_service.transcribe(
                 audio_path,
                 language="zh",
+                cancel_event=cancel_event,
             )
 
             if not use_quiet:
                 console.print(f"  [dim]语言: {transcript_result.language} ({transcript_result.language_probability:.0%})[/dim]")
                 console.print(f"  [dim]片段: {len(transcript_result.segments)} 个[/dim]")
+        except OperationCancelledError as e:
+            if use_json:
+                _write_json(_build_json_result(
+                    success=False, url=args.url, mode=args.mode,
+                    metadata=metadata, video_path=video_path, audio_path=audio_path,
+                    error=str(e), error_step="transcribe",
+                    elapsed=time.time() - start_time,
+                ))
+            else:
+                reason = "超时" if e.error_code == "TIMEOUT" else "已取消"
+                console.print(f"[yellow]⏹ 转录{reason}: {e.message}[/yellow]")
+            return 1
         except Exception as e:
             if use_json:
                 _write_json(_build_json_result(
