@@ -5,6 +5,15 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
+# ASR 降级链的唯一默认值来源（2026-11-20 P0）。
+# 之前这个默认值在两处重复硬编码（本文件 AsrConfig.chain 与 core/asr/chain.py 的
+# DEFAULT_CHAIN），且不断言二者一致。由于 resolve_chain() 的优先级是
+# 显式参数 > VMB_ASR_CHAIN > 配置文件 > DEFAULT_CHAIN，而 get_asr_config() 总会返回
+# 一个 chain 非空的 AsrConfig，导致 chain.py 的 DEFAULT_CHAIN 实际永远走不到——
+# 真正生效的是本文件这一份。默认 faster_whisper 让没有设 VMB_ASR_CHAIN 的进程
+# （CLI / MCP stdio）拿到 base 模型，中文输出繁体化并伴大量同音错字。
+DEFAULT_ASR_CHAIN: list[str] = ["sensevoice", "faster_whisper", "dashscope"]
+
 
 class AIEngine(StrEnum):
     """AI 引擎类型"""
@@ -119,7 +128,7 @@ class AsrConfig:
     backends: 各后端的模型与专属选项；未列出的后端使用环境变量/默认值。
     """
 
-    chain: list[str] = field(default_factory=lambda: ["faster_whisper", "dashscope"])
+    chain: list[str] = field(default_factory=lambda: list(DEFAULT_ASR_CHAIN))
     language: str | None = None
     max_cost: str = "premium"
     backends: dict[str, AsrBackendConfig] = field(default_factory=dict)
@@ -136,7 +145,7 @@ class AsrConfig:
     def from_dict(cls, data: dict[str, Any]) -> "AsrConfig":
         raw_backends = data.get("backends", {}) or {}
         return cls(
-            chain=list(data.get("chain", ["faster_whisper", "dashscope"])),
+            chain=list(data.get("chain", DEFAULT_ASR_CHAIN)),
             language=data.get("language"),
             max_cost=str(data.get("max_cost", "premium") or "premium"),
             backends={

@@ -10,6 +10,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..utils.platform_detector import detect_platform
+from ..utils.url_normalize import normalize_video_url
 from .extractors import list_extractor_classes
 from .extractors.base import ContentExtractor
 from .models import _COST_TIER_PRIORITY, CostTier, ExtractOptions, ExtractResult
@@ -113,6 +115,14 @@ class ContentRouter:
         """
         request_id = options.request_id if options else None
 
+        # 2026-11-22: URL 归一化必须发生在所有提取器之前。
+        # 抖音 jingxuan?modal_id=<id> 这类写法 yt-dlp 不认，会报 Unsupported URL，
+        # 而该报错又被上层合并进"可能风控"，把排查引到完全错误的方向。
+        original_url = url
+        url = normalize_video_url(url)
+        if url != original_url:
+            logger.info(f"URL 归一化: {original_url} → {url}")
+
         # 检查缓存
         if self.config.use_cache and url in self.config.cache:
             cached = self.config.cache[url]
@@ -126,6 +136,10 @@ class ContentRouter:
 
         failures: list[str] = []
         failures_meta: list[dict[str, Any]] = []
+        # 2026-11-21: 记录每个提取器的结构化失败原因。以前全部失败时只剩下最后一个
+        # 提取器的 error_code（常为 None → 被抹成 "extract_failed"），
+        # 导致"网关没起"“视频不可见”“真风控”这些需要完全不同处置的原因在下游全丢失。
+        attempts: list[dict[str, Any]] = []
         last_result: ExtractResult | None = None
 
         for name in priority:
@@ -176,15 +190,30 @@ class ContentRouter:
                     # 占位结果: 仅元信息/说明文本, 不缓存, 继续降级
                     failure_msg = result.error or f"{name}: 仅获取到元信息，无真实内容"
                     failures.append(failure_msg)
+                    attempts.append({
+                        "extractor": name,
+                        "error_code": result.error_code,
+                        "error": failure_msg,
+                    })
                     logger.warning(f"✗ 提取器 {name} 返回占位结果: {failure_msg}")
                 else:
                     failure_msg = f"{name}: {result.error or '未知错误'}"
                     failures.append(failure_msg)
+                    attempts.append({
+                        "extractor": name,
+                        "error_code": result.error_code,
+                        "error": failure_msg,
+                    })
                     logger.warning(f"✗ 提取失败: {failure_msg}")
 
             except Exception as e:
                 failure_msg = f"{name}: 异常 {e}"
                 failures.append(failure_msg)
+                attempts.append({
+                    "extractor": name,
+                    "error_code": "extractor_exception",
+                    "error": failure_msg,
+                })
                 logger.error(f"✗ 提取器 {name} 异常: {e}")
 
         # 所有提取器均失败
@@ -199,7 +228,25 @@ class ContentRouter:
                 last_result.duration_seconds = best_meta.get("duration_seconds", 0.0)
             last_result.success = False
             last_result.error = "; ".join(failures)
-            last_result.error_code = last_result.error_code or "extract_failed"
+            # 错误码优先级：平台原生提取器（如 douyin）> 任意有原因的提取器 > 兜底。
+            # 这样上层拿到的 error_code 说的是"抖音网关不可达"，而不是无信息量的 extract_failed。
+            detected = detect_platform(url)
+            native_code = next(
+                (
+                    a["error_code"]
+                    for a in attempts
+                    if a["extractor"] == detected and a["error_code"]
+                ),
+                None,
+            )
+            any_code = next((a["error_code"] for a in attempts if a["error_code"]), None)
+            last_result.error_code = (
+                native_code or any_code or last_result.error_code or "extract_failed"
+            )
+            last_result.metadata = {
+                **(last_result.metadata or {}),
+                "attempts": attempts,
+            }
             last_result.request_id = request_id or last_result.request_id
             return last_result
 

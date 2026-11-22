@@ -93,7 +93,13 @@ def main() -> int:
         run_api(host=args.host, port=args.port)
         return 0
     elif args.mcp:
-        print("启动 MCP Server（用于 AI Agent 集成，通过 stdio 通信）")
+        # 2026-11-20 P0: stdio 模式下 stdout 是 MCP 协议流（换行分隔 JSON-RPC），
+        # 任何非 JSON 文本都会让客户端在第一行解析失败。这行原来是 print() 到 stdout，
+        # 而 README 推荐的正是 `python main.py --mcp`，属于必踩的坑。
+        print(
+            "启动 MCP Server（用于 AI Agent 集成，通过 stdio 通信）",
+            file=sys.stderr,
+        )
         run_mcp()
         return 0
     else:

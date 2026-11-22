@@ -7,6 +7,7 @@ import os
 import threading
 import time
 
+from ..utils.url_normalize import normalize_video_url
 from .cache import TTLCache
 from .models import CostTier, ExtractOptions, ExtractResult
 from .router import ContentRouter, RouterConfig
@@ -69,6 +70,9 @@ class RouterRuntime:
         max_cost: CostTier | None = None,
         options: ExtractOptions | None = None,
     ) -> ExtractResult:
+        # 与 ContentRouter 一致：先归一化，让缓存键也收敛到同一形式，
+        # 否则同一视频的两种写法会各占一份缓存。
+        url = normalize_video_url(url)
         key = self._cache_key(url, max_cost, options)
         cached = self._cache.get(key)
         if isinstance(cached, ExtractResult):

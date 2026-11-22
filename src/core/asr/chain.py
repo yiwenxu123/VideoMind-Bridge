@@ -18,6 +18,7 @@ import time
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from ...models.config import DEFAULT_ASR_CHAIN
 from ..models import _COST_TIER_PRIORITY, CostTier
 from .registry import create_transcriber, validate_chain
 from .types import (
@@ -33,7 +34,12 @@ from .types import (
 if TYPE_CHECKING:
     from ...models.config import AsrConfig
 
-DEFAULT_CHAIN = ["faster_whisper", "dashscope"]
+# 2026-11-20 P0: 改为引用 models/config.py 的单一常量。
+# 关键坑：resolve_chain() 的优先级是 显式参数 > VMB_ASR_CHAIN > 配置文件 > DEFAULT_CHAIN，
+# 而 get_asr_config() 永远返回 chain 非空的 AsrConfig（其默认值来自同一个常量），
+# 所以本文件的 DEFAULT_CHAIN 实际上只在"配置层完全拿不到"时才作为最后兜底。
+# 真正决定默认行为的是 DEFAULT_ASR_CHAIN —— 两处必须同源，否则改了这里不生效。
+DEFAULT_CHAIN = list(DEFAULT_ASR_CHAIN)
 
 
 def _config_defaults() -> AsrConfig | None:

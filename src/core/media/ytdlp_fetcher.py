@@ -9,11 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import os
-import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
 
+from ...utils.ytdlp_bin import resolve_ytdlp as _resolve_ytdlp
 from ..platforms.ytdlp_options import ytdlp_cookie_args, ytdlp_network_args
 from .audio import find_ffmpeg
 from .types import FetchedMedia, MediaFetchFailed
@@ -24,25 +24,14 @@ _YTDLP_CMD = "yt-dlp"
 
 
 def resolve_ytdlp() -> str | None:
-    """解析 yt-dlp 可执行文件: PATH → 项目 venv → 常见路径。
+    """解析 yt-dlp 可执行文件（委托给 utils.ytdlp_bin 的统一优先级）。
 
-    MCP 常以 `uv run` 启动, venv bin 在 PATH 中; 但独立进程/非登录 shell
-    下 PATH 可能缺失, 此处显式兜底, 避免静默判为"未安装"。
+    2026-11-22 起改为 **venv 优先**：项目在 pyproject.toml 里声明了
+    yt-dlp>=2026.7.4，就应该跑项目装的那份。此前是 PATH 优先，导致本机实际执行的是
+    Homebrew 的 2026.03.13（比声明值旧 4 个月），而抖音恰恰最吃版本——
+    extractor 失效往往就是版本没跟上。
     """
-    found = shutil.which(_YTDLP_CMD)
-    if found:
-        return found
-    # 项目 venv (跨平台: Unix bin / Windows Scripts)
-    venv_root = Path(__file__).resolve().parents[3] / ".venv"
-    for sub in ("Scripts", "bin"):
-        for name in (_YTDLP_CMD, _YTDLP_CMD + ".exe"):
-            candidate = venv_root / sub / name
-            if candidate.exists():
-                return str(candidate)
-    candidate = Path.home() / ".local" / "bin" / _YTDLP_CMD
-    if candidate.exists():
-        return str(candidate)
-    return None
+    return _resolve_ytdlp()
 
 
 class YtDlpMediaFetcher:

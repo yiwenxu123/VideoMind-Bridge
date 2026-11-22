@@ -19,6 +19,7 @@ class RecordingLimiter(PlatformRateLimiter):
     def __init__(self) -> None:
         super().__init__({}, enabled=True)
         self.calls: list[tuple[str, float | None]] = []
+        self.circuit_keys: list[str | None] = []
 
     def execute(
         self,
@@ -26,8 +27,10 @@ class RecordingLimiter(PlatformRateLimiter):
         func: Any,
         *,
         deadline: float | None = None,
+        circuit_key: str | None = None,
     ) -> Any:
         self.calls.append((platform, deadline))
+        self.circuit_keys.append(circuit_key)
         return func()
 
 

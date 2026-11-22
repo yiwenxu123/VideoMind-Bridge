@@ -217,30 +217,34 @@ class PlatformRateLimiter:
                 self._semaphores[platform] = sem
             return sem
 
-    def _check_circuit(self, platform: str) -> None:
+    def _check_circuit(self, circuit_key: str, *, platform: str | None = None) -> None:
+        """按熔断键检查。指标仍记在 platform 名下，避免 /metrics 被 scope 碎片化。"""
         now = self._clock()
+        metric_key = platform or circuit_key
         retry_after: int | None = None
         with self._lock:
-            until = self._circuit_until.get(platform, 0.0)
+            until = self._circuit_until.get(circuit_key, 0.0)
             if until > now:
-                self._metrics_locked(platform).circuit_rejected_total += 1
+                self._metrics_locked(metric_key).circuit_rejected_total += 1
                 retry_after = max(1, math.ceil(until - now))
             elif until:
-                self._circuit_until.pop(platform, None)
-                self._failures[platform] = 0
+                self._circuit_until.pop(circuit_key, None)
+                self._failures[circuit_key] = 0
         if retry_after is not None:
             logger.warning(
-                "platform_circuit_rejected platform=%s retry_after_s=%s",
-                platform,
+                "platform_circuit_rejected platform=%s circuit=%s retry_after_s=%s",
+                metric_key,
+                circuit_key,
                 retry_after,
                 extra={
-                    "platform": platform,
+                    "platform": metric_key,
+                    "circuit": circuit_key,
                     "retry_after_seconds": retry_after,
                 },
             )
             raise PlatformRequestError(
                 "risk_control",
-                f"{platform} 熔断中，请稍后重试",
+                f"{metric_key} 熔断中 ({circuit_key})，请稍后重试",
                 retry_after_seconds=retry_after,
             )
 
@@ -414,53 +418,68 @@ class PlatformRateLimiter:
             },
         )
 
-    def _record_success(self, platform: str) -> None:
+    def _record_success(self, circuit_key: str) -> None:
         with self._lock:
-            self._failures[platform] = 0
-            self._circuit_until.pop(platform, None)
+            self._failures[circuit_key] = 0
+            self._circuit_until.pop(circuit_key, None)
 
     def _record_failure(
         self,
-        platform: str,
+        circuit_key: str,
         policy: PlatformPolicy,
+        *,
+        platform: str | None = None,
     ) -> tuple[bool, int]:
+        metric_key = platform or circuit_key
         with self._lock:
-            failures = self._failures.get(platform, 0) + 1
-            self._failures[platform] = failures
+            failures = self._failures.get(circuit_key, 0) + 1
+            self._failures[circuit_key] = failures
             if failures >= policy.circuit_threshold:
-                self._circuit_until[platform] = (
+                self._circuit_until[circuit_key] = (
                     self._clock() + policy.circuit_cooldown_seconds
                 )
-                self._metrics_locked(platform).circuit_open_total += 1
+                self._metrics_locked(metric_key).circuit_open_total += 1
                 return True, failures
         return False, failures
 
-    def notify_risk_control(self, platform: str) -> None:
-        """登记 HTTP 200 响应体里的风控信号，让后续请求走熔断。"""
+    def notify_risk_control(
+        self,
+        platform: str,
+        *,
+        circuit_key: str | None = None,
+    ) -> None:
+        """登记 HTTP 200 响应体里的风控信号，让后续请求走熔断。
+
+        circuit_key 用于把熔断隔离到"平台内的某个链路"（例如 douyin:share），
+        避免一个提取器的失败连带熔断同平台其它本可成功的兜底链路。
+        """
         if not self.enabled:
             return
+        key = circuit_key or platform
         policy = self._policy(platform)
-        opened, failures = self._record_failure(platform, policy)
+        opened, failures = self._record_failure(key, policy, platform=platform)
         with self._lock:
             self._metrics_locked(platform).risk_control_signals_total += 1
         logger.warning(
-            "platform_risk_signal platform=%s failures=%s",
+            "platform_risk_signal platform=%s circuit=%s failures=%s",
             platform,
+            key,
             failures,
-            extra={"platform": platform, "failures": failures},
+            extra={"platform": platform, "circuit": key, "failures": failures},
         )
         if opened:
             self._log_circuit_open(
-                platform,
+                key,
                 failures,
                 policy.circuit_cooldown_seconds,
             )
 
-    def circuit_state(self, platform: str) -> str:
+    def circuit_state(self, circuit_key: str) -> str:
+        """返回指定熔断键的状态。键可以是平台名，也可以是 `平台:链路` 作用域。"""
         with self._lock:
             return (
                 "open"
-                if self._circuit_until.get(platform, 0.0) > self._clock()
+                if self._circuit_until.get(circuit_key, 0.0) > self._clock()
                 else "closed"
             )
 
@@ -483,18 +502,47 @@ class PlatformRateLimiter:
                 }
             return snapshot
 
+    def circuits_snapshot(self) -> dict[str, dict[str, Any]]:
+        """按熔断键返回真实熔断状态。
+
+        与 metrics_snapshot 的区别：后者按平台聚合请求指标，本方法按 `平台:链路`
+        作用域展开，运维可以直接看到是 douyin:share 熔断还是 douyin:ytdlp 熔断。
+        """
+        with self._lock:
+            now = self._clock()
+            keys = set(self._circuit_until) | set(self._failures)
+            result: dict[str, dict[str, Any]] = {}
+            for key in sorted(keys):
+                until = self._circuit_until.get(key, 0.0)
+                result[key] = {
+                    "state": "open" if until > now else "closed",
+                    "failure_streak": self._failures.get(key, 0),
+                    "cooldown_remaining_s": (
+                        max(0, math.ceil(until - now)) if until > now else 0
+                    ),
+                }
+            return result
+
     def execute(
         self,
         platform: str,
         func: Callable[[], Any],
         *,
         deadline: float | None = None,
+        circuit_key: str | None = None,
     ) -> Any:
+        """执行受控请求。
+
+        platform 决定限速策略、并发闸门与指标归属；circuit_key 决定熔断归属。
+        二者分离是为了让"同平台的不同链路"互不牵连——例如抖音页面直抓被风控，
+        不应该把同平台下本来能成功的 yt-dlp / 本地 ASR 兜底一起熔断。
+        """
         if not self.enabled:
             return func()
 
+        key = circuit_key or platform
         policy = self._policy(platform)
-        self._check_circuit(platform)
+        self._check_circuit(key, platform=platform)
         semaphore = self._semaphore(platform, policy)
         timeout = None
         if deadline is not None:
@@ -529,7 +577,7 @@ class PlatformRateLimiter:
                     self._pace(platform, policy, deadline)
                     try:
                         result = func()
-                        self._record_success(platform)
+                        self._record_success(key)
                         latency_ms = self._elapsed_ms(started)
                         self._record_outcome(
                             platform,
@@ -553,13 +601,9 @@ class PlatformRateLimiter:
                                 status_code=status,
                             ) from exc
                         if status in _RISK_STATUS:
-                            opened, failures = self._record_failure(platform, policy)
-                            if opened:
-                                self._log_circuit_open(
-                                    platform,
-                                    failures,
-                                    policy.circuit_cooldown_seconds,
-                                )
+                            # 不在这里记账：抛出的 risk_control 会被外层
+                            # `except PlatformRequestError` 统一记一次。
+                            # 两处都记会导致一次请求算两次失败（实测 failures=2）。
                             raise PlatformRequestError(
                                 "risk_control",
                                 f"{platform} 触发风控",
@@ -640,6 +684,19 @@ class PlatformRateLimiter:
                 raise PlatformRequestError("upstream_error", f"{platform} 请求失败")
             except PlatformRequestError as exc:
                 latency_ms = self._elapsed_ms(started)
+                # 2026-11-21: 风控类错误一律计入熔断，不论它来自 HTTP 状态码
+                # （403 那条分支）还是来自调用方的内容判定（如"200 但返回验证码壳页"）。
+                # 之前只有 403 分支会累加失败数，导致 200 壳页永远熔不断。
+                if exc.code in {"risk_control", "auth_required"}:
+                    opened, failures = self._record_failure(
+                        key, policy, platform=platform
+                    )
+                    if opened:
+                        self._log_circuit_open(
+                            key,
+                            failures,
+                            policy.circuit_cooldown_seconds,
+                        )
                 self._record_outcome(
                     platform,
                     success=False,

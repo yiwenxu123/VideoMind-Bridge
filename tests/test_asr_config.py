@@ -6,7 +6,12 @@ import pytest
 
 from src.core.asr import resolve_chain, resolve_language, resolve_max_cost
 from src.core.models import CostTier
-from src.models.config import AppConfig, AsrBackendConfig, AsrConfig
+from src.models.config import (
+    DEFAULT_ASR_CHAIN,
+    AppConfig,
+    AsrBackendConfig,
+    AsrConfig,
+)
 
 
 @pytest.fixture
@@ -33,7 +38,9 @@ def manager(monkeypatch):
 
 def test_app_config_roundtrip_includes_asr():
     config = AppConfig.get_default_config()
-    assert config.asr.chain == ["faster_whisper", "dashscope"]
+    # 引用单一常量，而不是重复一遍字面量：这条测的是"默认配置被完整序列化再还原"，
+    # 不该因为默认链内容调整而变红。
+    assert config.asr.chain == DEFAULT_ASR_CHAIN
     assert config.asr.max_cost == "premium"
 
     restored = AppConfig.from_dict(config.to_dict())
@@ -90,7 +97,8 @@ def test_get_asr_config_sensevoice_env_options(manager, monkeypatch):
 def test_get_asr_config_returns_copy(manager):
     cfg = manager.get_asr_config()
     cfg.chain.append("aliyun")
-    assert manager.get_asr_config().chain == ["faster_whisper", "dashscope"]
+    # 测的是"返回的是副本，改它不污染内部状态"，不是默认链的具体内容
+    assert manager.get_asr_config().chain == DEFAULT_ASR_CHAIN
 
 
 def test_resolve_chain_prefers_request_then_env_then_config(monkeypatch):

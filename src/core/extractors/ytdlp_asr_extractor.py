@@ -69,15 +69,17 @@ class YtDlpASRExtractor(ContentExtractor):
     def extract(self, url: str, options: ExtractOptions | None = None) -> ExtractResult:
         platform = detect_platform(url)
         limiter = get_platform_rate_limiter()
+        # 2026-11-20 P1: 熔断键带提取器作用域，理由同 ytdlp_extractor：
+        # 不能让抖音直抓的失败连带跳过本地 ASR 兜底（这是"越坏越坏"的正反馈）。
         if (
             limiter.enabled
             and platform != "unknown"
-            and limiter.circuit_state(platform) == "open"
+            and limiter.circuit_state(f"{platform}:ytdlp_asr") == "open"
         ):
             return ExtractResult(
                 success=False, platform=platform, title="", content="",
                 source="ytdlp_asr", url=url, cost_tier=CostTier.CHEAP,
-                error=f"{platform} 平台熔断中，跳过 yt-dlp+ASR 兜底",
+                error=f"{platform} 的风控熔断中，跳过 yt-dlp+ASR 兜底",
             )
 
         if not self.is_available():

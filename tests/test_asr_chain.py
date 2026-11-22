@@ -18,6 +18,7 @@ from src.core.asr import (
     transcribe_with_chain,
 )
 from src.core.models import CostTier
+from src.models.config import DEFAULT_ASR_CHAIN
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +142,9 @@ def test_resolve_chain_precedence(monkeypatch):
     assert resolve_chain(["aliyun"]) == ["aliyun"]
 
     monkeypatch.delenv("VMB_ASR_CHAIN")
-    assert resolve_chain() == ["faster_whisper", "dashscope"]
+    # 本 fixture 把 _config_defaults 打成 None，所以这里走的是 DEFAULT_CHAIN 兜底。
+    # 断言引用单一常量，避免默认链调整时误红。
+    assert resolve_chain() == list(DEFAULT_ASR_CHAIN)
 
 
 def test_cost_limit_skips_expensive_backend(tmp_path):

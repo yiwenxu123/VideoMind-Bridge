@@ -182,6 +182,11 @@ def _extract_response(result, request_id: str) -> dict:
             "model": result.asr_model,
             "model_version": result.asr_model_version,
         }
+    # 2026-11-21: 暴露逐提取器的失败明细（extractor / error_code / error）。
+    # 之前只回最后一个提取器的 error，调用方无法判断"抖音网关没起"还是"视频不可见"。
+    attempts = (result.metadata or {}).get("attempts")
+    if attempts:
+        payload["attempts"] = attempts
     if result.error:
         payload["error"] = result.error
     if result.error_code:

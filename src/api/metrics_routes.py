@@ -16,5 +16,9 @@ def get_metrics() -> dict:
     return {
         "schema_version": SCHEMA_VERSION,
         "enabled": limiter.enabled,
+        # platforms: 按平台聚合的请求指标（计数/延迟/成功率）
         "platforms": limiter.metrics_snapshot(),
+        # circuits: 按熔断作用域展开的真实状态，如 douyin:crawl / douyin:ytdlp。
+        # 2026-11-20 起熔断键不再等于平台名，只看 platforms[*].circuit 会漏掉作用域熔断。
+        "circuits": limiter.circuits_snapshot(),
     }

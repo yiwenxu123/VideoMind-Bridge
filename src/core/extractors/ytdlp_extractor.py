@@ -18,14 +18,18 @@ from pathlib import Path
 from typing import Any
 
 from ...utils.platform_detector import detect_platform
+from ...utils.ytdlp_bin import ytdlp_command
 from ..models import CostTier, ExtractOptions, ExtractResult
 from ..platforms.rate_limit import get_platform_rate_limiter
 from ..platforms.ytdlp_options import ytdlp_cookie_args, ytdlp_network_args
 from . import register_extractor
 from .base import ContentExtractor
 
-# yt-dlp 可执行路径
+# yt-dlp 可执行路径。
+# 2026-11-22: 不再直接用字面量 "yt-dlp"（那会走 PATH，跑到全局安装的旧版本）。
+# 统一经 utils.ytdlp_bin 解析，优先使用项目 venv 里与 pyproject 声明一致的那份。
 _YTDLP_CMD = "yt-dlp"
+_YTDLP_BIN = ytdlp_command()
 
 # 支持的平台
 _SUPPORTED_PLATFORMS = [
@@ -62,7 +66,7 @@ class YtDlpExtractor(ContentExtractor):
             return self._available
         try:
             result = subprocess.run(
-                [_YTDLP_CMD, "--version"],
+                [_YTDLP_BIN, "--version"],
                 capture_output=True, text=True, timeout=10.0,
             )
             self._available = result.returncode == 0
@@ -73,15 +77,23 @@ class YtDlpExtractor(ContentExtractor):
     def extract(self, url: str, _options: ExtractOptions | None = None) -> ExtractResult:
         platform = detect_platform(url)
         limiter = get_platform_rate_limiter()
+        # 2026-11-20 P1: 熔断键必须带提取器作用域。
+        # 之前这里是 circuit_state(platform)，与 douyin 提取器共用 "douyin" 键：
+        # 抖音页面直抓被风控 3 次后，本兜底即使配了 cookie 也会被跳过 60 秒，
+        # 正好在最需要它的时候失效。现在按 {platform}:ytdlp 隔离。
+        # 注意：yt-dlp 侧目前不写这个键（不改用通用失败计数，否则"视频不存在"这类
+        # 内容错误也会被误算成平台故障），所以本闸门实际恒为放行——这正是兜底该有的语义。
+        # 若将来能从 yt-dlp stderr 识别风控（如 "Fresh cookies are needed"），
+        # 应在这里用 notify_risk_control(platform, circuit_key=...) 回写。
         if (
             limiter.enabled
             and platform != "unknown"
-            and limiter.circuit_state(platform) == "open"
+            and limiter.circuit_state(f"{platform}:ytdlp") == "open"
         ):
             return ExtractResult(
                 success=False, platform=platform, title="", content="",
                 source="ytdlp", url=url, cost_tier=CostTier.FREE,
-                error=f"{platform} 平台熔断中，跳过 yt-dlp 兜底",
+                error=f"{platform} 的风控熔断中，跳过 yt-dlp 兜底",
             )
 
         if not self.is_available():
@@ -173,7 +185,7 @@ class YtDlpExtractor(ContentExtractor):
             output_template = str(Path(tmp_dir) / "%(id)s.%(ext)s")
 
             cmd = [
-                _YTDLP_CMD,
+                _YTDLP_BIN,
                 "--skip-download",       # 只下载字幕
                 "--dump-json",           # JSON 输出元信息
                 "--quiet",
@@ -267,7 +279,7 @@ class YtDlpExtractor(ContentExtractor):
     def _extract_metadata(self, url: str) -> dict[str, Any]:
         """只提取元信息 (不使用字幕)"""
         cmd = [
-            _YTDLP_CMD,
+            _YTDLP_BIN,
             "--dump-json",
             "--skip-download",
             *ytdlp_network_args(url),

@@ -117,6 +117,11 @@ python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
+# integration: 真打网络的测试（tests/test_real_network.py）。
+# 默认跳过，用 VMB_RUN_INTEGRATION=1 开启；不要在 CI 里默认跑，会依赖本机网关。
+markers = [
+    "integration: 需要真实网络与本机服务的端到端测试（默认跳过）",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
