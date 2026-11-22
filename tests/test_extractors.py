@@ -8,10 +8,7 @@ supports(), is_available(), should_try(), cost_tier, URL 模式匹配,
 """
 
 import subprocess
-import sys
 from unittest import mock
-
-sys.path.insert(0, "src")
 
 from src.core.extractors import (
     create_all_extractors,

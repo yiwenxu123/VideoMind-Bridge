@@ -1003,11 +1003,28 @@ class MCPServer:
 
 
 def main():
-    server = MCPServer()
-    try:
-        server.run()
-    finally:
-        server.close()
+    """MCP 入口。
+
+    2026-11-22 起默认走 ``mcp>=2.3`` 的 ``MCPServer`` 实现（见 modern_server）：
+    它把同步工具函数放进 anyio 线程池，解决了旧实现的单线程阻塞与"取消被忽略"，
+    协议版本协商也交给 SDK。
+
+    旧的手写 JSON-RPC 实现完整保留：设 ``VMB_MCP_LEGACY=1`` 即可退回做对照，
+    无需改任何客户端配置。
+    """
+    import os
+
+    if os.getenv("VMB_MCP_LEGACY", "").strip() not in {"", "0", "false", "False"}:
+        server = MCPServer()
+        try:
+            server.run()
+        finally:
+            server.close()
+        return
+
+    from .modern_server import main as modern_main
+
+    modern_main()
 
 
 if __name__ == "__main__":

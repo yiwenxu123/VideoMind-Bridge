@@ -8,7 +8,6 @@
 """
 
 import asyncio
-import sys
 import threading
 import time
 from types import SimpleNamespace
@@ -16,9 +15,6 @@ from unittest import mock
 
 import pytest
 import yt_dlp
-
-sys.path.insert(0, "src")
-
 
 from src.api.task_manager import TaskManager
 from src.models.task import TaskStatus
