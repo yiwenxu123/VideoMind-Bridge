@@ -8,6 +8,13 @@ wheels/
 
 # Virtual environments
 .venv
+# 失败升级后遗留的整份 venv（2026-10-20 出现过 .venv.broken-*，1.5G 且未被忽略）
+.venv.broken-*
+.venv.bak-*
+
+# Type checker / linter caches（此前未被忽略，曾堆积 142M）
+.mypy_cache/
+.ruff_cache/
 
 # IDE and editor files
 .DS_Store

@@ -377,7 +377,10 @@ def test_cli_timeout_fires_and_exits_nonzero(tmp_path, monkeypatch, capsys):
 
         def download(self, url, **kwargs):
             ev = kwargs.get("cancel_event")
-            deadline = _time.time() + 5
+            # --timeout 设的是 1 秒，这里给 15 秒等待窗口。
+            # 原为 5 秒：整仓并行跑测试时线程调度会被拖慢，曾出现假红
+            # （单独跑必过，全量跑偶发失败）。放宽窗口只降低误报，不削弱断言本身。
+            deadline = _time.time() + 15
             while ev is None or not ev.is_set():
                 if _time.time() > deadline:
                     raise AssertionError("CLI --timeout 令牌未在期限内触发")

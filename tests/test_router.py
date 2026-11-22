@@ -48,7 +48,14 @@ def test_extract_uses_cache(mock_extractors):
         content="cached", source="mock_free",
         url="https://example.com/cached", cost_tier=CostTier.FREE,
     )
-    router = ContentRouter(RouterConfig(cache={"https://example.com/cached": cached_result}))
+    # 显式开启：这两条测的是"缓存命中/成本超限"的行为，
+    # 而路由层缓存默认已是关闭（进程级缓存由 RouterRuntime 唯一负责）。
+    router = ContentRouter(
+        RouterConfig(
+            cache={"https://example.com/cached": cached_result},
+            use_cache=True,
+        )
+    )
     result = router.extract("https://example.com/cached")
     assert result.title == "Cached"
 
@@ -60,9 +67,12 @@ def test_extract_skips_cache_when_cost_exceeded(mock_extractors):
         content="cached", source="mock_cheap", cost_tier=CostTier.CHEAP,
         url="https://example.com/cached",
     )
+    # 必须显式 use_cache=True，否则"成本超限跳过缓存"这条路径根本不会被走到，
+    # 测试会因缓存整体关闭而空过（假绿）。
     router = ContentRouter(RouterConfig(
         priority=["mock_free", "mock_cheap"],
         cache={"https://example.com/cached": cached_result},
+        use_cache=True,
     ))
     result = router.extract("https://example.com/cached", max_cost=CostTier.FREE)
     # 缓存被跳过（FREE < CHEAP），应使用 FREE 提取器

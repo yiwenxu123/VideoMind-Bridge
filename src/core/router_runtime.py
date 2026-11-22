@@ -124,7 +124,11 @@ class RouterRuntime:
             else ""
         )
         max_cost_value = max_cost.value if max_cost is not None else ""
+        # 2026-11-22：把"实际影响转写结果"的环境变量也纳入键。
+        # 此前换 VMB_WHISPER_MODEL / VMB_ASR_CHAIN 后，TTL 内仍会返回旧模型的结果。
+        model = os.getenv("VMB_WHISPER_MODEL", "").strip()
+        env_chain = os.getenv("VMB_ASR_CHAIN", "").strip()
         return (
             f"extract:{canonical_url}|{max_cost_value}|"
-            f"{chain}|{language}|{asr_max_cost}"
+            f"{chain}|{language}|{asr_max_cost}|{model}|{env_chain}"
         )

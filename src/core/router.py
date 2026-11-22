@@ -40,9 +40,13 @@ class RouterConfig:
     # 自定义提取器优先级列表 (名称列表)
     priority: list[str] | None = None
 
-    # 结果缓存 (Dict[url, ExtractResult])；RouterRuntime 关闭此项以自行管理缓存
+    # 结果缓存 (Dict[url, ExtractResult])。
+    # 2026-11-22：默认关闭。进程级缓存由 RouterRuntime 统一管理（它的键包含
+    # 成本档/ASR 链/语言，且只缓存 completeness=full）。这里保留一个 URL 单键缓存
+    # 会造成两层缓存语义不一致：本层曾把 completeness="meta"（只有标题）的结果
+    # 也当成功缓存，从而挡住后续更高成本的尝试。Keeping one owner is simpler.
     cache: dict[str, ExtractResult] = field(default_factory=dict)
-    use_cache: bool = True
+    use_cache: bool = False
 
 
 # 默认提取器优先级 (按提取能力排列)
@@ -180,8 +184,9 @@ class ContentRouter:
                     })
 
                 if result.success and result.content.strip() and not result.is_placeholder:
-                    # 真成功 (非占位): 缓存并返回
-                    if self.config.use_cache:
+                    # 真成功 (非占位)。缓存条件与 RouterRuntime 对齐：只有 full 才值得缓存，
+                    # meta（只有标题/文案）缓存下来会让同进程内更贵的 ASR 尝试被跳过。
+                    if self.config.use_cache and result.completeness == "full":
                         self.config.cache[url] = result
                     logger.info(f"✓ 提取成功: {name}")
                     return result
