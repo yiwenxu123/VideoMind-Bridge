@@ -39,6 +39,38 @@ logger = logging.getLogger(__name__)
 # 小红书 URL 模式 (xhslink.cn 为 2025 启用的新短链域名, 兼容 .com)
 _XHS_RE = re.compile(r"(?:xiaohongshu\.com/(?:explore|discovery/item)/|xhslink\.(?:com|cn)/)(\w+)")
 _XHS_SHORT_RE = re.compile(r"xhslink\.(?:com|cn)/(\w+)")
+# 2026-11-22：失败原因 → (error_code, 给用户的处置建议)。
+# 措辞原则：陈述事实 + 给出下一步动作，**不做猜测**。
+# 旧文案"可能需要 Cookie"是猜测，会把人引向"上浏览器/配 Cookie"这种又贵又不解决根因的操作。
+_NOTE_FAILURE_HINTS: dict[str, tuple[str, str]] = {
+    "token_invalid": (
+        "xhs_token_invalid",
+        "链接里的分享参数(xsec_token)已失效或被判无效；"
+        "请在小红书 App 内重新「分享 → 复制链接」后重试",
+    ),
+    "note_unavailable": (
+        "xhs_note_unavailable",
+        "笔记当前不可见（已删除 / 设为私密 / 分享链接过期）；"
+        "请确认笔记状态，或重新分享获取新链接",
+    ),
+    "login_required": (
+        "xhs_login_required",
+        "小红书要求登录态；配置 VMB_XHS_COOKIE 或 VMB_XHS_COOKIES_FILE 后重试",
+    ),
+    "risk_control": (
+        "xhs_risk_control",
+        "触发小红书风控；稍后重试，或配置登录态提高通过率",
+    ),
+    "http_error": (
+        "xhs_http_error",
+        "请求小红书失败（网络或服务端异常）；稍后重试",
+    ),
+    "no_content": (
+        "xhs_no_content",
+        "已取到笔记页面但没有正文；该笔记可能是纯图片、无文字说明",
+    ),
+}
+
 MOBILE_UA = (
     "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) "
     "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
@@ -92,7 +124,7 @@ class XiaohongshuExtractor(ContentExtractor):
                 )
 
             # 获取笔记内容
-            title, content, images, is_video, html = self._fetch_note(note_id, url)
+            title, content, images, is_video, html, failure = self._fetch_note(note_id, url)
 
             # 视频笔记优先口播 ASR（成功=full；失败落回 desc/meta）
             if is_video:
@@ -103,10 +135,23 @@ class XiaohongshuExtractor(ContentExtractor):
                     return video_result
 
             if not content and not title:
+                # 归因：不同原因处置完全不同（重分享 / 换链接 / 配登录态 / 等一会），
+                # 不能都报成"可能需要 Cookie"。
+                code, hint = _NOTE_FAILURE_HINTS.get(
+                    failure or "note_unavailable",
+                    ("xhs_extract_failed", "未能获取小红书笔记内容"),
+                )
+                logger.info(
+                    "[XiaohongshuExtractor] 取数失败 note_id=%s failure=%s",
+                    note_id,
+                    failure,
+                )
                 return ExtractResult(
                     success=False, platform="xiaohongshu", title="", content="",
                     source="xiaohongshu", url=url, cost_tier=CostTier.FREE,
-                    error="无法获取小红书笔记内容 (可能需要 Cookie)",
+                    error=hint,
+                    error_code=code,
+                    metadata={"note_id": note_id, "failure": failure},
                 )
 
             full_content = title
@@ -126,6 +171,8 @@ class XiaohongshuExtractor(ContentExtractor):
                 metadata={
                     "note_id": note_id,
                     "images": images,
+                    "note_type": "video" if is_video else "image",
+                    "failure": failure,
                 },
                 completeness="meta" if is_video else "full",
                 method="desc" if is_video else "page",
@@ -147,11 +194,20 @@ class XiaohongshuExtractor(ContentExtractor):
 
     def _fetch_note(
         self, note_id: str, original_url: str = ""
-    ) -> tuple[str, str, list[str], bool, str]:
+    ) -> tuple[str, str, list[str], bool, str, str | None]:
         """获取笔记内容
 
         保留原始 URL 中的 xsec_token/xsec_source 参数（未登录访问必需），
         其余追踪参数丢弃。
+
+        Returns:
+            (title, content, images, is_video, html, failure)
+            failure 取值见 ``_NOTE_FAILURE_HINTS``；成功时为 None。
+
+        2026-11-22：此前异常被吞成空元组，上层只能报"可能需要 Cookie"——那是猜测。
+        实测一条真实图文笔记会返回 **HTTP 200 的空壳页**（``noteData`` 只剩
+        ``routeQuery``、整页无 ``noteId``），与"被风控""需要登录"是完全不同的处置。
+        现在把原因显式带出去。
         """
         note_url = f"https://www.xiaohongshu.com/explore/{note_id}"
         if original_url:
@@ -172,6 +228,12 @@ class XiaohongshuExtractor(ContentExtractor):
                 limiter=self._limiter,
             )
             html = resp.text
+            final_path = resp.url.path or ""
+
+            # 软 404：小红书把"token 缺失/错误/私密/删除/限流"统一导向
+            # /404/sec_xxx（source=xhs_sec_server），页面本身不告知原因。
+            if "/404/" in final_path:
+                return "", "", [], False, html, "token_invalid"
 
             title = self._extract_title(html)
             content = self._extract_content(html)
@@ -185,10 +247,33 @@ class XiaohongshuExtractor(ContentExtractor):
                 if ssr_title and not title:
                     title = ssr_title
 
-            return title, content, images, self._is_video_html(html), html
+            failure: str | None = None
+            if not title and not content:
+                # 200 但笔记数据缺失：noteData 里没有 noteId 就说明这一页根本没渲染笔记。
+                # 常见于 token 失效后的降级空壳，或笔记已删除/转私密。
+                failure = (
+                    "note_unavailable"
+                    if "noteId" not in html
+                    else "no_content"
+                )
 
-        except (httpx.HTTPError, PlatformRequestError):
-            return "", "", [], False, ""
+            return (
+                title,
+                content,
+                images,
+                self._is_video_html(html),
+                html,
+                failure,
+            )
+
+        except PlatformRequestError as exc:
+            if exc.code == "auth_required":
+                return "", "", [], False, "", "login_required"
+            if exc.code == "risk_control":
+                return "", "", [], False, "", "risk_control"
+            return "", "", [], False, "", "http_error"
+        except httpx.HTTPError:
+            return "", "", [], False, "", "http_error"
 
     @staticmethod
     def _find_note_payload(data: dict) -> dict:

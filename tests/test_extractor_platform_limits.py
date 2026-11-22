@@ -125,10 +125,11 @@ def test_xiaohongshu_note_uses_platform_limiter():
 
     extractor = XiaohongshuExtractor(client=_client(handler), limiter=limiter)
 
-    title, content, _, _, _ = extractor._fetch_note("note-1")
+    title, content, _, _, _, failure = extractor._fetch_note("note-1")
 
     assert title == "标题"
     assert content == "这是一段足够长的正文内容"
+    assert failure is None
     assert limiter.calls == ["xiaohongshu"]
 
 
@@ -233,3 +234,78 @@ def test_douyin_normal_page_is_not_mistaken_for_shell():
     assert failure is None
     assert title == "标题"
     assert description.startswith("正文")
+
+
+# ── 小红书失败归因（2026-11-22）──────────────────────────────────────────
+# 背景：`_fetch_note` 曾把异常吞成空元组，上层只能说"可能需要 Cookie"——
+# 那是猜测。实测一条真实链接会返回 HTTP 200 空壳页（noteData 只剩 routeQuery、
+# 整页无 noteId），与"被风控""需登录"是完全不同的处置。
+
+_SHELL_NOTE = (
+    "<html><head><title>- 小红书</title></head><body><script>"
+    'window.__INITIAL_STATE__ = {"noteData":{"routeQuery":{"source":"webshare"}}};'
+    "</script></body></html>"
+)
+
+
+def test_xhs_shell_page_reports_note_unavailable():
+    """200 但整页无 noteId → 笔记不可见，不是风控、更不是"需要 Cookie"。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=_SHELL_NOTE)
+
+    extractor = XiaohongshuExtractor(client=_client(handler), limiter=RecordingLimiter())
+
+    assert extractor._fetch_note("note-1")[5] == "note_unavailable"
+
+
+def test_xhs_soft_404_reports_token_invalid():
+    """被导向 /404/sec_ 说明分享参数失效——该提示用户重新分享，而不是让他配 Cookie。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        if not request.url.path.startswith("/404/"):
+            return httpx.Response(
+                302, headers={"location": "https://www.xiaohongshu.com/404/sec_abc"}
+            )
+        return httpx.Response(200, text="<html>not found</html>")
+
+    extractor = XiaohongshuExtractor(client=_client(handler), limiter=RecordingLimiter())
+
+    assert extractor._fetch_note("note-1")[5] == "token_invalid"
+
+
+def test_xhs_403_maps_to_risk_control():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(403, request=request)
+
+    injector = PlatformRateLimiter(
+        {"xiaohongshu": PlatformPolicy(max_retries=0, circuit_threshold=10)}
+    )
+    extractor = XiaohongshuExtractor(client=_client(handler), limiter=injector)
+
+    assert extractor._fetch_note("note-1")[5] == "risk_control"
+
+
+def test_xhs_401_maps_to_login_required():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, request=request)
+
+    injector = PlatformRateLimiter(
+        {"xiaohongshu": PlatformPolicy(max_retries=0, circuit_threshold=10)}
+    )
+    extractor = XiaohongshuExtractor(client=_client(handler), limiter=injector)
+
+    assert extractor._fetch_note("note-1")[5] == "login_required"
+
+
+def test_xhs_failure_message_does_not_guess_cookie_and_carries_error_code():
+    """对外文案不得再出现"可能需要 Cookie"这种猜测，且必须带可机读 error_code。"""
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, text=_SHELL_NOTE)
+
+    extractor = XiaohongshuExtractor(client=_client(handler), limiter=RecordingLimiter())
+
+    result = extractor.extract("https://www.xiaohongshu.com/explore/note-1")
+
+    assert result.success is False
+    assert result.error_code == "xhs_note_unavailable"
+    assert "Cookie" not in (result.error or ""), f"文案仍在猜测: {result.error}"
+    assert "重新分享" in (result.error or ""), f"缺少可执行动作: {result.error}"
