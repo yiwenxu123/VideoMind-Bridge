@@ -337,12 +337,17 @@ class DouyinExtractor(ContentExtractor):
     ) -> ExtractResult | None:
         if len(desc) < 30:
             return None
-        # 2026-11-23：这里原来返回 success=True 且**未设 is_placeholder**，与同文件另两个
-        # 降级分支（"无可用字幕"/"文案过短"）不一致。后果是路由层把它当"真成功"直接返回，
-        # 不再尝试 yt-dlp / ASR——即"只有标题就结束"，拿不到视频里真正说的内容。
-        # 现在按占位处理：内容仍带回（desc 可能有用），但标记为不完整，让链路继续降级。
+        # 2026-11-23：这里原来**未设 is_placeholder**，导致路由层把它当"真成功"直接返回，
+        # 不再尝试 yt-dlp / ASR——"只有标题就结束"，拿不到视频里真正说的内容。
+        #
+        # 注意 success 必须保持 True：这是**对外契约**。下游（内容运营agent 的
+        # VideoMindClient.js）把 success!==true 当致命错误直接抛 502，并且它自己另有一套
+        # "completeness=full 是否可信"的密度校验来降级。也就是说，生态约定是
+        # "success=拿到了东西，completeness=完整到什么程度"，而不是"success=是否完整"。
+        # 让链路继续降级应该由 is_placeholder 控制（路由层的成功判定里包含它），
+        # 而不是把 success 改成 False。
         return ExtractResult(
-            success=False,
+            success=True,
             platform="douyin",
             title=title or f"抖音视频 {video_id}",
             content=desc,

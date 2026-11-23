@@ -61,11 +61,11 @@ def test_douyin_gateway_bypasses_platform_limiter():
         "123", "https://www.douyin.com/video/123"
     )
 
-    # 该用例构造的是"网关有文案但没有播放地址"，2026-11-23 起按占位处理：
-    # 内容带回但不谎报成功，以免路由层就此收工、不再尝试 ASR 拿全文。
+    # 该用例构造的是"网关有文案但没有播放地址"：
+    # 标占位（链路继续降级去拿全文），但 success 保持 True（下游契约，见上）。
     assert failure is None, "产出了结果就不该再标失败原因"
     assert result is not None
-    assert result.success is False
+    assert result.success is True
     assert result.is_placeholder is True
     assert "测试描述" in result.content
     # 网关是本地服务，不应占用平台限流器

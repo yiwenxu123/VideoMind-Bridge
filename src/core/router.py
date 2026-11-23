@@ -265,13 +265,32 @@ class ContentRouter:
             last_result.error_code = (
                 native_code or any_code or last_result.error_code or "extract_failed"
             )
+            # 全部链路失败，但沿途拿到过**真实文案**（如抖音网关给了 desc 却没播放地址）：
+            # 直接把那份结果交出去，而不是回一个只有报错的对象。
+            # success 保持 True 是刻意的——下游以 success!==true 为致命错误，
+            # 完整性由 completeness="meta" 表达（下游有自己的密度校验）。
             if best_partial is not None and len(best_partial.content or "") > len(
                 last_result.content or ""
             ):
-                last_result.content = best_partial.content
-                last_result.completeness = best_partial.completeness or "meta"
-                last_result.method = best_partial.method or last_result.method
-                last_result.is_placeholder = True
+                partial = best_partial
+                # 路由在这里决定"这份部分内容值得交出去"，因此显式置 success=True：
+                # 不依赖提取器传进来的值（不同提取器可能标 False），也不让下游
+                # 因为 success=false 而把这唯一可用内容当硬错误丢掉。
+                partial.success = True
+                partial.is_placeholder = True
+                if not partial.title and last_result.title:
+                    partial.title = last_result.title
+                if not partial.duration_seconds:
+                    partial.duration_seconds = last_result.duration_seconds
+                partial.error = "; ".join(failures)
+                partial.metadata = {
+                    **(partial.metadata or {}),
+                    "attempts": attempts,
+                    "partial": True,
+                }
+                partial.request_id = request_id or partial.request_id
+                logger.warning("△ 仅取得部分内容 (%s)，已按 meta 返回", partial.source)
+                return partial
             last_result.metadata = {
                 **(last_result.metadata or {}),
                 "attempts": attempts,

@@ -66,12 +66,16 @@ def test_douyin_gateway_asr_full(monkeypatch, tmp_path):
 
 
 def test_douyin_gateway_meta_when_download_fails_is_placeholder(monkeypatch):
-    """只拿到文案/标题时必须标为占位，**不能**报成功。
+    """只拿到文案/标题时必须标 is_placeholder，**但不能改 success**。
 
-    原断言是 ``assert result.success is True``——等于把这个 bug 固化成契约：
-    路由层看到 success=True 且非占位，会直接返回这份"只有标题"的结果，
-    不再尝试 yt-dlp / ASR，用户永远拿不到视频里真正说的内容。
-    同文件另两个降级分支（无字幕 / 文案过短）本来就是占位语义，这里只是对齐。
+    两个约束同时成立，很容易只满足一个：
+
+    1. 必须 ``is_placeholder=True``：否则路由层判定"真成功"直接返回，不再尝试
+       yt-dlp / ASR，用户永远拿不到视频里真正说的内容（原 bug）。
+    2. 必须保持 ``success=True``：这是**对外契约**。下游 VideoMindClient.js
+       把 ``success!==true`` 当致命错误抛 502，并自行用 completeness 的密度校验
+       判断"是否可信"。生态约定是「success=拿到了东西，completeness=完整到什么程度」，
+       把 success 改成 False 会让"有部分内容可用"退化成硬错误。
 
     文案本身仍然带回：它是真实内容，只是不完整。
     """
@@ -85,7 +89,7 @@ def test_douyin_gateway_meta_when_download_fails_is_placeholder(monkeypatch):
 
     result = extractor.extract("https://www.douyin.com/video/123456789012345")
 
-    assert result.success is False, "只拿到文案不能算成功"
+    assert result.success is True, "success 是对外契约，不能改成 False（下游会抛 502）"
     assert result.is_placeholder is True, "必须标占位，否则会截断降级链"
     assert result.completeness == "meta"
     assert result.method == "desc"

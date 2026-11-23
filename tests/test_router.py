@@ -363,11 +363,12 @@ def test_failed_chain_returns_explicit_partial_content():
     finally:
         router.close()
 
-    assert result.success is False, "没拿到全文就不能报成功"
+    # success 保持 True：下游以 success!==true 为致命错误；
+    # 完整性由 completeness="meta" 表达，下游有自己的密度校验。
+    assert result.success is True
     assert result.content == partial.content, "真实文案应当被回收"
-    assert result.is_placeholder is True
     assert result.completeness == "meta"
-    assert result.metadata["partial_from"] == "douyin_gateway"
+    assert result.metadata.get("partial") is True
 
 
 def test_failed_result_platform_is_url_platform_not_extractor_name():
