@@ -9,6 +9,7 @@ import time
 
 from ..utils.url_normalize import normalize_video_url
 from .cache import TTLCache
+from .metrics import get_extraction_metrics
 from .models import CostTier, ExtractOptions, ExtractResult
 from .router import ContentRouter, RouterConfig
 
@@ -78,6 +79,8 @@ class RouterRuntime:
         if isinstance(cached, ExtractResult):
             if options and options.request_id:
                 cached.request_id = options.request_id
+            # 缓存命中单独计：否则"ASR 占比"会被缓存放大成虚假繁荣
+            get_extraction_metrics().record(cached, cache_hit=True)
             return cached
 
         if options is not None:
@@ -91,6 +94,9 @@ class RouterRuntime:
             and not result.is_placeholder
         ):
             self._cache.set(key, result, self._cache_ttl)
+        # 命中分布：按 method/source/platform/completeness/error_code 归集，
+        # 用来回答"抖音多少走 ASR、多少走字幕""失败卡在哪一环"。
+        get_extraction_metrics().record(result)
         return result
 
     def extractor_status(self) -> dict[str, bool]:

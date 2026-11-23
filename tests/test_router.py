@@ -368,3 +368,45 @@ def test_failed_chain_returns_explicit_partial_content():
     assert result.is_placeholder is True
     assert result.completeness == "meta"
     assert result.metadata["partial_from"] == "douyin_gateway"
+
+
+def test_failed_result_platform_is_url_platform_not_extractor_name():
+    """全部失败时 platform 必须是链接所属平台，不能变成最后那个提取器名。
+
+    2026-11-23 由提取指标暴露：抖音链接失败后 platform 显示为 "ytdlp_asr"，
+    导致按平台聚合的统计把抖音故障记到一个不存在的平台上。
+    """
+    def _fail(name: str):
+        class _F:
+            platform_name = name
+
+            def supports(self, url: str) -> bool:
+                return True
+
+            def is_available(self) -> bool:
+                return True
+
+            def extract(self, url: str, _options=None):
+                return ExtractResult(
+                    success=False, platform=name, title="", content="",
+                    source=name, url=url, cost_tier=CostTier.CHEAP,
+                    error=f"{name} 失败", error_code=None,
+                )
+
+            def close(self) -> None:
+                pass
+
+        return _F
+
+    router = ContentRouter(
+        RouterConfig(priority=["ytdlp", "ytdlp_asr"], use_cache=False)
+    )
+    router._extractor_classes = {"ytdlp": _fail("ytdlp"), "ytdlp_asr": _fail("ytdlp_asr")}
+    try:
+        result = router.extract("https://www.douyin.com/video/7400000000000000003")
+    finally:
+        router.close()
+
+    assert result.platform == "douyin", f"平台被记成了 {result.platform!r}"
+    # 提取器身份仍可从 attempts 看到，信息没有丢
+    assert {a["extractor"] for a in result.metadata["attempts"]} == {"ytdlp", "ytdlp_asr"}

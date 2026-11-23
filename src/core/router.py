@@ -236,9 +236,16 @@ class ContentRouter:
         if last_result:
             # 返回最后一个失败结果, 但包含所有失败原因; 补充沿途最佳元信息
             best_meta = _best_metadata(failures_meta)
+            detected = detect_platform(url)
             if best_meta.get("title") and not last_result.title:
                 last_result.title = best_meta.get("title", "")
-            if best_meta.get("platform") and last_result.platform == "unknown":
+            # 失败结果的 platform 必须是"链接所属平台"，而不是最后那个提取器名。
+            # 例：抖音链接全部失败时，last_result 来自 ytdlp_asr，其 platform 字段是
+            # "ytdlp_asr"，会让按平台聚合的指标/看板把抖音故障记到一个不存在的平台上。
+            # 提取器身份由 source 与 attempts 表达，platform 只表示内容来源。
+            if detected != "unknown":
+                last_result.platform = detected
+            elif best_meta.get("platform") and last_result.platform == "unknown":
                 last_result.platform = best_meta.get("platform", "")
             if best_meta.get("duration_seconds"):
                 last_result.duration_seconds = best_meta.get("duration_seconds", 0.0)
@@ -246,7 +253,6 @@ class ContentRouter:
             last_result.error = "; ".join(failures)
             # 错误码优先级：平台原生提取器（如 douyin）> 任意有原因的提取器 > 兜底。
             # 这样上层拿到的 error_code 说的是"抖音网关不可达"，而不是无信息量的 extract_failed。
-            detected = detect_platform(url)
             native_code = next(
                 (
                     a["error_code"]
