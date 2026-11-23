@@ -298,3 +298,73 @@ def test_router_passes_options_positionally_to_underscore_param_extractors():
 
     assert result.success is True
     assert result.request_id == "req-123"
+
+
+def test_failed_chain_returns_explicit_partial_content():
+    """全部链路失败时，回收**真实文案**，但 success 仍为 False、并标占位。
+
+    2026-11-23：抖音网关可能给出文案却拿不到播放地址。这份文案有价值，
+    不该因为"没拿到全文"就丢掉；但也绝不能谎报成功。
+    """
+    partial = ExtractResult(
+        success=False,
+        platform="douyin",
+        title="标题",
+        content="这是真实的笔记/视频文案内容",
+        source="douyin_gateway",
+        url="https://www.douyin.com/video/1",
+        cost_tier=CostTier.FREE,
+        is_placeholder=True,
+        completeness="meta",
+        method="desc",
+        metadata={"partial_content": True},
+    )
+
+    class _Partial:
+        platform_name = "douyin"
+
+        def supports(self, url: str) -> bool:
+            return True
+
+        def is_available(self) -> bool:
+            return True
+
+        def extract(self, url: str, _options=None):
+            return partial
+
+        def close(self) -> None:
+            pass
+
+    class _Empty:
+        platform_name = "ytdlp_asr"
+
+        def supports(self, url: str) -> bool:
+            return True
+
+        def is_available(self) -> bool:
+            return True
+
+        def extract(self, url: str, _options=None):
+            return ExtractResult(
+                success=False, platform="ytdlp_asr", title="", content="",
+                source="ytdlp_asr", url=url, cost_tier=CostTier.CHEAP,
+                error="下载失败",
+            )
+
+        def close(self) -> None:
+            pass
+
+    router = ContentRouter(
+        RouterConfig(priority=["douyin", "ytdlp_asr"], use_cache=False)
+    )
+    router._extractor_classes = {"douyin": _Partial, "ytdlp_asr": _Empty}
+    try:
+        result = router.extract("https://www.douyin.com/video/1")
+    finally:
+        router.close()
+
+    assert result.success is False, "没拿到全文就不能报成功"
+    assert result.content == partial.content, "真实文案应当被回收"
+    assert result.is_placeholder is True
+    assert result.completeness == "meta"
+    assert result.metadata["partial_from"] == "douyin_gateway"

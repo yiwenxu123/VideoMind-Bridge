@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 
 from src.core.extractors.douyin_extractor import DouyinExtractor
 from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
@@ -60,9 +61,14 @@ def test_douyin_gateway_bypasses_platform_limiter():
         "123", "https://www.douyin.com/video/123"
     )
 
-    assert failure is None
+    # 该用例构造的是"网关有文案但没有播放地址"，2026-11-23 起按占位处理：
+    # 内容带回但不谎报成功，以免路由层就此收工、不再尝试 ASR 拿全文。
+    assert failure is None, "产出了结果就不该再标失败原因"
     assert result is not None
-    assert result.success is True
+    assert result.success is False
+    assert result.is_placeholder is True
+    assert "测试描述" in result.content
+    # 网关是本地服务，不应占用平台限流器
     assert limiter.calls == []
 
 
@@ -309,3 +315,44 @@ def test_xhs_failure_message_does_not_guess_cookie_and_carries_error_code():
     assert result.error_code == "xhs_note_unavailable"
     assert "Cookie" not in (result.error or ""), f"文案仍在猜测: {result.error}"
     assert "重新分享" in (result.error or ""), f"缺少可执行动作: {result.error}"
+
+
+# ── 小红书：熔断作用域 + 短文案门槛（2026-11-23）─────────────────────────
+
+
+def test_xhs_note_uses_scoped_circuit_key():
+    """小红书直抓应打 xiaohongshu:crawl 作用域，与平台其它链路隔离。"""
+    limiter = RecordingLimiter()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            text=(
+                '<meta property="og:title" content="标题">'
+                '<meta property="og:description" content="这是一段足够长的正文内容">'
+            ),
+        )
+
+    extractor = XiaohongshuExtractor(client=_client(handler), limiter=limiter)
+    extractor._fetch_note("note-1")
+
+    assert limiter.calls == ["xiaohongshu"], "限速主体仍是平台名"
+    assert limiter.circuit_keys == ["xiaohongshu:crawl"], "熔断主体应为作用域"
+
+
+@pytest.mark.parametrize(
+    ("html", "expect"),
+    [
+        # 短文案此前被 len>10 门槛静默丢弃
+        ('{"desc":"3 个技巧"}', "3 个技巧"),
+        ('{"desc":"好"}', "好"),
+        # og:description 同理
+        ('<meta property="og:description" content="很短">', "很短"),
+        # 泛化字段 "content" 保留较高门槛，避免抓到噪音
+        ('{"content":"abc"}', ""),
+        ('{"content":"这是一段足够长的内容"}', "这是一段足够长的内容"),
+    ],
+)
+def test_xhs_content_threshold_by_field(html: str, expect: str):
+    """门槛按字段区分：真实文案字段不丢短文本，泛化字段仍过滤噪音。"""
+    assert XiaohongshuExtractor._extract_content(html) == expect

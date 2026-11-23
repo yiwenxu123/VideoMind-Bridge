@@ -39,6 +39,10 @@ logger = logging.getLogger(__name__)
 # 小红书 URL 模式 (xhslink.cn 为 2025 启用的新短链域名, 兼容 .com)
 _XHS_RE = re.compile(r"(?:xiaohongshu\.com/(?:explore|discovery/item)/|xhslink\.(?:com|cn)/)(\w+)")
 _XHS_SHORT_RE = re.compile(r"xhslink\.(?:com|cn)/(\w+)")
+
+# 2026-11-23：熔断作用域。与抖音一致，把"页面直抓"与平台其它链路隔离，
+# 避免本提取器的失败连带熔断同平台下本来可用的兜底（yt-dlp / 本地 ASR）。
+_CIRCUIT_SCOPE = "xiaohongshu:crawl"
 # 2026-11-22：失败原因 → (error_code, 给用户的处置建议)。
 # 措辞原则：陈述事实 + 给出下一步动作，**不做猜测**。
 # 旧文案"可能需要 Cookie"是猜测，会把人引向"上浏览器/配 Cookie"这种又贵又不解决根因的操作。
@@ -226,6 +230,7 @@ class XiaohongshuExtractor(ContentExtractor):
                 note_url,
                 timeout=15.0,
                 limiter=self._limiter,
+                circuit_key=_CIRCUIT_SCOPE,
             )
             html = resp.text
             final_path = resp.url.path or ""
@@ -422,17 +427,20 @@ class XiaohongshuExtractor(ContentExtractor):
     @staticmethod
     def _extract_content(html: str) -> str:
         """提取正文内容"""
-        patterns = [
-            r'<meta\s+property="og:description"\s+content="([^"]*)"',
-            r'"desc"\s*:\s*"([^"]+)"',
-            r'"description"\s*:\s*"([^"]+)"',
-            r'"content"\s*:\s*"([^"]+)"',
+        # 2026-11-23：门槛按字段区分。
+        # 原来统一 `len(text) > 10`，会把"3 个技巧"这类短文案静默丢掉；
+        # 但最后一条 "content" 是泛化字段，容易抓到无关小串，保留较高门槛。
+        patterns: list[tuple[str, int]] = [
+            (r'<meta\s+property="og:description"\s+content="([^"]*)"', 1),
+            (r'"desc"\s*:\s*"([^"]+)"', 1),
+            (r'"description"\s*:\s*"([^"]+)"', 1),
+            (r'"content"\s*:\s*"([^"]+)"', 10),
         ]
-        for p in patterns:
-            m = re.search(p, html)
+        for pattern, min_len in patterns:
+            m = re.search(pattern, html)
             if m:
                 text = m.group(1).strip()
-                if len(text) > 10:
+                if len(text) >= min_len:
                     return text
         return ""
 

@@ -145,6 +145,9 @@ class ContentRouter:
         # 导致"网关没起"“视频不可见”“真风控”这些需要完全不同处置的原因在下游全丢失。
         attempts: list[dict[str, Any]] = []
         last_result: ExtractResult | None = None
+        # 沿途最好的"部分内容"（占位但有正文）。全部链路失败时，与其只回一串报错，
+        # 不如把这份正文一并交出——但 success 仍为 False，不假装成功。
+        best_partial: ExtractResult | None = None
 
         for name in priority:
             extractor = self._get_extractor(name)
@@ -194,6 +197,14 @@ class ContentRouter:
                 if result.is_placeholder:
                     # 占位结果: 仅元信息/说明文本, 不缓存, 继续降级
                     failure_msg = result.error or f"{name}: 仅获取到元信息，无真实内容"
+                    # 只回收**真实文案**，不收合成提示语：
+                    # 判据用提取器显式打的 partial_content 标记，不靠 completeness 猜。
+                    if (result.metadata or {}).get("partial_content") and (
+                        best_partial is None
+                        or len(result.content or "")
+                        > len(best_partial.content or "")
+                    ):
+                        best_partial = result
                     failures.append(failure_msg)
                     attempts.append({
                         "extractor": name,
@@ -248,9 +259,17 @@ class ContentRouter:
             last_result.error_code = (
                 native_code or any_code or last_result.error_code or "extract_failed"
             )
+            if best_partial is not None and len(best_partial.content or "") > len(
+                last_result.content or ""
+            ):
+                last_result.content = best_partial.content
+                last_result.completeness = best_partial.completeness or "meta"
+                last_result.method = best_partial.method or last_result.method
+                last_result.is_placeholder = True
             last_result.metadata = {
                 **(last_result.metadata or {}),
                 "attempts": attempts,
+                "partial_from": best_partial.source if best_partial else None,
             }
             last_result.request_id = request_id or last_result.request_id
             return last_result

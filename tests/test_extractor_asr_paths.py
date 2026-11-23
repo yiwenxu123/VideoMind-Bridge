@@ -65,7 +65,16 @@ def test_douyin_gateway_asr_full(monkeypatch, tmp_path):
     assert result.metadata["api_provider"] == "sensevoice_asr"
 
 
-def test_douyin_gateway_meta_when_download_fails(monkeypatch):
+def test_douyin_gateway_meta_when_download_fails_is_placeholder(monkeypatch):
+    """只拿到文案/标题时必须标为占位，**不能**报成功。
+
+    原断言是 ``assert result.success is True``——等于把这个 bug 固化成契约：
+    路由层看到 success=True 且非占位，会直接返回这份"只有标题"的结果，
+    不再尝试 yt-dlp / ASR，用户永远拿不到视频里真正说的内容。
+    同文件另两个降级分支（无字幕 / 文案过短）本来就是占位语义，这里只是对齐。
+
+    文案本身仍然带回：它是真实内容，只是不完整。
+    """
     extractor = DouyinExtractor()
     monkeypatch.setattr(extractor._client, "get", lambda *a, **k: _gateway_response())
 
@@ -76,10 +85,12 @@ def test_douyin_gateway_meta_when_download_fails(monkeypatch):
 
     result = extractor.extract("https://www.douyin.com/video/123456789012345")
 
-    assert result.success is True
+    assert result.success is False, "只拿到文案不能算成功"
+    assert result.is_placeholder is True, "必须标占位，否则会截断降级链"
     assert result.completeness == "meta"
     assert result.method == "desc"
-    assert "抖音测试描述" in result.content
+    assert "抖音测试描述" in result.content, "文案要保留，不能因为标记不成功就丢掉"
+    assert result.error and "非视频全文" in result.error
 
 
 def _xhs_video_html() -> str:

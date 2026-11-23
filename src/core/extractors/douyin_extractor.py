@@ -337,8 +337,12 @@ class DouyinExtractor(ContentExtractor):
     ) -> ExtractResult | None:
         if len(desc) < 30:
             return None
+        # 2026-11-23：这里原来返回 success=True 且**未设 is_placeholder**，与同文件另两个
+        # 降级分支（"无可用字幕"/"文案过短"）不一致。后果是路由层把它当"真成功"直接返回，
+        # 不再尝试 yt-dlp / ASR——即"只有标题就结束"，拿不到视频里真正说的内容。
+        # 现在按占位处理：内容仍带回（desc 可能有用），但标记为不完整，让链路继续降级。
         return ExtractResult(
-            success=True,
+            success=False,
             platform="douyin",
             title=title or f"抖音视频 {video_id}",
             content=desc,
@@ -347,13 +351,19 @@ class DouyinExtractor(ContentExtractor):
             cost_tier=CostTier.FREE,
             duration_seconds=duration,
             language="zh",
+            is_placeholder=True,
             metadata={
                 "aweme_id": video_id,
                 "author": author,
                 "description": desc[:200],
+                # 显式声明"这里带的是真实文案"，供路由层在全部失败时回收。
+                # 不要靠 completeness/method 猜——同文件另两个降级分支也标 meta，
+                # 但它们的内容是合成的提示语，不该被当成正文交出去。
+                "partial_content": True,
             },
             completeness="meta",
             method="desc",
+            error="仅取到抖音文案/标题（无播放地址或 ASR 不可用），非视频全文",
         )
 
     def _extract_video_id(self, url: str) -> str | None:
