@@ -62,6 +62,42 @@ def _resolve_model_dir() -> Path:
 def _model_ready(model_dir: Path) -> bool:
     return (model_dir / "model.int8.onnx").is_file() and (model_dir / "tokens.txt").is_file()
 
+# 子进程探测超时：import sherpa_onnx 实测约 0.2s，留足冷启动余量即可。
+_PROBE_TIMEOUT_S = 10.0
+# 解释器路径 -> (是否可用, 诊断信息)。capabilities() 会被 /api/v1/capabilities 反复调用，
+# 而探测要起子进程，因此每个解释器在进程生命周期内只探一次。
+_RUNTIME_PROBE_CACHE: dict[str, tuple[bool, str]] = {}
+
+
+def _probe_runtime(python: str) -> tuple[bool, str]:
+    """验证该解释器**真的**能 import sherpa_onnx + soundfile。
+
+    2026-11-24：此前只检查三样文件是否存在。换机器后 _resolve_python 找不到专用 venv
+    会回落到 sys.executable，而主 venv 没有 sherpa-onnx —— 于是 capabilities 报
+    available=true，真跑转写才失败。这里用一次子进程把「可运行」变成可验证的事实，
+    失败时把原因带进 notes，便于直接定位（见 scripts/install_sensevoice.sh）。
+    """
+    cached = _RUNTIME_PROBE_CACHE.get(python)
+    if cached is not None:
+        return cached
+    try:
+        proc = subprocess.run(
+            [python, "-c", "import sherpa_onnx, soundfile"],
+            capture_output=True,
+            text=True,
+            timeout=_PROBE_TIMEOUT_S,
+        )
+        if proc.returncode == 0:
+            result: tuple[bool, str] = (True, "")
+        else:
+            lines = [line for line in (proc.stderr or proc.stdout or "").splitlines() if line.strip()]
+            detail = lines[-1][:200] if lines else f"退出码 {proc.returncode}"
+            result = (False, detail)
+    except (OSError, subprocess.SubprocessError) as exc:
+        result = (False, str(exc)[:200])
+    _RUNTIME_PROBE_CACHE[python] = result
+    return result
+
 
 def _ensure_wav(audio_path: Path) -> tuple[Path, Path | None]:
     """返回 (16k 单声道 wav, 需清理的临时文件)。"""
@@ -98,7 +134,15 @@ class SenseVoiceTranscriber(Transcriber):
             missing.append(f"解释器缺失({python})")
         if not _model_ready(model_dir):
             missing.append(f"模型缺失({model_dir})")
-        notes = "; ".join(missing) if missing else "子进程调用，需 sherpa-onnx+soundfile"
+        # 三样文件齐了还不算可用：解释器可能没装 sherpa-onnx。真探一次，结果带进 notes。
+        if not missing:
+            probe_ok, probe_detail = _probe_runtime(python)
+            if not probe_ok:
+                missing.append(f"解释器缺少 sherpa-onnx/soundfile({probe_detail})")
+        if missing:
+            notes = "; ".join(missing)
+        else:
+            notes = "子进程调用，已确认解释器可 import sherpa-onnx+soundfile"
         return Capabilities(
             name=self.name,
             available=not missing,

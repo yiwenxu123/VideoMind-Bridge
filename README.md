@@ -54,6 +54,25 @@ pip install .
 pip install ".[gui]"    # 需要桌面 GUI 时追加
 ```
 
+### ASR 后端（可选，默认链第一级 SenseVoice）
+
+无字幕视频靠 ASR 兜底，默认链是 `sensevoice → faster_whisper → dashscope`
+（单一常量定义在 `src/models/config.py` 的 `DEFAULT_ASR_CHAIN`）。
+其中 SenseVoice 的依赖**故意不进主 venv**（sherpa-onnx 体积大），要单独准备解释器与模型：
+
+```bash
+./scripts/install_sensevoice.sh --check   # 先体检：只读，不下载不安装
+./scripts/install_sensevoice.sh           # 安装/补全（幂等，已就绪直接跳过）
+```
+
+它做三件事：建 `~/.cache/sensevoice/venv` 并装 `sherpa-onnx + soundfile`、
+把模型下到 `~/.cache/sherpa-onnx/sense-voice/`（约 230MB）、用 1 秒静音 wav 真跑一次转写自检。
+国内网络可加 `--index-url https://pypi.tuna.tsinghua.edu.cn/simple`。
+
+不装也能跑：`/api/v1/capabilities` 会把 sensevoice 标成 `available=false` 并写明缺什么，
+提取链自动落到下一级 `faster_whisper`。自 2026-11-24 起这个判断是**真探测**
+（起子进程试 `import sherpa_onnx, soundfile`），不再只看文件是否存在。
+
 ### Docker 部署（服务端）
 
 ```bash

@@ -15,6 +15,7 @@ uv run python -m src.cli /path/to/video.mp4 --targets obsidian  # 本地文件�
 python main.py                  # GUI 模式
 python main.py --api            # API 服务 (端口 8787; 控制台 /console)
 python main.py --mcp            # MCP Server (stdio JSON-RPC)
+./scripts/install_sensevoice.sh --check  # SenseVoice（默认 ASR 第一级）体检；去掉 --check 即安装
 pm2 start ecosystem.config.cjs  # 本机 PM2 常驻 API 服务
 pytest tests/ -v                # 运行测试
 ruff check src/                 # 代码风格检查
@@ -116,6 +117,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **下载/转录取消**: 取消令牌为 `threading.Event`，贯穿 TaskManager → DownloadService → yt-dlp progress hook（抛 `DownloadCancelled`）与转录片段边界；取消/超时统一抛 `OperationCancelledError`（终态 CANCELLED 而非 FAILED）。CLI `--timeout` 为整体超时（下载+转录共享令牌）。下载中断保留 `.part`，同 URL 重建任务即断点续传（临时目录按 URL 哈希固定）。删除任务有 tombstone，executor 收尾不会把已删任务复活写库
 - **平台请求治理**: 平台自有 HTTP 请求走 `PlatformRateLimiter`（B站/抖音/小红书/YouTube），本地网关、第三方 API 和 CDN 下载不套平台 limiter；yt-dlp 通过 `VMB_YTDLP_SLEEP_REQUESTS`、`VMB_YTDLP_RETRIES` 等参数节流，平台熔断时跳过 yt-dlp 兜底。小红书可选 `VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE`；抖音用 `DOUYIN_COOKIES_FILE`。`GET /api/v1/metrics` 返回进程内平台计数，`VMB_LOG_JSON=1` 开启 JSON 日志。
 - **GUI 使用 PySide6**: 已移到 `gui` extra；服务端/CLI/MCP 不需要安装，GUI 测试在缺依赖时自动跳过
+- **SenseVoice 依赖仓库外资产**: 默认 ASR 第一级需要 `~/.cache/sensevoice/venv`（sherpa-onnx + soundfile）与 `~/.cache/sherpa-onnx/sense-voice/`（`model.int8.onnx` + `tokens.txt`）。2026-11-24 起 `capabilities()` 会真起子进程探测 `import sherpa_onnx, soundfile`（按解释器缓存，超时 10s），**文件齐但解释器缺依赖时 `available=false`**——别再把「文件存在」当成「能用」。安装/体检：`scripts/install_sensevoice.sh [--check]`
 - **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)
 - **v2 引擎可独立导入**: `from src.core import ContentRouter` 不依赖 GUI；ASR 适配器在需要时通过 `src/services/config_manager` 读取密钥

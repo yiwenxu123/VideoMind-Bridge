@@ -236,3 +236,19 @@ info_plist={
 - [PyInstaller 文档](https://pyinstaller.readthedocs.io/)
 - [Apple 代码签名指南](https://developer.apple.com/documentation/xcode/creating-distribution-signed-code-for-the-mac)
 - [macOS 应用公证](https://developer.apple.com/documentation/xcode/notarizing_macos_software_before_distribution)
+## 可选依赖：SenseVoice（ASR）
+
+打包后的应用同样**不自带** SenseVoice：默认 ASR 链第一级依赖仓库外的专用解释器与模型，
+两者都在 `~/.cache` 下，既不进 .app 包，也不进 git：
+
+```bash
+./scripts/install_sensevoice.sh --check   # 体检（只读）
+./scripts/install_sensevoice.sh           # 建 venv + 装 sherpa-onnx/soundfile + 下模型 + 自检
+```
+
+- 解释器：`~/.cache/sensevoice/venv/bin/python`（可用 `VMB_SENSEVOICE_PYTHON` 覆盖）
+- 模型：`~/.cache/sherpa-onnx/sense-voice/`（可用 `VMB_SENSEVOICE_MODEL_DIR` 覆盖，约 230MB）
+- 缺失时的行为：`/api/v1/capabilities` 报 `available=false` 并写明缺什么，提取链自动落到 `faster_whisper`
+
+若要让 .app 免安装，可在打包前把 venv 与模型放进应用资源目录并设置上面两个环境变量
+（该路径未实测，属打包阶段的独立工作）。

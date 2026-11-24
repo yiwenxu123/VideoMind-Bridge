@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -235,3 +236,96 @@ def test_sensevoice_nonzero_exit_raises(monkeypatch, tmp_path):
     with pytest.raises(AsrFailed) as exc:
         sv_mod.SenseVoiceTranscriber().transcribe(MediaRef(path=wav), TranscribeOptions())
     assert "model files missing" in str(exc.value)
+
+
+# ---- 2026-11-24：capabilities 真探测解释器依赖（只存在文件不代表能跑）----
+
+
+def _fake_python_and_model(monkeypatch, tmp_path):
+    """把三重检查都搭成「文件齐全」，让 tests 只关心探测这一步。"""
+    script = tmp_path / "sensevoice_transcribe.py"
+    script.write_text("", encoding="utf-8")
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    monkeypatch.setattr(sv_mod, "_resolve_script", lambda: script)
+    monkeypatch.setattr(sv_mod, "_resolve_python", lambda: sys.executable)
+    monkeypatch.setattr(sv_mod, "_resolve_model_dir", lambda: model_dir)
+    monkeypatch.setattr(sv_mod, "_model_ready", lambda _dir: True)
+    monkeypatch.setattr(sv_mod, "_RUNTIME_PROBE_CACHE", {})
+
+
+def test_sensevoice_capabilities_unavailable_when_probe_fails(monkeypatch, tmp_path):
+    """文件齐全但解释器没装 sherpa-onnx 时必须报不可用，并把原因写进 notes。"""
+    _fake_python_and_model(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        sv_mod,
+        "_probe_runtime",
+        lambda python: (False, "ModuleNotFoundError: No module named 'sherpa_onnx'"),
+    )
+
+    caps = sv_mod.SenseVoiceTranscriber().capabilities()
+
+    assert caps.available is False
+    assert "sherpa-onnx" in caps.notes
+
+
+def test_sensevoice_capabilities_available_when_probe_passes(monkeypatch, tmp_path):
+    _fake_python_and_model(monkeypatch, tmp_path)
+    monkeypatch.setattr(sv_mod, "_probe_runtime", lambda python: (True, ""))
+
+    caps = sv_mod.SenseVoiceTranscriber().capabilities()
+
+    assert caps.available is True
+    assert "已确认" in caps.notes
+
+
+def test_probe_runtime_caches_per_interpreter(monkeypatch):
+    """capabilities 会被 /api/v1/capabilities 反复调用，子进程只能起一次。"""
+    calls: list[list[str]] = []
+
+    class _Ok:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    def _run(args, **kwargs):
+        calls.append(list(args))
+        return _Ok()
+
+    monkeypatch.setattr(sv_mod, "_RUNTIME_PROBE_CACHE", {})
+    monkeypatch.setattr(sv_mod.subprocess, "run", _run)
+
+    assert sv_mod._probe_runtime("/fake/python") == (True, "")
+    assert sv_mod._probe_runtime("/fake/python") == (True, "")
+    assert len(calls) == 1
+    assert calls[0][1:] == ["-c", "import sherpa_onnx, soundfile"]
+
+
+def test_probe_runtime_reports_import_error_detail(monkeypatch):
+    class _Bad:
+        returncode = 1
+        stdout = ""
+        stderr = "Traceback (most recent call last):\nModuleNotFoundError: No module named 'soundfile'\n"
+
+    monkeypatch.setattr(sv_mod, "_RUNTIME_PROBE_CACHE", {})
+    monkeypatch.setattr(sv_mod.subprocess, "run", lambda *a, **k: _Bad())
+
+    ok, detail = sv_mod._probe_runtime("/fake/python")
+
+    assert ok is False
+    assert "soundfile" in detail
+
+
+def test_probe_runtime_survives_timeout(monkeypatch):
+    """探测超时不能被当成「可用」，也不能把异常抛给 /capabilities。"""
+
+    def _timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="python", timeout=1)
+
+    monkeypatch.setattr(sv_mod, "_RUNTIME_PROBE_CACHE", {})
+    monkeypatch.setattr(sv_mod.subprocess, "run", _timeout)
+
+    ok, detail = sv_mod._probe_runtime("/fake/python")
+
+    assert ok is False
+    assert detail
