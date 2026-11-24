@@ -44,10 +44,6 @@ def _base_url() -> str:
     return os.getenv("VMB_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
 
 
-def _embedded_enabled() -> bool:
-    return os.getenv("VMB_MCP_EMBEDDED", "").strip().lower() not in {"", "0", "false"}
-
-
 def _headers() -> dict[str, str]:
     headers = {"X-Consumer-Id": CONSUMER_ID}
     token = os.getenv("VIDEOMIND_API_TOKEN", "").strip()
@@ -65,8 +61,8 @@ def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> d
     except httpx.ConnectError as exc:
         raise RuntimeError(
             f"无法连接 VideoMind 服务 ({_base_url()})：{exc}\n"
-            f"请先启动服务：pm2 start videomind-api（或 pm2 list 检查状态）。\n"
-            f"若确实需要离线运行，可设 VMB_MCP_EMBEDDED=1 让 MCP 自带引擎。"
+            f"请先启动服务：pm2 start videomind-api（或 pm2 list 检查状态），"
+            f"例如 curl {_base_url()}/health 验证。"
         ) from exc
     except httpx.TimeoutException as exc:
         raise RuntimeError(f"请求 {path} 超时：{exc}") from exc
@@ -141,55 +137,9 @@ def _build_remote():
     return mcp
 
 
-# ── 兜底：进程内引擎（VMB_MCP_EMBEDDED=1 时使用）────────────────────────
-
-
-def _args(**kwargs: Any) -> dict[str, Any]:
-    """丢掉未提供(None)的参数（旧实现用 args.get 取默认值，塞 None 会覆盖默认）。"""
-    return {k: v for k, v in kwargs.items() if v is not None}
-
-
-def _build_embedded():
-    from mcp.server.mcpserver import MCPServer
-
-    from .server import MCPServer as LegacyCore
-
-    core = LegacyCore()
-    mcp = MCPServer("VideoMind Bridge", version="3.0.0")
-
-    @mcp.tool(name="extract", description="提取文字内容（进程内引擎，VMB_MCP_EMBEDDED=1）")
-    def extract(
-        url: Annotated[str, Field(description="视频或笔记链接")],
-        mode: Annotated[str, Field(description="auto / prescreen")] = "auto",
-        cost_tier: Annotated[str, Field(description="成本上限")] = "cheap",
-        asr_language: Annotated[str | None, Field(description="ASR 语言提示")] = None,
-    ) -> dict:
-        if mode == "prescreen":
-            return core._call_prescreen_video(_args(url=url, mode="quick"))
-        return core._call_extract_video(
-            _args(url=url, cost_tier=cost_tier, asr_language=asr_language)
-        )
-
-    @mcp.tool(name="capabilities", description="能力矩阵（进程内）")
-    def capabilities() -> dict:
-        return core._call_capabilities({})
-
-    @mcp.tool(name="comments", description="采集评论（进程内）")
-    def comments(
-        url: Annotated[str, Field(description="视频或笔记链接")],
-        limit: Annotated[int, Field(description="评论条数上限")] = 20,
-        sort: Annotated[str, Field(description="hot / time")] = "hot",
-    ) -> dict:
-        return core._call_get_comments(_args(url=url, limit=limit, sort=sort))
-
-    return mcp
-
-
-def build_server(embedded: bool | None = None):
-    """构建 MCP server。默认薄适配器；`embedded=True` 或环境变量可退回进程内引擎。"""
-    if embedded is None:
-        embedded = _embedded_enabled()
-    return _build_embedded() if embedded else _build_remote()
+def build_server():
+    """构建 MCP server（唯一形态：薄适配器）。"""
+    return _build_remote()
 
 
 def main() -> None:

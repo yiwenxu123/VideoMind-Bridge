@@ -7,8 +7,6 @@ from src.models.task import (
     ExportContext,
     ExportResult,
     ExportTarget,
-    ProcessingMode,
-    TaskStatus,
     TranscriptSegment,
     VideoMetadata,
 )
@@ -34,21 +32,6 @@ def test_video_metadata():
     print("  ✓ VideoMetadata 测试通过")
 
 
-def test_processing_mode():
-    """测试 ProcessingMode 枚举"""
-    print("\n=== 测试 ProcessingMode ===")
-
-    assert ProcessingMode.FULL.value == "full"
-    assert ProcessingMode.DOWNLOAD_ONLY.value == "download_only"
-    assert ProcessingMode.TRANSCRIBE_ONLY.value == "transcribe_only"
-
-    # 测试从字符串创建
-    mode = ProcessingMode("full")
-    assert mode == ProcessingMode.FULL
-
-    print("  ✓ ProcessingMode 测试通过")
-
-
 def test_export_target():
     """测试 ExportTarget 枚举"""
     print("\n=== 测试 ExportTarget ===")
@@ -58,29 +41,6 @@ def test_export_target():
     assert ExportTarget.NOTION.value == "notion"
 
     print("  ✓ ExportTarget 测试通过")
-
-
-def test_task_status():
-    """测试 TaskStatus 枚举"""
-    print("\n=== 测试 TaskStatus ===")
-
-    statuses = [
-        TaskStatus.PENDING,
-        TaskStatus.DOWNLOADING,
-        TaskStatus.TRANSCRIBING,
-        TaskStatus.AI_PROCESSING,
-        TaskStatus.EXPORTING,
-        TaskStatus.PAUSED,
-        TaskStatus.COMPLETED,
-        TaskStatus.FAILED,
-        TaskStatus.CANCELLED
-    ]
-
-    assert len(statuses) == 9
-    for status in statuses:
-        assert isinstance(status.value, str)
-
-    print("  ✓ TaskStatus 测试通过")
 
 
 def test_transcript_segment():
@@ -222,9 +182,7 @@ if __name__ == "__main__":
 
     all_passed = True
     all_passed &= test_video_metadata()
-    all_passed &= test_processing_mode()
     all_passed &= test_export_target()
-    all_passed &= test_task_status()
     all_passed &= test_transcript_segment()
     all_passed &= test_export_result()
     all_passed &= test_export_context()

@@ -1,23 +1,22 @@
-"""数据模型模块"""
+"""数据模型模块
+
+（2026-11-25 A2：v1 任务模型 VideoTask/TaskStatus/ProcessingMode/TaskHistory 已删除）
+"""
 
 from .task import (
     ExportContext,
     ExportResult,
     ExportTarget,
-    ProcessingMode,
-    TaskStatus,
+    Highlight,
     TranscriptSegment,
     VideoMetadata,
-    VideoTask,
 )
 
 __all__ = [
-    "VideoTask",
     "VideoMetadata",
-    "ProcessingMode",
     "ExportTarget",
     "ExportContext",
     "ExportResult",
-    "TaskStatus",
+    "Highlight",
     "TranscriptSegment",
 ]

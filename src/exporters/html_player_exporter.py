@@ -4,8 +4,7 @@ import html
 import json
 from pathlib import Path
 
-from ..models.task import ExportContext, ExportResult, ExportTarget
-from ..services.ai_service import Highlight
+from ..models.task import ExportContext, ExportResult, ExportTarget, Highlight
 from ..utils.media_utils import extract_highlights_from_context
 from .base import BaseExporter
 

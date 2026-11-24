@@ -3,36 +3,25 @@
 VideoMind Bridge - CLI 入口
 
 使用示例 (使用 uv):
-    uv run python -m src.cli "https://bilibili.com/video/BV1xx" --mode full --model small
-    uv run python -m src.cli "https://bilibili.com/video/BV1xx" --mode transcribe --model tiny
-    uv run python -m src.cli "https://bilibili.com/video/BV1xx" --mock  # 测试模式
+    uv run python -m src.cli "https://bilibili.com/video/BV1xx"          # 提取正文
+    uv run python -m src.cli "https://bilibili.com/video/BV1xx" --smart  # 预筛 + 成本感知
+    uv run python -m src.cli ~/Downloads/manual.mp4                       # 本地文件 → 转写
+    uv run python -m src.cli --list-extractors                            # 能力发现
 
-或使用虚拟环境:
-    source .venv/bin/activate
-    python -m src.cli "https://bilibili.com/video/BV1xx" --mode full
+v1 流水线（下载 → 转录 → AI 摘要 → 导出）已于 2026-11-25（A2）移除；
+本地文件只剩「转写」这一步，走 v2 的 ASR 降级链。
 """
 
 import argparse
 import json
 import sys
-import threading
-import time
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
 
 from rich.console import Console
-from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from src.models.task import ExportContext, ExportTarget, Highlight, ProcessingMode, VideoMetadata
-from src.services.ai_service import AIService
-from src.services.download_service import DownloadService
-from src.services.export_orchestrator import ExportOrchestrator
+from src.models.task import ExportTarget, Highlight, VideoMetadata
 from src.services.local_media import is_remote_url
-from src.services.transcribe_service import TranscribeService
-from src.utils.exceptions import OperationCancelledError
-from src.utils.media_utils import generate_srt
 
 console = Console()
 
@@ -40,57 +29,31 @@ console = Console()
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(
-        description="VideoMind Bridge - 视频知识处理工具",
+        description="VideoMind Bridge - 多平台内容提取（v2 引擎）",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-示例:
-  # 完整处理（下载视频+音频、转录、AI摘要、导出）
-  %(prog)s "https://bilibili.com/video/BV1xx" --mode full --model small
+        epilog="""示例:
+  # 提取正文（B站/YouTube/抖音/小红书）
+  %(prog)s "https://bilibili.com/video/BV1xx"
 
-  # 处理本地文件（跳过下载，适合视频号等无法直接链接下载的素材）
-  %(prog)s ~/Downloads/video.mp4 --targets obsidian
+  # 智能模式（先预筛，再按成本感知提取）
+  %(prog)s "https://bilibili.com/video/BV1xx" --smart
 
-  # 仅转录（不下载视频，只下载音频）
-  %(prog)s "https://bilibili.com/video/BV1xx" --mode transcribe --model tiny
+  # 本地文件（手动下载的视频）→ 走 ASR 降级链转写
+  %(prog)s ~/Downloads/manual.mp4
 
-  # 测试模式（使用模拟AI数据）
-  %(prog)s "https://bilibili.com/video/BV1xx" --mock
+  # 提取即归档
+  %(prog)s "https://bilibili.com/video/BV1xx" --archive obsidian,local
 
-  # 不保留视频（节省空间）
-  %(prog)s "https://bilibili.com/video/BV1xx" --no-keep-video
-
-  # 指定视频质量
-  %(prog)s "https://bilibili.com/video/BV1xx" --video-quality 720p
+  # 能力发现
+  %(prog)s --list-extractors --list-asr
         """
     )
 
     parser.add_argument("url", nargs="?", help="视频链接")
     parser.add_argument(
-        "--mode",
-        choices=["full", "download", "transcribe"],
-        default="full",
-        help="处理模式 (默认: full)"
-    )
-    parser.add_argument(
-        "--model",
-        choices=["tiny", "base", "small", "medium"],
-        default="small",
-        help="Whisper 模型大小 (默认: small)"
-    )
-    parser.add_argument(
-        "--targets",
-        default="local",
-        help="导出目标，逗号分隔 (默认: local，可选: obsidian,local,notion)"
-    )
-    parser.add_argument(
         "--output-dir",
         default=str(Path.home() / "Downloads" / "VideoMind"),
         help="输出目录 (默认: ~/Downloads/VideoMind)"
-    )
-    parser.add_argument(
-        "--mock",
-        action="store_true",
-        help="测试模式 - 使用模拟数据，不调用真实 AI API"
     )
     parser.add_argument(
         "--obsidian-vault",
@@ -110,31 +73,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     # 新增视频控制参数
     parser.add_argument(
-        "--keep-video",
-        dest="keep_video",
-        action="store_true",
-        default=True,
-        help="保留视频文件 (默认: True)"
-    )
-    parser.add_argument(
-        "--no-keep-video",
-        dest="keep_video",
-        action="store_false",
-        help="不保留视频文件，仅下载音频 (节省空间)"
-    )
-    parser.add_argument(
-        "--video-quality",
-        default="best",
-        choices=["best", "worst", "1080p", "720p", "480p"],
-        help="视频质量 (默认: best，可选: worst/1080p/720p/480p)"
-    )
-    parser.add_argument(
-        "--stdin",
-        action="store_true",
-        default=False,
-        help="从 stdin 读取 URL（每行一个），支持管道"
-    )
-    parser.add_argument(
         "--json",
         dest="json_output",
         action="store_true",
@@ -142,31 +80,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="以 JSON 格式输出结果（适合 Agent/脚本调用）"
     )
     parser.add_argument(
-        "--output-file",
-        type=str,
-        default=None,
-        help="将结果写入文件而非 stdout"
-    )
-    parser.add_argument(
-        "--timeout",
-        type=int,
-        default=600,
-        help="整体超时时间（秒，默认 600）"
-    )
-    parser.add_argument(
         "--quiet",
         action="store_true",
         default=False,
         help="静默模式，仅输出最终结果"
     )
-    parser.add_argument(
-        "--cookie-browser",
-        default=None,
-        choices=["chrome", "safari", "firefox", "edge", "brave"],
-        help="从浏览器读取 cookies（国内平台如抖音/小红书需要）"
-    )
-
-    # === v2 新参数 ===
     parser.add_argument(
         "--prescreen", "-p",
         action="store_true",
@@ -699,364 +617,96 @@ def _run_config_set(key: str, value: str, json_output: bool = False) -> int:
 
 
 def main() -> int:
-    """主入口"""
-    args = parse_args()
-    start_time = time.time()
+    """主入口
 
-    # 配置管理 (不依赖 URL)
+    A2（2026-11-25）后只有三种行为：配置管理、能力发现、提取（远程 URL 或本地文件）。
+    不带参数直接打印用法并以退出码 2 结束 —— 不再有「隐式默认模式」。
+    """
+    args = parse_args()
+
     if args.config_list:
         return _run_config_list(args)
     if args.config_set:
         return _run_config_set(args.config_set[0], args.config_set[1], json_output=args.json_output)
 
-    # 本地媒体文件没有可提取的 URL，直接走 v1: 跳过下载 → 转录 → 摘要 → 导出
-    if args.url and not is_remote_url(args.url) and Path(args.url).expanduser().is_file():
-        return _process_single(args, start_time)
-
-    # v2 提取引擎为默认路径 (成本感知路由, 无需下载/转录, Agent 友好):
-    # 仅当显式请求 v1 专属参数时才走旧版 下载→转录→摘要 流程
-    v1_requested = (
-        args.mode != "full"
-        or args.model != "small"
-        or args.targets != "local"
-        or args.output_dir != str(Path.home() / "Downloads" / "VideoMind")
-        or not args.keep_video
-        or args.video_quality != "best"
-        or args.mock
-    )
-    if (
-        args.prescreen or args.smart or args.prescreen_only
-        or args.cost_tier or args.list_extractors or args.list_asr
-        or not v1_requested
-    ):
+    # 能力发现不需要 URL
+    if args.list_extractors or args.list_asr:
         return run_v2_extraction(args)
 
-    # stdin 模式：每行一个 URL，JSONL 批量输出
-    if args.stdin:
-        urls = [line.strip() for line in sys.stdin if line.strip()]
-        has_error = False
-        for url in urls:
-            import copy
-            a = copy.copy(args)
-            a.url = url
-            a.json_output = True
-            a.quiet = True
-            if _process_single(a, time.time()) != 0:
-                has_error = True
-        return 1 if has_error else 0
-
-    return _process_single(args, start_time)
-
-
-def _process_single(args: argparse.Namespace, start_time: float) -> int:
-    """处理单个视频链接或本地媒体文件"""
-    use_json = args.json_output
-    use_quiet = args.quiet or use_json
-    source_is_local = bool(
-        args.url and not is_remote_url(args.url) and Path(args.url).expanduser().is_file()
-    )
-
-    out_file = open(args.output_file, "a", encoding="utf-8") if args.output_file else None  # noqa: SIM115
-
-    # --timeout: 整体超时令牌, 下载与转录共享; 到时在各自的取消检查点中断
-    cancel_event = threading.Event()
-    if getattr(args, "timeout", 0) and args.timeout > 0:
-        timeout_timer = threading.Timer(args.timeout, cancel_event.set)
-        timeout_timer.daemon = True
-        timeout_timer.start()
-
-    def _write_json(data: dict) -> None:
-        text = json.dumps(data, ensure_ascii=False, indent=2)
-        if out_file:
-            out_file.write(text + "\n")
-        else:
-            print(text)
-
-    if not use_quiet:
-        video_status = "保留视频" if args.keep_video else "仅音频"
-        console.print(Panel.fit(
-            "[bold cyan]VideoMind Bridge[/bold cyan] - 视频知识处理工具\n"
-            f"模式: [green]{args.mode}[/green] | "
-            f"模型: [green]{args.model}[/green] | "
-            f"目标: [green]{args.targets}[/green] | "
-            f"视频: [green]{video_status}[/green]",
-            title="🎬",
-            border_style="cyan"
-        ))
-
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    targets = parse_targets(args.targets)
-    processing_mode = {
-        "full": ProcessingMode.FULL,
-        "download": ProcessingMode.DOWNLOAD_ONLY,
-        "transcribe": ProcessingMode.TRANSCRIBE_ONLY,
-    }[args.mode]
-
-    download_service = DownloadService(output_dir)
-    transcribe_service = TranscribeService(model_size=args.model)
-    ai_service = None
-    if processing_mode == ProcessingMode.FULL and not args.mock:
-        try:
-            ai_service = AIService()
-        except ValueError as e:
-            if not use_quiet:
-                console.print(f"[yellow]警告: {e}[/yellow]")
-                console.print("[yellow]将使用 mock 模式继续...[/yellow]")
-            ai_service = AIService(mock=True)
-    elif args.mock:
-        ai_service = AIService(mock=True)
-
-    video_path: Path | None = None
-    audio_path: Path | None = None
-    metadata: VideoMetadata | None = None
-    transcript_result = None
-    summary_result = None
-    highlights: list[Highlight] = []
-    export_results_list: list = []
-
-    if not use_quiet:
-        progress_ctx: Any = Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console,
+    if not args.url:
+        print(
+            "用法: python -m src.cli <URL 或本地文件> [--smart|--prescreen|--archive ...]\n"
+            "       python -m src.cli --list-extractors | --list-asr | --config-list\n"
+            "提取远程链接用 URL；本地文件只会被转写（v1 的下载/AI 摘要已移除）。",
+            file=sys.stderr,
         )
-    else:
-        progress_ctx = _DummyProgress()
+        return 2
 
-    with progress_ctx:
-        try:
-            result = download_service.download(
-                args.url,
-                download_video=args.keep_video,
-                video_quality=args.video_quality,
-                cookies_from_browser=args.cookie_browser,
-                cancel_event=cancel_event,
+    if not is_remote_url(args.url):
+        return _run_local_asr(args)
+
+    return run_v2_extraction(args)
+
+
+def _run_local_asr(args: argparse.Namespace) -> int:
+    """本地文件 → 只做转写（复用 v2 的 ASR 降级链）。
+
+    存在的理由：有些平台（视频号等）拿不到直链，只能人先手动下载，再把语音变成文字。
+    这是「转写」这一项能力的延续，不是 v1 流水线复活 —— 没有下载、没有 AI 摘要。
+    """
+    import tempfile
+
+    from src.core.asr import MediaRef, TranscribeOptions, transcribe_with_chain
+    from src.core.media import to_16k_mono_wav
+
+    src = Path(args.url).expanduser()
+    if not src.is_file():
+        print(f"文件不存在: {src}", file=sys.stderr)
+        return 2
+
+    chain: list[str] | None = None
+    if args.asr_chain:
+        chain = [x.strip() for x in args.asr_chain.split(",") if x.strip()]
+    elif args.asr:
+        chain = [args.asr.strip()]
+
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            wav = to_16k_mono_wav(src, Path(tmp) / "audio.wav")
+            transcript = transcribe_with_chain(
+                MediaRef(path=wav),
+                TranscribeOptions(language=args.asr_language),
+                chain=chain,
             )
-            video_path = result.video_path
-            audio_path = result.audio_path
-            metadata = result.metadata
+    except Exception as exc:  # noqa: BLE001 - CLI 边界，统一转成可读错误
+        print(f"转写失败: {exc}", file=sys.stderr)
+        return 1
 
-            if not use_quiet:
-                console.print(f"  [dim]标题: {metadata.title}[/dim]")
-                console.print(f"  [dim]UP主: {metadata.author}[/dim]")
-                console.print(f"  [dim]时长: {metadata.duration//60}分{metadata.duration%60}秒[/dim]")
-                if video_path:
-                    console.print(f"  [dim]视频: {video_path.name}[/dim]")
-                console.print(f"  [dim]音频: {audio_path.name}[/dim]")
-        except OperationCancelledError as e:
-            action = "读取本地文件" if source_is_local else "下载"
-            if use_json:
-                _write_json(_build_json_result(
-                    success=False, url=args.url, mode=args.mode,
-                    error=str(e), error_step="download",
-                    elapsed=time.time() - start_time,
-                ))
-            else:
-                reason = "超时" if e.error_code == "TIMEOUT" else "已取消"
-                console.print(f"[yellow]⏹ {action}{reason}: {e.message}[/yellow]")
-            return 1
-        except Exception as e:
-            if use_json:
-                _write_json(_build_json_result(
-                    success=False, url=args.url, mode=args.mode,
-                    error=str(e), error_step="download",
-                    elapsed=time.time() - start_time,
-                ))
-            else:
-                console.print(
-                    f"[red]✗ {'读取本地文件失败' if source_is_local else '下载失败'}: {e}[/red]"
-                )
-            return 1
-
-        if processing_mode == ProcessingMode.DOWNLOAD_ONLY:
-            elapsed = time.time() - start_time
-            if use_json:
-                _write_json(_build_json_result(
-                    success=True, url=args.url, mode=args.mode,
-                    metadata=metadata, video_path=video_path, audio_path=audio_path,
-                    elapsed=elapsed,
-                ))
-            else:
-                console.print(
-                    "\n[green]✓ 本地文件已就绪![/green]"
-                    if source_is_local
-                    else "\n[green]✓ 下载完成![/green]"
-                )
-                if video_path:
-                    console.print(f"  [dim]视频: {video_path}[/dim]")
-                console.print(f"  [dim]音频: {audio_path}[/dim]")
-            return 0
-
-        try:
-            transcript_result = transcribe_service.transcribe(
-                audio_path,
-                language="zh",
-                cancel_event=cancel_event,
-            )
-
-            if not use_quiet:
-                console.print(f"  [dim]语言: {transcript_result.language} ({transcript_result.language_probability:.0%})[/dim]")
-                console.print(f"  [dim]片段: {len(transcript_result.segments)} 个[/dim]")
-        except OperationCancelledError as e:
-            if use_json:
-                _write_json(_build_json_result(
-                    success=False, url=args.url, mode=args.mode,
-                    metadata=metadata, video_path=video_path, audio_path=audio_path,
-                    error=str(e), error_step="transcribe",
-                    elapsed=time.time() - start_time,
-                ))
-            else:
-                reason = "超时" if e.error_code == "TIMEOUT" else "已取消"
-                console.print(f"[yellow]⏹ 转录{reason}: {e.message}[/yellow]")
-            return 1
-        except Exception as e:
-            if use_json:
-                _write_json(_build_json_result(
-                    success=False, url=args.url, mode=args.mode,
-                    metadata=metadata, video_path=video_path, audio_path=audio_path,
-                    error=str(e), error_step="transcribe",
-                    elapsed=time.time() - start_time,
-                ))
-            else:
-                console.print(f"[red]✗ 转录失败: {e}[/red]")
-            return 1
-
-        if processing_mode == ProcessingMode.TRANSCRIBE_ONLY:
-            srt_path = audio_path.with_suffix(".srt")
-            srt_content = generate_srt(transcript_result.segments)
-            srt_path.write_text(srt_content, encoding="utf-8")
-            elapsed = time.time() - start_time
-            if use_json:
-                json_result = _build_json_result(
-                    success=True, url=args.url, mode=args.mode,
-                    metadata=metadata, audio_path=audio_path,
-                    transcript_result=transcript_result,
-                    elapsed=elapsed,
-                )
-                json_result["transcript"]["srt_path"] = str(srt_path)
-                _write_json(json_result)
-            else:
-                console.print("\n[green]✓ 转录完成![/green]")
-                console.print(f"  [dim]SRT: {srt_path}[/dim]")
-            return 0
-
-        if ai_service:
-            try:
-                summary_result = ai_service.summarize(
-                    transcript=transcript_result.full_text,
-                    title=metadata.title
-                )
-                highlights = summary_result.highlights
-                if not use_quiet:
-                    console.print(f"  [dim]总结: {summary_result.summary[:50]}...[/dim]")
-                    console.print(f"  [dim]时间轴: {len(highlights)} 个要点[/dim]")
-            except Exception as e:
-                if not use_quiet:
-                    console.print(f"[red]✗ AI 摘要失败: {e}[/red]")
-                summary_result = None
-                highlights = []
-        else:
-            summary_result = None
-            highlights = []
-
-    if not use_quiet:
-        console.print("\n[cyan]导出到目标...[/cyan]")
-
-    export_context = ExportContext(
-        task_id=uuid4(),
-        video_metadata=metadata,
-        video_path=video_path,
-        audio_path=audio_path,
-        transcript_segments=transcript_result.segments,
-        transcript_text=transcript_result.formatted_text,
-        ai_summary=summary_result.summary if summary_result else None,
-        config={
-            "highlights": [{"time": h.time, "seconds": h.seconds, "content": h.content} for h in highlights]
-        }
-    )
-
-    export_config = {
-        "local_output_path": output_dir,
-        "organize_by": "date",
-        "obsidian_vault_path": Path(args.obsidian_vault) if args.obsidian_vault else None,
-    }
-
-    orchestrator = ExportOrchestrator(targets=targets, config=export_config)
-    export_results_list = orchestrator.export_all(export_context)
-
-    if not use_quiet:
-        for export_result in export_results_list:
-            if export_result.success:
-                console.print(f"[green]✓ {export_result.target.value}:[/green] {export_result.output_path}")
-                if export_result.metadata.get("files"):
-                    console.print(f"  [dim]文件: {', '.join(export_result.metadata['files'])}[/dim]")
-            else:
-                console.print(f"[red]✗ {export_result.target.value}:[/red] {export_result.error_msg}")
-
-    if video_path and highlights:
-        try:
-            from src.exporters.html_player_exporter import HTMLPlayerExporter
-            player_output_dir = next(
-                (
-                    r.output_path
-                    for r in export_results_list
-                    if r.target == ExportTarget.LOCAL and r.success and r.output_path
-                ),
-                None,
-            )
-            if source_is_local and player_output_dir is None:
-                player_output_dir = output_dir
-            html_exporter = HTMLPlayerExporter(output_dir=player_output_dir)
-            html_result = html_exporter.export(export_context)
-            if html_result.success and not use_quiet:
-                console.print(f"[green]✓ HTML播放器:[/green] {html_result.output_path}")
-            if html_result.success:
-                export_results_list.append(html_result)
-        except Exception as e:
-            if not use_quiet:
-                console.print(f"[yellow]⚠ HTML播放器生成失败: {e}[/yellow]")
-
-    elapsed = time.time() - start_time
-
-    if use_json:
-        _write_json(_build_json_result(
-            success=True, url=args.url, mode=args.mode,
-            metadata=metadata, video_path=video_path, audio_path=audio_path,
-            transcript_result=transcript_result,
-            summary_result=summary_result, highlights=highlights,
-            export_results=export_results_list,
-            elapsed=elapsed,
+    if args.json_output:
+        print(json.dumps(
+            {
+                "success": bool(transcript.text.strip()),
+                "source": "local_asr",
+                "url": str(src),
+                "platform": "local",
+                "title": src.stem,
+                "content": transcript.text,
+                "language": transcript.language,
+                "duration_seconds": transcript.duration_seconds,
+                "method": "asr",
+                "completeness": "full" if transcript.text.strip() else "none",
+                "asr": {
+                    "provider": transcript.provider,
+                    "model": transcript.model,
+                    "model_version": transcript.model_version,
+                },
+                "segments": transcript.segments,
+            },
+            ensure_ascii=False,
+            indent=2,
         ))
     else:
-        console.print(f"\n[bold green]✓ 完成![/bold green] 总耗时: {format_duration(elapsed)}")
-        if highlights:
-            console.print("\n[cyan]关键时间轴预览:[/cyan]")
-            for _i, h in enumerate(highlights[:5], 1):
-                console.print(f"  [{h.time}] {h.content[:40]}...")
-            if len(highlights) > 5:
-                console.print(f"  ... 还有 {len(highlights) - 5} 个要点")
-
-    if out_file:
-        out_file.close()
-    return 0
+        console.print(transcript.text)
+    return 0 if transcript.text.strip() else 1
 
 
-class _DummyProgress:
-    """静默模式下的空进度条替代"""
-
-    def __enter__(self) -> "_DummyProgress":
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        pass
-
-
-
-
-
-if __name__ == "__main__":
-    sys.exit(main())

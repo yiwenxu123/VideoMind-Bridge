@@ -34,18 +34,6 @@ def test_console_static_assets_are_served():
     assert "javascript" in script.headers["content-type"]
     assert styles.status_code == 200
     assert "text/css" in styles.headers["content-type"]
-
-
-def test_legacy_ui_is_available():
-    with TestClient(APIServer().app) as client:
-        response = client.get("/legacy")
-
-    assert response.status_code == 200
-    assert "VideoMind Bridge" in response.text
-    assert "/static/app.js" in response.text
-    assert 'href="/console"' in response.text
-
-
 def test_console_is_public_but_api_requires_token(monkeypatch):
     monkeypatch.setenv("VIDEOMIND_API_TOKEN", "console-test-token")
     with TestClient(APIServer().app) as client:

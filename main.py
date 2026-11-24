@@ -105,7 +105,8 @@ def main() -> int:
             "\n请显式选择模式：\n"
             "  python main.py --api    # 本地 API 服务（http://127.0.0.1:8787）\n"
             "  python main.py --mcp    # MCP Server（stdio，供 AI Agent 调用）\n"
-            "GUI 已下线；旧的 v1 工作站页面仍在 --api 启动后的 /legacy。",
+            "桌面 GUI 与 v1 工作站（/legacy、/ws、/api/v1/tasks*）已于 2026-11-25 移除；"
+            "现在只有 API 与 MCP 两种模式。",
             file=sys.stderr,
         )
         return 2

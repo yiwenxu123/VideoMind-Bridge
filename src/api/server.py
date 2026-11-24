@@ -10,34 +10,26 @@ import urllib.parse
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from ..core.metrics import get_api_metrics
 from ..core.models import SCHEMA_VERSION, CostTier
-from ..models.task import ProcessingMode, TaskStatus, VideoTask
 from ..services.config_manager import ConfigManager
-from ..services.local_media import is_remote_url, resolve_allowed_local_media_path
 from ..utils import get_logger
-from ..utils.exceptions import ValidationError
 from .models import (
     ConfigResponse,
     ExtractResponse,
     KeyGroup,
     KeysListResponse,
     KeyUpdateRequest,
-    ProgressUpdate,
     SettingsResponse,
     SettingsUpdateRequest,
     SystemStatusResponse,
-    TaskCreateRequest,
-    TaskListResponse,
-    TaskResponse,
 )
-from .task_manager import TaskManager
 
 logger = get_logger(__name__)
 
@@ -196,67 +188,6 @@ def _extract_response(result, request_id: str) -> dict:
     return payload
 
 
-class ConnectionManager:
-    """WebSocket连接管理器"""
-
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-        self.task_subscriptions: dict[UUID, set[WebSocket]] = {}
-
-    async def connect(self, websocket: WebSocket):
-        """接受WebSocket连接"""
-        await websocket.accept()
-        self.active_connections.append(websocket)
-        logger.info(f"WebSocket连接已建立: {websocket.client}")
-
-    def disconnect(self, websocket: WebSocket):
-        """断开WebSocket连接"""
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-
-        # 从所有订阅中移除
-        for _task_id, connections in self.task_subscriptions.items():
-            connections.discard(websocket)
-
-        logger.info(f"WebSocket连接已断开: {websocket.client}")
-
-    def subscribe_to_task(self, task_id: UUID, websocket: WebSocket):
-        """订阅任务更新"""
-        if task_id not in self.task_subscriptions:
-            self.task_subscriptions[task_id] = set()
-        self.task_subscriptions[task_id].add(websocket)
-        logger.debug(f"WebSocket订阅任务: {task_id}")
-
-    def unsubscribe_from_task(self, task_id: UUID, websocket: WebSocket):
-        """取消订阅任务更新"""
-        if task_id in self.task_subscriptions:
-            self.task_subscriptions[task_id].discard(websocket)
-
-    async def broadcast_progress(self, progress: ProgressUpdate):
-        """广播进度更新"""
-        subscriptions = self.task_subscriptions.get(progress.task_id, set())
-        all_targets = set(self.active_connections) | subscriptions
-
-        logger.debug(f"WebSocket广播: {progress.task_id}, 连接数={len(all_targets)}")
-
-        data = progress.model_dump(mode="json")
-
-        dead = set()
-        for conn in all_targets:
-            try:
-                await conn.send_json(data)
-            except Exception as e:
-                logger.warning(f"  → 发送失败: {conn.client} - {e}")
-                dead.add(conn)
-
-        if dead:
-            for conn in dead:
-                if conn in self.active_connections:
-                    self.active_connections.remove(conn)
-                for subs in self.task_subscriptions.values():
-                    subs.discard(conn)
-
-
 class APIServer:
     """API服务器"""
 
@@ -282,15 +213,9 @@ class APIServer:
         self._rate_limiter = RateLimiter(self._auth.rate_limit_per_min)
         self._api_token = self._auth.admin_token
 
-        # 任务管理器
-        self.task_manager = TaskManager()
-
         # 长生命周期 Router（缓存/提取器/HTTP 连接复用）
         from ..core.router_runtime import RouterRuntime
         self._router_runtime = RouterRuntime()
-
-        # WebSocket连接管理器
-        self.connection_manager = ConnectionManager()
 
         # 启动即校验 ASR 默认链，坏配置不拖到第一次转写才暴露
         from ..core.asr import validate_configured_chain
@@ -299,9 +224,6 @@ class APIServer:
             validate_configured_chain()
         except Exception as exc:
             raise RuntimeError(f"ASR 配置非法: {exc}") from exc
-
-        # 事件循环引用（用于线程间调度）
-        self._event_loop: Any = None
 
         # FastAPI应用
         self.app = self._create_app()
@@ -316,18 +238,16 @@ class APIServer:
         async def lifespan(app: FastAPI):
             """应用生命周期管理"""
             self._event_loop = asyncio.get_running_loop()
-            await self.task_manager.start()
             logger.info(f"API服务器已启动: http://{self.host}:{self.port}")
             try:
                 yield
             finally:
-                await self.task_manager.stop()
                 self._router_runtime.close()
                 logger.info("API服务器已关闭")
 
         app = FastAPI(
             title="VideoMind Bridge API",
-            description="VideoMind Bridge 本地API服务，支持视频下载、转录、AI摘要生成",
+            description="VideoMind Bridge 本地API服务，多平台内容提取与转写（v1 流水线已于 2026-11-25 移除）",
             version=self.VERSION,
             lifespan=lifespan,
         )
@@ -472,19 +392,6 @@ class APIServer:
                 status_code=404,
             )
 
-        @app.get("/legacy")
-        @app.get("/legacy/")
-        async def legacy_ui():
-            """旧版 v1 工作站；保留一段时间供过渡使用。"""
-            from pathlib import Path as _Path
-            index = _Path(__file__).resolve().parent.parent.parent / "web" / "index.html"
-            if index.is_file():
-                return FileResponse(str(index))
-            return JSONResponse(
-                content={"message": "旧版 Web UI 未找到"},
-                status_code=404,
-            )
-
         @app.get("/health", response_model=dict)
         async def health():
             """健康检查"""
@@ -496,14 +403,16 @@ class APIServer:
         @app.get("/api/v1/status", response_model=SystemStatusResponse)
         async def get_status():
             """获取系统状态"""
-            stats = self.task_manager.get_statistics()
+            # 2026-11-25（A2）：v1 任务队列已删除，四个计数恒为 0。
+            # 保留字段是为了不破坏已按这四列写代码的调用方（CONTRACT §2 把它列为稳定端点）。
+            # 代码里没有任何执行者 —— 0 是事实（没有任务在跑），不是占位。
             return SystemStatusResponse(
                 version=self.VERSION,
                 status="running",
-                active_tasks=stats["active"],
-                queued_tasks=stats["queued"],
-                completed_tasks=stats["completed"],
-                failed_tasks=stats["failed"],
+                active_tasks=0,
+                queued_tasks=0,
+                completed_tasks=0,
+                failed_tasks=0,
             )
 
         @app.get("/api/v1/capabilities", response_model=dict)
@@ -518,13 +427,14 @@ class APIServer:
         @app.get("/api/v1/config", response_model=ConfigResponse)
         async def get_config():
             """获取系统配置"""
-            ai_enabled = self.task_manager.is_ai_available()
+            config_mgr = ConfigManager()
+            cfg = config_mgr.config
             return ConfigResponse(
-                default_output_dir=str(self.task_manager.output_dir),
+                default_output_dir=cfg.download.output_dir,
                 supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu", "local"],
                 supported_ai_providers=["deepseek", "zhipu", "moonshot", "minimax", "doubao", "ollama"],
                 supported_export_targets=["local", "obsidian", "notion"],
-                ai_enabled=ai_enabled,
+                ai_enabled=False,  # A2：AI 摘要服务已删除，此字段恒为 False
             )
 
         # v2 提取 API
@@ -852,224 +762,6 @@ class APIServer:
 
             logger.info(f"设置已更新: {', '.join(changed)}")
             return {"success": True, "updated": changed}
-
-        @app.post("/api/v1/settings/test-ai")
-        async def test_ai_connection(http_request: Request):
-            """测试 AI 连接"""
-            _require_admin_consumer(http_request)
-            config_mgr = ConfigManager()
-            api_key = config_mgr.get_api_key()
-            cfg = config_mgr.config
-
-            if not api_key:
-                return {"success": False, "message": "请先配置 API Key"}
-
-            try:
-                from ..services.ai_service import AIService
-                ai = AIService(
-                    api_key=api_key,
-                    base_url=cfg.ai.base_url,
-                    model=cfg.ai.model,
-                    temperature=cfg.ai.temperature,
-                    max_tokens=cfg.ai.max_tokens,
-                )
-                loop = asyncio.get_running_loop()
-                ok, msg = await loop.run_in_executor(None, ai.test_connection)
-                return {"success": ok, "message": msg if not ok else "AI 连接正常"}
-            except Exception as e:
-                logger.error(f"AI 连接测试失败: {e}")
-                return {"success": False, "message": str(e)}
-
-        # 任务管理API
-        @app.post("/api/v1/tasks", response_model=TaskResponse, status_code=status.HTTP_201_CREATED)
-        async def create_task(request: TaskCreateRequest):
-            """创建新任务"""
-            try:
-                if is_remote_url(request.url):
-                    task_url = request.url
-                else:
-                    try:
-                        task_url = str(resolve_allowed_local_media_path(request.url))
-                    except ValidationError as e:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=e.message,
-                        )
-
-                # 检查 AI 配置
-                if (
-                    request.mode == ProcessingMode.FULL
-                    and not self.task_manager.is_ai_available()
-                    and not request.allow_downgrade
-                ):
-                    raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail=(
-                                "AI 服务未配置，无法进行完整处理。"
-                                "请在设置中配置 API Key，"
-                                "或设置 allow_downgrade=true 降级为转录存档模式"
-                            ),
-                        )
-
-                task = await self.task_manager.create_task(
-                    url=task_url,
-                    mode=request.mode,
-                    targets=set(request.targets),
-                    ai_provider=request.ai_provider,
-                    ai_prompt=request.ai_prompt,
-                    cookies_from_browser=request.cookies_from_browser,
-                    allow_downgrade=request.allow_downgrade,
-                )
-
-                # 注册进度回调
-                self.task_manager.register_callback(
-                    task.id,
-                    self._sync_on_task_update,
-                )
-
-                return self._task_to_response(task)
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"创建任务失败: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail=str(e),
-                )
-
-        @app.get("/api/v1/tasks", response_model=TaskListResponse)
-        async def list_tasks(
-            status: TaskStatus | None = None,
-            limit: int = Query(20, ge=1, le=100),
-            offset: int = Query(0, ge=0),
-        ):
-            """获取任务列表"""
-            tasks = await self.task_manager.get_tasks(
-                status=status,
-                limit=limit,
-                offset=offset,
-            )
-            total = len(self.task_manager._tasks)
-
-            return TaskListResponse(
-                total=total,
-                tasks=[self._task_to_response(t) for t in tasks],
-                page=offset // limit + 1,
-                page_size=limit,
-            )
-
-        @app.get("/api/v1/tasks/{task_id}", response_model=TaskResponse)
-        async def get_task(task_id: UUID):
-            """获取单个任务"""
-            task = await self.task_manager.get_task(task_id)
-            if not task:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"任务不存在: {task_id}",
-                )
-            return self._task_to_response(task)
-
-        @app.post("/api/v1/tasks/{task_id}/cancel")
-        async def cancel_task(task_id: UUID):
-            """取消任务"""
-            success = await self.task_manager.cancel_task(task_id)
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"无法取消任务: {task_id}",
-                )
-            return {"success": True, "message": "任务已取消"}
-
-        @app.delete("/api/v1/tasks/{task_id}")
-        async def delete_task(task_id: UUID):
-            """删除任务"""
-            success = await self.task_manager.delete_task(task_id)
-            if not success:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"任务不存在: {task_id}",
-                )
-            return {"success": True, "message": "任务已删除"}
-
-        # WebSocket端点
-        @app.websocket("/ws")
-        async def websocket_endpoint(websocket: WebSocket):
-            """WebSocket连接，用于实时接收任务进度更新"""
-            origin = websocket.headers.get("origin", "")
-
-            if not _is_allowed_origin(origin):
-                logger.warning(f"WebSocket 连接被拒绝，Origin: {origin}")
-                await websocket.close(code=1008)
-                return
-
-            await self.connection_manager.connect(websocket)
-            try:
-                while True:
-                    # 接收客户端消息
-                    data = await websocket.receive_json()
-
-                    # 处理订阅请求
-                    if data.get("action") == "subscribe":
-                        task_id = UUID(data.get("task_id"))
-                        self.connection_manager.subscribe_to_task(task_id, websocket)
-                        await websocket.send_json({
-                            "type": "subscribed",
-                            "task_id": str(task_id),
-                        })
-
-                    elif data.get("action") == "unsubscribe":
-                        task_id = UUID(data.get("task_id"))
-                        self.connection_manager.unsubscribe_from_task(task_id, websocket)
-                        await websocket.send_json({
-                            "type": "unsubscribed",
-                            "task_id": str(task_id),
-                        })
-
-            except WebSocketDisconnect:
-                self.connection_manager.disconnect(websocket)
-            except Exception as e:
-                logger.error(f"WebSocket错误: {e}")
-                self.connection_manager.disconnect(websocket)
-
-    async def _on_task_update(self, task: VideoTask) -> None:
-        """任务更新回调"""
-        progress = ProgressUpdate(
-            task_id=task.id,
-            status=task.status,
-            progress=task.progress,
-            current_step=task.current_step,
-            message=task.error_msg if task.status == TaskStatus.FAILED else None,
-        )
-        await self.connection_manager.broadcast_progress(progress)
-
-    def _sync_on_task_update(self, task: VideoTask) -> None:
-        """同步包装器，将 async 回调调度到事件循环"""
-        loop = getattr(self, '_event_loop', None)
-        if loop and loop.is_running():
-            asyncio.run_coroutine_threadsafe(self._on_task_update(task), loop)
-        else:
-            logger.warning(f"WebSocket回调: 事件循环不可用 (loop={loop is not None}, running={loop.is_running() if loop else False})")
-
-    def _task_to_response(self, task: VideoTask) -> TaskResponse:
-        """将VideoTask转换为TaskResponse"""
-        return TaskResponse(
-            id=task.id,
-            url=task.url,
-            status=task.status,
-            mode=task.mode,
-            targets=list(task.targets),
-            progress=task.progress,
-            current_step=task.current_step,
-            title=task.metadata.title if task.metadata else None,
-            author=task.metadata.author if task.metadata else None,
-            platform=task.metadata.platform if task.metadata else None,
-            created_at=task.created_at,
-            updated_at=task.updated_at,
-            completed_at=task.completed_at,
-            error_msg=task.error_msg,
-            summary=task.ai_summary,
-            output_files=[str(p) for p in task.output_files],
-        )
 
     async def start(self) -> None:
         """启动API服务器"""

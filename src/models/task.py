@@ -5,14 +5,7 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
-from uuid import UUID, uuid4
-
-
-class ProcessingMode(Enum):
-    """处理模式枚举"""
-    FULL = "full"  # 完整处理: 下载 → 转录 → AI摘要 → 导出
-    DOWNLOAD_ONLY = "download_only"  # 仅下载原始视频/音频
-    TRANSCRIBE_ONLY = "transcribe_only"  # 下载 → 转录生成SRT，不调用AI
+from uuid import UUID
 
 
 class ExportTarget(Enum):
@@ -21,19 +14,6 @@ class ExportTarget(Enum):
     LOCAL = "local"
     NOTION = "notion"
     WEBHOOK = "webhook"
-
-
-class TaskStatus(Enum):
-    """任务状态枚举"""
-    PENDING = "pending"  # 等待中
-    DOWNLOADING = "downloading"  # 下载中
-    TRANSCRIBING = "transcribing"  # 转录中
-    AI_PROCESSING = "ai_processing"  # AI处理中
-    EXPORTING = "exporting"  # 导出中
-    PAUSED = "paused"  # 已暂停
-    COMPLETED = "completed"  # 已完成
-    FAILED = "failed"  # 失败
-    CANCELLED = "cancelled"  # 已取消
 
 
 @dataclass
@@ -101,84 +81,3 @@ class ExportResult:
     output_path: Path | None = None  # 本地输出路径
     remote_url: str | None = None  # 远程链接（如Notion页面）
     metadata: dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class VideoTask:
-    """
-    视频任务实体
-
-    这是一个聚合根，包含任务的所有信息和状态
-    """
-    # 基础标识
-    id: UUID = field(default_factory=uuid4)
-    url: str = ""
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-
-    # 处理配置
-    mode: ProcessingMode = ProcessingMode.FULL
-    targets: set[ExportTarget] = field(default_factory=lambda: {ExportTarget.LOCAL})
-    ai_provider: str | None = None  # AI提供商名称
-    ai_prompt: str | None = None  # 使用的Prompt模板
-    cookies_from_browser: str | None = None  # 浏览器Cookie来源
-    allow_downgrade: bool = False  # AI不可用时是否降级为转录存档
-
-    # 状态追踪
-    status: TaskStatus = TaskStatus.PENDING
-    progress: float = 0.0  # 0.0 - 100.0
-    current_step: str = ""  # 当前步骤描述
-
-    # 元数据（解析URL后填充）
-    metadata: VideoMetadata | None = None
-
-    # 结果数据
-    audio_path: Path | None = None
-    transcript_segments: list[TranscriptSegment] = field(default_factory=list)
-    ai_summary: str | None = None
-    export_results: list[ExportResult] = field(default_factory=list)
-
-    # 错误信息
-    error_msg: str | None = None
-    retry_count: int = 0
-    completed_at: datetime | None = None
-
-    # 输出文件
-    output_files: list[Path] = field(default_factory=list)
-
-@dataclass
-class TaskHistory:
-    """
-    任务历史记录
-
-    用于持久化存储已完成的任务信息
-    """
-    # 基础标识
-    id: str  # 任务ID
-    url: str  # 视频URL
-    title: str  # 视频标题
-    author: str  # 视频作者
-    platform: str  # 视频平台
-
-    # 处理配置
-    mode: ProcessingMode  # 处理模式
-    targets: list[ExportTarget]  # 导出目标
-
-    # 状态信息
-    status: TaskStatus  # 最终状态
-    error_msg: str | None = None  # 错误信息（如果失败）
-
-    # 时间戳
-    created_at: datetime = field(default_factory=datetime.now)
-    completed_at: datetime | None = None
-
-    # 结果数据
-    summary: str | None = None  # AI摘要内容
-    highlights_count: int = 0  # 要点数量
-    transcript_path: Path | None = None  # 转录文件路径
-
-    # 导出结果
-    output_files: list[Path] = field(default_factory=list)  # 输出文件列表
-    export_success_count: int = 0  # 成功导出数
-    export_total_count: int = 0  # 总导出数
-

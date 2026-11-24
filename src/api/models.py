@@ -1,14 +1,10 @@
 """API数据模型"""
 
-from datetime import datetime
 from typing import Any, Literal
-from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl
 
 from ..core.models import SCHEMA_VERSION, CostTier
-from ..models.task import ExportTarget, ProcessingMode, TaskStatus
-from ..services.local_media import is_local_media_path, is_remote_url
 
 
 class APIError(BaseModel):
@@ -168,120 +164,6 @@ class CommentsResponse(BaseModel):
     retry_after_seconds: int | None = None
 
 
-class TaskCreateRequest(BaseModel):
-    """创建任务请求"""
-    url: str = Field(..., description="视频链接或本地媒体文件路径")
-    mode: ProcessingMode = Field(default=ProcessingMode.FULL, description="处理模式")
-    targets: list[ExportTarget] = Field(
-        default=[ExportTarget.LOCAL],
-        description="导出目标列表"
-    )
-    ai_provider: str | None = Field(None, description="AI提供商名称")
-    ai_prompt: str | None = Field(None, description="自定义Prompt模板")
-    cookies_from_browser: str | None = Field(
-        None, description="浏览器名称（chrome/safari/firefox，国内平台需要）"
-    )
-    allow_downgrade: bool = Field(
-        default=False,
-        description="AI服务不可用时是否降级为转录存档模式"
-    )
-
-    @field_validator("url")
-    @classmethod
-    def _validate_url_or_local_media(cls, value: str) -> str:
-        value = value.strip()
-        if is_remote_url(value) or is_local_media_path(value):
-            return value
-        raise ValueError("url 必须是 http(s) 链接或受支持的本地媒体文件")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "url": "https://www.bilibili.com/video/BV1xx411c7mD",
-                "mode": "full",
-                "targets": ["local", "obsidian"],
-                "ai_provider": "deepseek",
-            }
-        }
-
-
-class TaskResponse(BaseModel):
-    """任务响应"""
-    id: UUID = Field(..., description="任务ID")
-    url: str = Field(..., description="视频链接")
-    status: TaskStatus = Field(..., description="任务状态")
-    mode: ProcessingMode = Field(..., description="处理模式")
-    targets: list[ExportTarget] = Field(..., description="导出目标")
-    progress: float = Field(..., ge=0.0, le=100.0, description="进度百分比")
-    current_step: str = Field(..., description="当前步骤")
-    title: str | None = Field(None, description="视频标题")
-    author: str | None = Field(None, description="视频作者")
-    platform: str | None = Field(None, description="视频平台")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
-    completed_at: datetime | None = Field(None, description="完成时间")
-    error_msg: str | None = Field(None, description="错误信息")
-    summary: str | None = Field(None, description="AI摘要")
-    output_files: list[str] = Field(default=[], description="输出文件路径列表")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "url": "https://www.bilibili.com/video/BV1xx411c7mD",
-                "status": "processing",
-                "mode": "full",
-                "targets": ["local"],
-                "progress": 45.5,
-                "current_step": "正在生成AI摘要...",
-                "title": "示例视频标题",
-                "author": "UP主名称",
-                "platform": "bilibili",
-            }
-        }
-
-
-class TaskListResponse(BaseModel):
-    """任务列表响应"""
-    total: int = Field(..., description="总任务数")
-    tasks: list[TaskResponse] = Field(..., description="任务列表")
-    page: int = Field(default=1, description="当前页码")
-    page_size: int = Field(default=20, description="每页数量")
-
-
-class ProgressUpdate(BaseModel):
-    """进度更新消息（WebSocket）"""
-    task_id: UUID = Field(..., description="任务ID")
-    status: TaskStatus = Field(..., description="任务状态")
-    progress: float = Field(..., ge=0.0, le=100.0, description="进度百分比")
-    current_step: str = Field(..., description="当前步骤描述")
-    message: str | None = Field(None, description="附加消息")
-    timestamp: datetime = Field(default_factory=datetime.now, description="时间戳")
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "task_id": "550e8400-e29b-41d4-a716-446655440000",
-                "status": "downloading",
-                "progress": 35.0,
-                "current_step": "正在下载视频...",
-                "message": "已下载 35MB / 100MB",
-            }
-        }
-
-
-class TaskSearchRequest(BaseModel):
-    """任务搜索请求"""
-    keyword: str = Field(..., min_length=1, description="搜索关键词")
-    limit: int = Field(default=20, ge=1, le=100, description="返回数量限制")
-
-
-class ExportRequest(BaseModel):
-    """导出请求"""
-    task_id: UUID = Field(..., description="任务ID")
-    targets: list[ExportTarget] = Field(..., description="导出目标列表")
-
-
 class SystemStatusResponse(BaseModel):
     """系统状态响应"""
     version: str = Field(..., description="API版本")
@@ -290,14 +172,6 @@ class SystemStatusResponse(BaseModel):
     queued_tasks: int = Field(..., description="排队任务数")
     completed_tasks: int = Field(..., description="已完成任务数")
     failed_tasks: int = Field(..., description="失败任务数")
-
-
-class AIModelInfo(BaseModel):
-    """AI 模型信息"""
-    engine: str = Field(..., description="引擎名称")
-    model: str = Field(..., description="模型名称")
-    is_available: bool = Field(default=False, description="是否可用（有 API Key 配置）")
-    api_key_configured: bool = Field(default=False, description="API Key 是否已配置")
 
 
 class SettingsResponse(BaseModel):
