@@ -24,7 +24,6 @@
 from __future__ import annotations
 
 import httpx
-import pytest
 
 from src.core.extractors.xiaohongshu_extractor import XiaohongshuExtractor
 from src.core.models import CostTier, ExtractResult
@@ -158,3 +157,53 @@ def _failure() -> ExtractResult:
         error="下载失败",
         error_code="ytdlp_download_failed",
     )
+
+
+# ── CONTRACT.md §4 的不变式 ─────────────────────────────────────────────
+# 文档写的不变式必须有测试兜着，否则就是口号。
+
+
+def _assert_invariants(result):
+    if result.success is False:
+        assert result.error_code, "不变式 1：失败必须带可机读 error_code"
+    else:
+        assert result.completeness in {"full", "meta"}, (
+            f"不变式 2：success=true 时 completeness 不得为 {result.completeness!r}"
+        )
+    if result.completeness == "full":
+        assert (result.content or "").strip(), "不变式 3：full 必须有正文"
+
+
+def test_invariants_hold_for_partial_result():
+    _assert_invariants(
+        _run(["douyin", "ytdlp_asr"], {"douyin": _PartialStub, "ytdlp_asr": _FailStub})
+    )
+
+
+def test_invariants_hold_for_hard_failure():
+    _assert_invariants(
+        _run(["douyin"], {"douyin": _FailStub}, url="https://www.douyin.com/video/7400000000000000011")
+    )
+
+
+def test_invariants_hold_for_full_success():
+    def _full() -> ExtractResult:
+        return ExtractResult(
+            success=True,
+            platform="douyin",
+            title="标题",
+            content="正文" * 60,
+            source="douyin_asr",
+            url="https://www.douyin.com/video/1",
+            cost_tier=CostTier.CHEAP,
+            completeness="full",
+            method="asr",
+        )
+
+    result = _run(
+        ["douyin"],
+        {"douyin": lambda: _Stub(_full)},
+        url="https://www.douyin.com/video/7400000000000000012",
+    )
+    _assert_invariants(result)
+    assert result.completeness == "full"
