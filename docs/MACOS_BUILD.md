@@ -1,7 +1,7 @@
 # VideoMind Bridge macOS 应用打包指南
 
 > **⚠️ 2026-11-24 起本指南对应的桌面 GUI 已下线**（`src/gui/` 已删除，`gui` extra 已移除，`main.py` 不再有 GUI 模式）。
-> 本文保留为历史参考；若要恢复桌面形态，需要先恢复 GUI 代码。发布流水线 `.github/workflows/build.yml` 同样依赖已不存在的 `build.spec` 与 `src/gui/resources/icon.icns`，当前不可用。
+> 本文保留为历史参考；若要恢复桌面形态，需要先恢复 GUI 代码。发布流水线 `.github/workflows/build.yml` 与 `build_macos_app.sh` / `create_dmg.sh` 也已于同一天删除——它们依赖的 `build.spec` 与 `src/gui/resources/icon.icns` 本就不存在。**本文中的命令现在一条都跑不通**，只作为恢复路径的记录。
 
 本文档介绍如何将 VideoMind Bridge 打包为独立的 macOS 应用程序。
 

@@ -115,7 +115,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **平台请求治理**: 平台自有 HTTP 请求走 `PlatformRateLimiter`（B站/抖音/小红书/YouTube），本地网关、第三方 API 和 CDN 下载不套平台 limiter；yt-dlp 通过 `VMB_YTDLP_SLEEP_REQUESTS`、`VMB_YTDLP_RETRIES` 等参数节流，平台熔断时跳过 yt-dlp 兜底。小红书可选 `VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE`；抖音用 `DOUYIN_COOKIES_FILE`。`GET /api/v1/metrics` 返回进程内平台计数，`VMB_LOG_JSON=1` 开启 JSON 日志。
 - **桌面 GUI 已下线（2026-11-24）**: `src/gui/` 与 `browser-extension/` 已删除，`gui` extra 一并移除；`python main.py` 不带参数会打印用法并以退出码 2 结束（不再有隐式默认模式）。v1 的下载/转录/摘要能力仍在（CLI `--mode` + `/legacy` 页面），等 A2 再决定去留
 - **SenseVoice 依赖仓库外资产**: 默认 ASR 第一级需要 `~/.cache/sensevoice/venv`（sherpa-onnx + soundfile）与 `~/.cache/sherpa-onnx/sense-voice/`（`model.int8.onnx` + `tokens.txt`）。2026-11-24 起 `capabilities()` 会真起子进程探测 `import sherpa_onnx, soundfile`（按解释器缓存，超时 10s），**文件齐但解释器缺依赖时 `available=false`**——别再把「文件存在」当成「能用」。安装/体检：`scripts/install_sensevoice.sh [--check]`
-- **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)
+- **Build 工具**: 只剩 `python -m build`（sdist/wheel）。PyInstaller 打包随 GUI 一起在 2026-11-24 移除
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)
 - **v2 引擎可独立导入**: `from src.core import ContentRouter` 不依赖 GUI；ASR 适配器在需要时通过 `src/services/config_manager` 读取密钥
 
@@ -142,18 +142,16 @@ pytest tests/ --cov=src --cov-report=term       # 覆盖率
 ```
 uv sync --extra dev             # 开发安装（服务端）
 pip install -e ".[dev]"         # 含 dev 依赖
-pyinstaller videomind.spec      # macOS 应用打包
+python -m build                 # 产出 sdist/wheel（CI 的 build job 也跑这条）
 ```
 
-Release workflow 自动构建 macOS DMG + Windows ZIP，标签推送 `v*` 触发。
+**桌面打包流水线已于 2026-11-24 删除**（GUI 下线）：`.github/workflows/build.yml`、`build_macos_app.sh`、`create_dmg.sh` 均已移除，标签推送 `v*` 不再触发任何打包。`docs/MACOS_BUILD.md` 仅作历史参考。
 
 ## 非标准文件
 
 | 文件 | 说明 |
 |------|------|
 | `main.py` | 入口：API / MCP 两模式（GUI 已下线） |
-| `build_macos_app.sh` | macOS 构建脚本 |
-| `create_dmg.sh` | DMG 包创建 |
 | `.python-version` | Python 3.11 (仅供 pyenv) |
 | `skill/` | OpenClaw 集成 skill 定义 |
 | `.sisyphus/` | 历史开发计划 (仅保留供参考) |
