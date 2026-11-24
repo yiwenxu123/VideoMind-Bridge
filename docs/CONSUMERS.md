@@ -35,10 +35,15 @@
 |---|---|
 | 代码位置 | 本仓库 `src/mcp/`（`server.py` 旧实现 / `modern_server.py` 现行） |
 | 注册位置 | `~/.dsh/profiles/{desktop,web}/cordis.patch.yml` → `mcp-videomind` |
-| 有据可查的使用 | `extract_video`、`videomind_capabilities` |
+| 形态 | **薄适配器**：工具把请求转给 REST :8787（不自带引擎），标识 `X-Consumer-Id: dsh-mcp` |
+| 工具面（3 个） | `extract` / `capabilities` / `comments` |
 | 依赖的字段 | 与 §3 相同的响应对象（工具结果原样透出） |
 
-> 其余 10 个工具**没有已知消费者**（详见审查报告 §问题 3），已在工具面收敛中处置。
+> 2026-11-23 从 12 个工具收敛到 3 个：其余 10 个**没有已知消费者**（详见审查报告 §问题 3）。
+> 2026-11-24 改为薄适配器：此前 MCP 在进程内跑整套引擎，导致 Agent 流量在 `/metrics` 里
+> 完全不可见（实测 MCP 提取后 REST 的 `total` 不变）。现在统一走 REST，指标自然可见。
+> 代价：本服务没起时 MCP 不可用（会返回 `pm2 start videomind-api` 的提示）；
+> 离线场景可设 `VMB_MCP_EMBEDDED=1` 退回自带引擎。
 
 ---
 

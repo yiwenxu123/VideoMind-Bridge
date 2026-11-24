@@ -1,93 +1,156 @@
-"""MCP 新实现（mcp 2.x MCPServer）测试（2026-11-22）。
+"""MCP 实现测试（2026-11-24）。
 
-迁移动机是三个**功能性**缺陷（旧手写 JSON-RPC 实现）：
-1. 单线程 ``for line in sys.stdin``：一次慢提取阻塞所有后续调用；
-2. ``notifications/cancelled`` 是 ``pass``，取消被忽略；
-3. protocolVersion 硬编码，不协商。
+当前形态：**薄适配器**（把请求转给本机 REST :8787），可选 `VMB_MCP_EMBEDDED=1`
+退回进程内引擎。这里锁住四件事：
 
-实测并发差异（慢提取进行中再调零网络的预筛）：
-    新实现 13.2ms ｜ 旧实现 2919.1ms
-
-这里锁住三件事：工具面不变、参数搬运不覆盖默认值、结果与旧实现一致。
-真正的"并发能力"由 SDK 的线程池保证，属集成性质，用
-``tests/test_real_network.py`` 之外的手工探针验证（见交付报告）。
+1. 工具面固定为 3 个，且两条路径的工具面一致；
+2. 远程路径的**参数翻译**正确（成本档、asr 语言、prescreen 走不同端点）；
+3. 服务没起时给出可执行提示，而不是裸 traceback；
+4. 嵌入式路径与旧实现结果一致（兜底不许漂移）。
 """
 
 from __future__ import annotations
 
-from src.mcp import modern_server
-from src.mcp.server import MCPServer as LegacyCore
+import httpx
+import pytest
 
-# 2026-11-23 收敛后的工具面：3 个。
-# 从 12 个砍到 3 个是有意为之，依据见 docs/CONSUMERS.md 与审查报告 §问题 3：
-# - 下游只用 extract / capabilities（+ comments），其余 10 个无已知消费者；
-# - 12 个工具 ≈1847 token，每轮都在上下文里；
-# - prescreen/smart/supported 是 extract 的参数或成本闸，不该各占一个工具；
-# - configure/videomind_config 属配置写入，不该暴露给模型（最小权限）；
-# - v1 的 process/download/transcribe 已 DEPRECATED；archive 属上层 Skill 职责。
+from src.mcp import modern_server
+
 _TOOL_NAMES = {"extract", "capabilities", "comments"}
 
 
-def _tools() -> dict:
-    return modern_server.build_server()._tool_manager._tools
+def _tools(server) -> dict:
+    return server._tool_manager._tools
 
 
-def test_tool_surface_is_the_agreed_three():
-    """工具面固定在 3 个：增删必须是有意为之（并同步更新本文与 CONTRACT）。"""
-    assert set(_tools()) == _TOOL_NAMES
+# ── 工具面 ──────────────────────────────────────────────────────────────
 
 
-def test_args_helper_drops_none_only():
-    """``_args`` 只能丢掉 None。
-
-    旧实现用 ``args.get("x", default)``：若把 ``"x": None`` 传进去会**覆盖默认值**，
-    行为就变了。这是搬运层最容易出的错，单独锁住。
-    """
-    assert modern_server._args(a=1, b=None, c="") == {"a": 1, "c": ""}
-    assert modern_server._args() == {}
+def test_remote_surface_is_the_agreed_three():
+    assert set(_tools(modern_server.build_server(embedded=False))) == _TOOL_NAMES
 
 
-def test_extract_passes_default_cost_tier_and_omits_unset():
-    """extract_video 的默认 cost_tier 应显式传递；未提供的可选参数不得出现。"""
-    captured: dict = {}
-    original = modern_server._CORE._call_extract_video
-    modern_server._CORE._call_extract_video = lambda args: captured.update(args) or {}
-    try:
-        _tools()["extract"].fn(url="https://example.com/v")
-    finally:
-        modern_server._CORE._call_extract_video = original
-
-    assert captured["url"] == "https://example.com/v"
-    assert captured["cost_tier"] == "cheap", "默认成本档必须显式传下去"
-    assert "asr" not in captured and "asr_chain" not in captured
+def test_embedded_surface_matches_remote():
+    """兜底路径与默认路径的工具面必须一致，否则切换时 Agent 会调不到。"""
+    remote = set(_tools(modern_server.build_server(embedded=False)))
+    embedded = set(_tools(modern_server.build_server(embedded=True)))
+    assert remote == embedded == _TOOL_NAMES
 
 
-def test_capabilities_result_matches_legacy():
-    """纯函数类工具，新旧实现结果必须一致（防止搬运时丢字段）。"""
+def test_build_server_defaults_to_remote(monkeypatch):
+    monkeypatch.delenv("VMB_MCP_EMBEDDED", raising=False)
+    assert modern_server._embedded_enabled() is False
+    monkeypatch.setenv("VMB_MCP_EMBEDDED", "1")
+    assert modern_server._embedded_enabled() is True
+
+
+# ── 远程路径：参数翻译 ──────────────────────────────────────────────────
+
+
+@pytest.fixture
+def captured(monkeypatch):
+    """拦截 _request，记录 (method, path, payload)。"""
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def _fake(method: str, path: str, payload: dict | None = None):
+        calls.append((method, path, payload))
+        return {"ok": True, "path": path}
+
+    monkeypatch.setattr(modern_server, "_request", _fake)
+    return calls
+
+
+def test_extract_translates_to_rest_extract(captured):
+    tool = _tools(modern_server.build_server(embedded=False))["extract"]
+    tool.fn(url="https://www.douyin.com/video/1", cost_tier="cheap", asr_language="zh")
+
+    method, path, payload = captured[-1]
+    assert (method, path) == ("POST", "/api/v1/extract")
+    assert payload == {
+        "url": "https://www.douyin.com/video/1",
+        "cost_tier": "cheap",
+        "asr_options": {"language": "zh"},
+    }
+
+
+def test_extract_prescreen_uses_prescreen_endpoint(captured):
+    tool = _tools(modern_server.build_server(embedded=False))["extract"]
+    tool.fn(url="https://www.douyin.com/video/1", mode="prescreen")
+
+    method, path, payload = captured[-1]
+    assert (method, path) == ("POST", "/api/v1/prescreen")
+    assert payload == {"url": "https://www.douyin.com/video/1", "mode": "quick"}
+
+
+def test_extract_rejects_unknown_mode(captured):
+    tool = _tools(modern_server.build_server(embedded=False))["extract"]
+    with pytest.raises(ValueError):
+        tool.fn(url="https://x/v", mode="whatever")
+
+
+def test_capabilities_and_comments_paths(captured):
+    tools = _tools(modern_server.build_server(embedded=False))
+    tools["capabilities"].fn()
+    assert captured[-1][:2] == ("GET", "/api/v1/capabilities")
+
+    tools["comments"].fn(url="https://www.douyin.com/video/1", limit=5, sort="time")
+    method, path, payload = captured[-1]
+    assert (method, path) == ("POST", "/api/v1/comments")
+    assert payload == {"url": "https://www.douyin.com/video/1", "limit": 5, "sort": "time"}
+
+
+# ── 远程路径：失败提示 ──────────────────────────────────────────────────
+
+
+def test_connection_error_is_actionable(monkeypatch):
+    """服务没起时必须告诉人「怎么办」，这是薄适配器唯一的代价。"""
+
+    def _boom(self, method, url, **kwargs):
+        raise httpx.ConnectError(
+            "refused", request=httpx.Request(method, url)
+        )
+
+    # 直接测 _request 的异常转换
+    monkeypatch.setattr(httpx.Client, "request", _boom)
+    with pytest.raises(RuntimeError) as exc:
+        modern_server._request("POST", "/api/v1/extract", {"url": "x"})
+
+    msg = str(exc.value)
+    assert "pm2 start videomind-api" in msg, "要给出可执行动作"
+    assert "VMB_MCP_EMBEDDED=1" in msg, "要给出离线兜底选项"
+
+
+# ── 嵌入式路径：与旧实现一致 ────────────────────────────────────────────
+
+
+def test_embedded_capabilities_matches_legacy():
+    from src.mcp.server import MCPServer as LegacyCore
+
     legacy = LegacyCore()._call_capabilities({})
-    modern = _tools()["capabilities"].fn()
+    modern = _tools(modern_server.build_server(embedded=True))["capabilities"].fn()
     assert modern == legacy
 
 
-def test_prescreen_merged_into_extract():
-    """prescreen 不再是独立工具，改由 extract(mode="prescreen") 提供。"""
-    legacy = LegacyCore()._call_prescreen_video(
-        {"url": "https://www.bilibili.com/video/BV1x", "mode": "quick"}
-    )
-    modern = _tools()["extract"].fn(
-        url="https://www.bilibili.com/video/BV1x", mode="prescreen"
+def test_embedded_prescreen_matches_legacy():
+    from src.mcp.server import MCPServer as LegacyCore
+
+    url = "https://www.bilibili.com/video/BV1x"
+    legacy = LegacyCore()._call_prescreen_video({"url": url, "mode": "quick"})
+    modern = _tools(modern_server.build_server(embedded=True))["extract"].fn(
+        url=url, mode="prescreen"
     )
     assert modern == legacy
+
+
+# ── 入口 ────────────────────────────────────────────────────────────────
 
 
 def test_entry_point_defaults_to_modern_and_keeps_legacy_escape_hatch(monkeypatch):
-    """``server.main()`` 默认走新实现；VMB_MCP_LEGACY=1 时退回旧实现。"""
+    """`server.main()` 默认走新实现；VMB_MCP_LEGACY=1 时退回手写 JSON-RPC 版。"""
     import src.mcp.server as legacy_module
 
     calls: list[str] = []
-    monkeypatch.setattr(
-        modern_server, "main", lambda: calls.append("modern")
-    )
+    monkeypatch.setattr(modern_server, "main", lambda: calls.append("modern"))
 
     class _StubLegacy:
         def run(self) -> None:

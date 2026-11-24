@@ -647,6 +647,23 @@ class APIServer:
                 "source": result.get("source", "unknown"),
             }
 
+        @app.post("/api/v1/prescreen")
+        async def prescreen(body: dict):
+            """零网络的成本/价值预筛（不下载视频）。
+
+            2026-11-24 新增：此前预筛只存在于 MCP 工具里，REST 没有对应端点。
+            补上之后 MCP 才能做成"薄适配器统一走 :8787"，不用在 MCP 进程里再跑一遍引擎。
+            """
+            url = body.get("url")
+            if not url:
+                raise HTTPException(status_code=400, detail="url 不能为空")
+
+            from ..core.prescreen_api import run_prescreen
+
+            return run_prescreen(
+                self._router_runtime, str(url), str(body.get("mode") or "quick")
+            )
+
         # 提取器 API Key 管理
         @app.get("/api/v1/keys", response_model=KeysListResponse)
         async def list_keys():

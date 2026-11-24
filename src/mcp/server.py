@@ -666,44 +666,14 @@ class MCPServer:
         return {"success": True, "action": "set", "key": key, "message": f"{key} 已设置"}
 
     def _call_prescreen_video(self, args: dict) -> dict:
-        """执行内容预筛"""
-        url = args["url"]
-        mode = args.get("mode", "quick")
+        """执行内容预筛（复用 core.prescreen_api，避免两份实现漂移）。"""
+        from src.core.prescreen_api import run_prescreen
 
-        from src.core import Prescreener
-
-        runtime = self._get_router_runtime()
-        prescreener = Prescreener(runtime.router)
-
-        if mode == "full":
-            from src.core.models import CostTier
-            # 先用 FREE 成本提取元信息
-            quick_result = runtime.extract(url, max_cost=CostTier.FREE)
-            if quick_result.success and quick_result.title:
-                result = prescreener.prescreen(
-                    url,
-                    title=quick_result.title,
-                    duration_seconds=quick_result.duration_seconds,
-                )
-            else:
-                result = prescreener.prescreen_quick(url)
-        else:
-            result = prescreener.prescreen_quick(url)
-
-        cost_grade = result.effective_cost_grade()
-        return {
-            "url": result.url,
-            "platform": result.platform,
-            "grade": result.grade.value,
-            "cost_grade": cost_grade.value,
-            "score": round(result.score, 1),
-            "title": result.title,
-            "duration_seconds": result.duration_seconds,
-            "reasons": result.reasons,
-            "recommended_cost_tier": result.recommended_cost_tier.value if result.recommended_cost_tier else None,
-            "skip_reason": result.skip_reason,
-            "metadata": result.metadata,
-        }
+        return run_prescreen(
+            self._get_router_runtime(),
+            str(args["url"]),
+            str(args.get("mode", "quick")),
+        )
 
     def _call_smart_extract(self, args: dict) -> dict:
         """智能提取: 预筛 + 自动提取"""

@@ -29,12 +29,21 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 | `POST /api/v1/extract` | **主入口**：提取内容 | 稳定 |
 | `POST /api/v1/extract/archive` | 提取并归档 | 稳定 |
 | `POST /api/v1/parse` | 仅解析元信息（快，含音频直链） | 稳定 |
+| `POST /api/v1/prescreen` | 零网络成本/价值预筛（不下载） | 稳定 |
 | `POST /api/v1/comments` | 评论采集 | 稳定 |
 | `POST /api/v1/creator/feed` | 创作者作品列表 | **默认关闭**（`VMB_ENABLE_CREATOR_FEED=0` 时不注册） |
 | `GET /api/v1/metrics` | 平台请求指标 + 熔断状态 + 提取命中分布 | 稳定 |
 | `POST /api/v1/tasks*`、`/api/v1/sessions*`、`/api/v1/settings`、`/api/v1/keys*` | 管理面（v1 流水线 / 登录态 / 配置） | 内部，不承诺 |
 
 鉴权：本机回环默认免鉴权；设了 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS` 后需 `Authorization: Bearer`。
+
+**调用方标识**：请在请求头带 `X-Consumer-Id`（如 `content-ops`、`dsh-mcp`）。
+缺省记 `anonymous`。该标识进日志与 `/api/v1/metrics` 的 `api.by_consumer`，
+是"按实际使用收敛端点数/工具面"的唯一依据。
+
+**MCP 是薄适配器**：`videomind` MCP 工具（`extract`/`capabilities`/`comments`）不带引擎，
+而是把请求转给本服务，因此**本服务必须在跑**；指标/缓存/熔断由此天然统一。
+服务不可用时 MCP 会返回可执行提示，也可设 `VMB_MCP_EMBEDDED=1` 让 MCP 自带引擎离线运行。
 
 ---
 

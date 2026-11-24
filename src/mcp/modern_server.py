@@ -1,62 +1,88 @@
-"""MCP Server —— mcp 2.x (``MCPServer``) 实现。
+"""MCP Server —— 薄适配器：默认把请求转给本机 REST 服务(:8787)。
 
-## 为什么要换掉手写 JSON-RPC 版
+## 为什么是"薄"
 
-原实现（``src/mcp/server.py`` 的 ``MCPServer`` 类）能用，但有三个**功能性**缺陷：
+架构文档 §3.4/§8.2：**插件/MCP 是适配器，不是能力本体**；反模式是"插件即小应用"。
+此前 MCP 在**进程内跑整套引擎**，直接造成三个问题（审查报告 §问题 4）：
 
-1. **单线程阻塞**：主循环是 ``for line in sys.stdin``，一次 40~200 秒的提取会
-   把之后所有请求排队——包括本应 <2ms 的 ``prescreen_video``。
-2. **取消被忽略**：``notifications/cancelled`` 分支是 ``pass``。
-3. **协议版本硬编码** ``2025-03-26``，不读客户端请求的版本、不协商。
+1. **指标看不见 Agent 流量**——`/metrics` 只统计 pm2 那个 REST 进程。实测：通过 MCP
+   提取一次，REST 的 `total` 一点没动。刚建的观测能力对 Agent 这条路完全失效。
+2. 缓存/熔断/模型实例都是两份，行为可能与 REST 不一致。
+3. 违反 §3.4 的分层约定。
 
-``mcp>=2.3`` 的 ``MCPServer`` 把**同步工具函数放进 anyio 线程池**执行
-（``utilities/func_metadata.py`` 用 ``anyio.to_thread.run_sync``），
-因此上面的 1、2 自然解决，协议协商与 ``structuredContent`` 也由 SDK 负责。
+现在默认薄适配器：MCP 只做参数翻译 → HTTP → 返回。引擎只有 pm2 那一个实例，
+指标、缓存、熔断、限流天然统一。
 
-## 工具面：3 个（2026-11-23 收敛，原 12 个）
+`VMB_MCP_EMBEDDED=1` 可退回"进程内引擎"模式（服务没起时的兜底，或离线调试）。
 
-对外暴露的是**工作流**，不是内部端点。收敛依据：
+## 工具面：3 个（2026-11-23 从 12 个收敛）
 
-- 下游实际只用 ``extract`` 与 ``capabilities``（`docs/CONSUMERS.md`），
-  外加评论采集；其余 10 个工具**没有已知消费者**。
-- 官方文档明确"工具越多不一定越好"：全部工具定义进上下文会
-  "wastes tokens, increases latency, and degrades model performance"
-  （MCP client best practices）。收敛前实测 12 个工具 ≈1847 token，**每轮都在上下文里**。
-- 原则：同一工作流不拆多刀（``prescreen``/``smart``/``supported`` 都是 ``extract``
-  的参数或成本闸）；配置类不暴露给模型（最小权限）；已 DEPRECATED 的 v1 工具移除。
+`extract` / `capabilities` / `comments`。收敛依据见 `docs/CONSUMERS.md` 与审查报告：
+下游只用 extract / capabilities(+comments)；12 个工具定义 ≈1847 token 每轮都在上下文里。
 
-被移除的能力**没有消失**：仍在 REST（``/api/v1/extract/archive``、``/api/v1/parse`` 等）、
-CLI 与旧实现类里。需要时用 ``VMB_MCP_LEGACY=1`` 退回旧工具面。
+## 兼容
 
-## 兼容性
-
-- 入口仍是 ``python -m src.mcp.server``（``server.main`` 转调本模块），客户端配置不用改。
-- 业务逻辑**完全复用** ``server.MCPServer`` 的 ``_call_*``，不重写，便于新旧比对。
+入口仍是 `python -m src.mcp.server`（`server.main()` 转调本模块）；
+`VMB_MCP_LEGACY=1` 退回手写 JSON-RPC 版（12 个旧工具）。
 """
 
 from __future__ import annotations
 
+import os
 from typing import Annotated, Any
 
+import httpx
 from pydantic import Field
 
-from .server import MCPServer as _LegacyCore
-
-# 业务逻辑的唯一实现。这里只做参数搬运，避免两份实现漂移。
-_CORE = _LegacyCore()
-
-
-def _args(**kwargs: Any) -> dict[str, Any]:
-    """丢掉未提供(None)的参数。
-
-    旧实现用 ``args.get("x", default)`` 取默认值，若把 ``"x": None`` 塞进去会**覆盖**
-    默认值导致行为变化。所以这里只保留调用方真正给出的键。
-    """
-    return {k: v for k, v in kwargs.items() if v is not None}
+DEFAULT_BASE_URL = "http://127.0.0.1:8787"
+CONSUMER_ID = "dsh-mcp"
+# 提取可能 40~200 秒；MCP 侧 toolCallTimeoutMs 已放宽到 600s，这里留出余量。
+_TIMEOUT = httpx.Timeout(connect=5.0, read=540.0, write=15.0, pool=15.0)
 
 
-def build_server():
-    """构建并返回配置好全部工具的 MCPServer。"""
+def _base_url() -> str:
+    return os.getenv("VMB_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
+
+
+def _embedded_enabled() -> bool:
+    return os.getenv("VMB_MCP_EMBEDDED", "").strip().lower() not in {"", "0", "false"}
+
+
+def _headers() -> dict[str, str]:
+    headers = {"X-Consumer-Id": CONSUMER_ID}
+    token = os.getenv("VIDEOMIND_API_TOKEN", "").strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
+
+def _request(method: str, path: str, payload: dict[str, Any] | None = None) -> dict:
+    """调本机 REST。连接失败时给出**可执行**的提示，而不是裸 traceback。"""
+    url = f"{_base_url()}{path}"
+    try:
+        with httpx.Client(timeout=_TIMEOUT) as client:
+            response = client.request(method, url, json=payload, headers=_headers())
+    except httpx.ConnectError as exc:
+        raise RuntimeError(
+            f"无法连接 VideoMind 服务 ({_base_url()})：{exc}\n"
+            f"请先启动服务：pm2 start videomind-api（或 pm2 list 检查状态）。\n"
+            f"若确实需要离线运行，可设 VMB_MCP_EMBEDDED=1 让 MCP 自带引擎。"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise RuntimeError(f"请求 {path} 超时：{exc}") from exc
+
+    if response.status_code >= 400:
+        raise RuntimeError(
+            f"{path} 返回 HTTP {response.status_code}：{response.text[:300]}"
+        )
+    data = response.json()
+    if not isinstance(data, dict):
+        raise RuntimeError(f"{path} 返回了非对象响应：{type(data).__name__}")
+    return data
+
+
+def _build_remote():
+    """默认：薄适配器，全部转发给本机 REST。"""
     from mcp.server.mcpserver import MCPServer
 
     mcp = MCPServer("VideoMind Bridge", version="3.0.0")
@@ -65,7 +91,7 @@ def build_server():
         name="extract",
         description=(
             "从视频/笔记链接提取文字内容。"
-            "mode=auto 执行提取；mode=prescreen 只做零网络的成本/价值预筛（<2ms，不下载）。"
+            "mode=auto 执行提取；mode=prescreen 只做零网络的成本/价值预筛（不下载）。"
             "返回含 success / completeness / platform / content / source / error_code。"
             "注意：success=true 只表示拿到了东西，完整性看 completeness（meta 表示只有标题/文案）。"
         ),
@@ -76,18 +102,18 @@ def build_server():
             str, Field(description="auto=执行提取；prescreen=只预筛（不下载）")
         ] = "auto",
         cost_tier: Annotated[
-            str,
-            Field(description="成本上限：free / cheap / paid / expensive / premium"),
+            str, Field(description="成本上限：free / cheap / paid / expensive / premium")
         ] = "cheap",
         asr_language: Annotated[str | None, Field(description="ASR 语言提示，如 zh")] = None,
     ) -> dict:
         if mode == "prescreen":
-            return _CORE._call_prescreen_video(_args(url=url, mode="quick"))
+            return _request("POST", "/api/v1/prescreen", {"url": url, "mode": "quick"})
         if mode != "auto":
             raise ValueError(f"mode 只支持 auto / prescreen，收到 {mode!r}")
-        return _CORE._call_extract_video(
-            _args(url=url, cost_tier=cost_tier, asr_language=asr_language)
-        )
+        payload: dict[str, Any] = {"url": url, "cost_tier": cost_tier}
+        if asr_language:
+            payload["asr_options"] = {"language": asr_language}
+        return _request("POST", "/api/v1/extract", payload)
 
     @mcp.tool(
         name="capabilities",
@@ -97,7 +123,7 @@ def build_server():
         ),
     )
     def capabilities() -> dict:
-        return _CORE._call_capabilities({})
+        return _request("GET", "/api/v1/capabilities")
 
     @mcp.tool(
         name="comments",
@@ -108,9 +134,62 @@ def build_server():
         limit: Annotated[int, Field(description="评论条数上限")] = 20,
         sort: Annotated[str, Field(description="hot / time")] = "hot",
     ) -> dict:
-        return _CORE._call_get_comments(_args(url=url, limit=limit, sort=sort))
+        return _request(
+            "POST", "/api/v1/comments", {"url": url, "limit": limit, "sort": sort}
+        )
 
     return mcp
+
+
+# ── 兜底：进程内引擎（VMB_MCP_EMBEDDED=1 时使用）────────────────────────
+
+
+def _args(**kwargs: Any) -> dict[str, Any]:
+    """丢掉未提供(None)的参数（旧实现用 args.get 取默认值，塞 None 会覆盖默认）。"""
+    return {k: v for k, v in kwargs.items() if v is not None}
+
+
+def _build_embedded():
+    from mcp.server.mcpserver import MCPServer
+
+    from .server import MCPServer as LegacyCore
+
+    core = LegacyCore()
+    mcp = MCPServer("VideoMind Bridge", version="3.0.0")
+
+    @mcp.tool(name="extract", description="提取文字内容（进程内引擎，VMB_MCP_EMBEDDED=1）")
+    def extract(
+        url: Annotated[str, Field(description="视频或笔记链接")],
+        mode: Annotated[str, Field(description="auto / prescreen")] = "auto",
+        cost_tier: Annotated[str, Field(description="成本上限")] = "cheap",
+        asr_language: Annotated[str | None, Field(description="ASR 语言提示")] = None,
+    ) -> dict:
+        if mode == "prescreen":
+            return core._call_prescreen_video(_args(url=url, mode="quick"))
+        return core._call_extract_video(
+            _args(url=url, cost_tier=cost_tier, asr_language=asr_language)
+        )
+
+    @mcp.tool(name="capabilities", description="能力矩阵（进程内）")
+    def capabilities() -> dict:
+        return core._call_capabilities({})
+
+    @mcp.tool(name="comments", description="采集评论（进程内）")
+    def comments(
+        url: Annotated[str, Field(description="视频或笔记链接")],
+        limit: Annotated[int, Field(description="评论条数上限")] = 20,
+        sort: Annotated[str, Field(description="hot / time")] = "hot",
+    ) -> dict:
+        return core._call_get_comments(_args(url=url, limit=limit, sort=sort))
+
+    return mcp
+
+
+def build_server(embedded: bool | None = None):
+    """构建 MCP server。默认薄适配器；`embedded=True` 或环境变量可退回进程内引擎。"""
+    if embedded is None:
+        embedded = _embedded_enabled()
+    return _build_embedded() if embedded else _build_remote()
 
 
 def main() -> None:

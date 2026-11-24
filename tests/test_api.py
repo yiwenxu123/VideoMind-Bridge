@@ -528,3 +528,27 @@ class TestSecurity:
         with TestClient(server.app) as c:
             resp = c.get("/api/v1/tasks?limit=1000")
             assert resp.status_code == 422
+
+
+def test_prescreen_endpoint_exists_and_is_offline(client):
+    """POST /api/v1/prescreen —— 2026-11-24 新增。
+
+    存在意义：预筛此前只作为 MCP 工具存在，REST 没有对应端点，
+    导致 MCP 无法做成薄适配器（只能在自己进程里再跑一遍引擎）。
+    这里断言端点存在、零网络可用、返回结构稳定。
+    """
+    resp = client.post(
+        "/api/v1/prescreen",
+        json={"url": "https://www.bilibili.com/video/BV1p45v6kEJc/", "mode": "quick"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    for key in ("url", "platform", "grade", "cost_grade", "score", "reasons"):
+        assert key in data, f"缺少字段 {key}"
+    assert data["platform"] == "bilibili"
+    assert data["grade"] in {"S", "A", "B", "C", "D"}
+
+
+def test_prescreen_requires_url(client):
+    resp = client.post("/api/v1/prescreen", json={})
+    assert resp.status_code == 400
