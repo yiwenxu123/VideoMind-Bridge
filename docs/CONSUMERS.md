@@ -43,7 +43,7 @@
 > 2026-11-24 改为薄适配器：此前 MCP 在进程内跑整套引擎，导致 Agent 流量在 `/metrics` 里
 > 完全不可见（实测 MCP 提取后 REST 的 `total` 不变）。现在统一走 REST，指标自然可见。
 > 代价：本服务没起时 MCP 不可用（会返回 `pm2 start videomind-api` 的提示）；
-> 离线场景可设 `VMB_MCP_EMBEDDED=1` 退回自带引擎。
+> 没有离线兜底：`VMB_MCP_EMBEDDED=1` 已于 2026-11-25 删除，服务必须在跑。
 
 ---
 

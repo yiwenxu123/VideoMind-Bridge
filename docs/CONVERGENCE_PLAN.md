@@ -155,7 +155,9 @@ prescreen → recommended_cost_tier → router.extract(url, max_cost=recommended
 
 ### 4.2 CLI 单一化
 
-**现状**: 一个 `cli.py` 承载 v1 模式（`--mode full/download/transcribe`）+ v2 模式（`--smart/--prescreen/--cost-tier`）20+ 参数。
+**2026-11-25 更新**: v1 模式已整体删除（A2）—— 现在 `cli.py` 只有 v2 一条路。下面是当时的记录。
+
+**当时现状**: 一个 `cli.py` 承载 v1 模式（`--mode full/download/transcribe`）+ v2 模式（`--smart/--prescreen/--cost-tier`）20+ 参数。
 
 **收敛目标**:
 

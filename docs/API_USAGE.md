@@ -2,7 +2,8 @@
 
 > 创作者作品列表 / 评论采样接口见 [DISCOVERY_API.md](DISCOVERY_API.md)；默认关闭，需显式开启。
 >
-> 浏览器控制台：`http://127.0.0.1:8787/console`；旧版 v1 工作站：`http://127.0.0.1:8787/legacy`。
+> 浏览器控制台：`http://127.0.0.1:8787/console`。旧版 v1 工作站（`/legacy`）、WebSocket（`/ws`）
+> 与任务接口（`/api/v1/tasks*`）已于 2026-11-25（A2）删除。
 
 ## HTTP API 要点
 

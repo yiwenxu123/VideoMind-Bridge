@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-智能视频处理工具，支持下载、转录、AI 摘要和导出。  
+多平台内容采集引擎：给一条链接，返回它的文字内容（无字幕由 ASR 兜底）。  
 Python 3.11+ monorepo。uv 驱动。
 
 ## Quick Start
@@ -10,7 +10,7 @@ Python 3.11+ monorepo。uv 驱动。
 ```bash
 uv sync --extra dev             # 服务端/CLI/MCP 依赖（含 dev: ruff/mypy/pytest）
 uv run python -m src.cli <url>  # CLI 模式
-uv run python -m src.cli /path/to/video.mp4 --targets obsidian  # 本地文件（跳过下载）
+uv run python -m src.cli /path/to/video.mp4 --json  # 本地文件：只转写（无下载/摘要）
 python main.py --api            # API 服务 (端口 8787; 控制台 /console)；GUI 已下线
 python main.py --mcp            # MCP Server (stdio JSON-RPC)
 ./scripts/install_sensevoice.sh --check  # SenseVoice（默认 ASR 第一级）体检；去掉 --check 即安装
@@ -22,23 +22,23 @@ mypy src/ --ignore-missing-imports  # 类型检查
 
 ## Architecture (Dual System)
 
-**v1 (Legacy):** Download → Transcribe (Whisper) → AI Summary → Export  
-**v2 (New Engine):** Extract ×10 → Cost-aware Route → Prescreen → Hermes Output
+**v1 已删除（2026-11-25 A2）:** 原 Download → Transcribe → AI Summary → Export 流水线；现在只有 v2 引擎 + 本地文件转写。
+**v2 (Only Engine):** Prescreen → Cost-aware Route → Extract ×8 → ASR 兜底 → Hermes Output / 归档
 
 | Layer | Path | Technology |
 |-------|------|-----------|
 | Entrypoint | `main.py` | argparse → API (FastAPI) / MCP |
-| CLI | `src/cli.py` | rich, argparse (v1+v2 dual mode) |
-| v2 Engine | `src/core/` | 10 extractors + router + prescreener + archiver + Hermes formatter |
-| v1 Services | `src/services/` | download, transcribe (faster-whisper), AI, export |
-| API | `src/api/` | FastAPI + WebSocket |
-| MCP | `src/mcp/server.py` | stdio JSON-RPC (Model Context Protocol) |
+| CLI | `src/cli.py` | rich, argparse（v2 单一路径；本地文件只转写） |
+| v2 Engine | `src/core/` | 8 extractors + ASR 链 + router + prescreener + archiver + Hermes formatter |
+| Services | `src/services/` | config_manager（配置/密钥）、local_media（本地路径白名单）、export_orchestrator（并发导出） |
+| API | `src/api/` | FastAPI（无 WebSocket，A2 已删） |
+| MCP | `src/mcp/server.py` | stdio 入口 → `modern_server.py`（3 工具薄适配器，转 HTTP） |
 
 ## v2 Engine (`src/core/`)
 
 ### Extractors (`src/core/extractors/`)
 
-10 个提取器通过注册表模式自动注册 (`register_extractor()`)，在 `__init__.py` 中延迟导入触发。
+8 个提取器通过注册表模式自动注册 (`register_extractor()`)，在 `__init__.py` 中延迟导入触发。
 
 默认优先级 (成本排序):
 ```
@@ -91,7 +91,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 提取即归档: 把 `ExtractResult` 直接写入 Obsidian/本地/HTML, 无需 v1 下载/转录。
 - `archive_extract_result(result, targets, config)` — 复用 v1 导出器做纯文本归档
 - `build_export_context(result)` — ExtractResult → ExportContext (无媒体文件, 导出器自动降级为纯文本笔记)
-- CLI: `--archive obsidian,local --obsidian-vault <path>`; MCP: `archive_extract` 工具
+- CLI: `--archive obsidian,local --obsidian-vault <path>`; API: `POST /api/v1/extract/archive`（MCP 不暴露归档工具）
 - 无真实内容 (占位/失败) 时拒绝归档
 
 ### Hermes Formatter (`formatter.py`)
@@ -105,15 +105,14 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **Bilibili API**: URL 必须全小写 `/x/web-interface/view`，大写 `I` 会 404
 - **Extractor 注册**: 通过 import 时跑的模块级代码自动注册，无需手动配置
 - **占位结果语义**: `ExtractResult.is_placeholder=True` 表示仅元信息/说明文本（无真实内容）。router 对占位结果不缓存、继续降级链；真正成功才缓存并返回
-- **`--smart`/MCP smart_extract**: FREE 提取到完整内容时直接复用（不二次提取）；仅当 FREE 失败/占位时才按推荐成本升级提取
+- **`--smart`**: FREE 提取到完整内容时直接复用（不二次提取）；仅当 FREE 失败/占位时才按推荐成本升级提取（MCP 侧的 smart_extract 已于 2026-11-25 删除，预筛用 `extract mode=prescreen`）
 - **`--prescreen` 复用提取**: 仅真成功（有内容、非占位）结果被复用；失败/占位时允许二次高成本提取
 - **API 鉴权**: 默认绑定 127.0.0.1。设置 `VIDEOMIND_API_TOKEN`（admin）或 `VMB_CONSUMER_TOKENS`（JSON 多消费者）后，`/api/v1/*` 需携带 `Authorization: Bearer <token>`；`VMB_RATE_LIMIT_PER_MIN` 可开启每消费者每分钟限流（0=关闭）。**token 规范名只有 `VIDEOMIND_API_TOKEN`**；`VMB_API_TOKEN` 是历史错名（服务端从不读），回归脚本仅为兼容保留回退并打印弃用提示。带非白名单 Origin 的浏览器请求被 403 拒绝（防 CSRF）。**Origin 校验为精确主机名匹配**（urlsplit 后 host ∈ {127.0.0.1, localhost, ::1}，扩展按 scheme 放行）——不要改回前缀匹配，`http://127.0.0.1.evil.com` 类仿冒源曾可绕过。多消费者模式下 settings/keys/sessions 写端点仅 admin 可用（consumer 返回 403）
-- **Discovery API**: `VMB_ENABLE_CREATOR_FEED=1` 开启 `/api/v1/creator/feed`，`VMB_ENABLE_COMMENTS=1` 开启 `/api/v1/comments`（默认都不注册路由）；MCP 同步出现 `get_creator_feed` / `get_comments`。B站空间接口对无登录态请求常返回 HTTP 412 / `code=-352`，可用 `VMB_BILIBILI_COOKIES_FILE`（Netscape cookies.txt）或 `VMB_BILIBILI_SESSDATA` / `VMB_BILIBILI_COOKIE` 提供登录态；评论接口实测可无登录采样。cookie 可能绑定出口 IP/指纹，换机器仍可能 `risk_control`；VMB 不绕过验证码。回归脚本：`scripts/check_discovery_links.py`
-- **本地文件摄入**: CLI 传本地视频/音频路径时跳过下载，直接转录/摘要/导出（平台标记 `local`）；MCP `videomind_process` / `videomind_download` 同样支持。API `POST /api/v1/tasks` 也接受本地路径，但文件必须位于 `VMB_LOCAL_MEDIA_DIRS`（路径分隔符分隔）内，未配置时禁用。
-- **登录态统一管理**: 所有平台登录态经 `SessionManager.resolve(platform)` 统一解析，优先级：**平台专用 env → 密钥环 session 设置 → 通用 env（`VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`）**。密钥环键见 `ConfigManager.SESSION_KEYS`（如 `bilibili:cookies_file`、`ytdlp:browser`），管理入口：MCP `configure` 的 `session:*` 键 + API `PUT/DELETE /api/v1/sessions/settings/{key}`（admin）。`/api/v1/parse` **不接受**请求体 cookies_file 路径（安全），登录态只来自服务端解析。新平台接入时在 `session.py` 加 Provider，勿在业务代码直读 cookie env
-- **下载/转录取消**: 取消令牌为 `threading.Event`，贯穿 TaskManager → DownloadService → yt-dlp progress hook（抛 `DownloadCancelled`）与转录片段边界；取消/超时统一抛 `OperationCancelledError`（终态 CANCELLED 而非 FAILED）。CLI `--timeout` 为整体超时（下载+转录共享令牌）。下载中断保留 `.part`，同 URL 重建任务即断点续传（临时目录按 URL 哈希固定）。删除任务有 tombstone，executor 收尾不会把已删任务复活写库
+- **Discovery API**: `VMB_ENABLE_CREATOR_FEED=1` 开启 `/api/v1/creator/feed`，`VMB_ENABLE_COMMENTS=1` 开启 `/api/v1/comments`（默认都不注册路由）；MCP 侧只有 `comments` 工具（创作者列表走 REST）。B站空间接口对无登录态请求常返回 HTTP 412 / `code=-352`，可用 `VMB_BILIBILI_COOKIES_FILE`（Netscape cookies.txt）或 `VMB_BILIBILI_SESSDATA` / `VMB_BILIBILI_COOKIE` 提供登录态；评论接口实测可无登录采样。cookie 可能绑定出口 IP/指纹，换机器仍可能 `risk_control`；VMB 不绕过验证码。回归脚本：`scripts/check_discovery_links.py`
+- **本地文件只剩转写（2026-11-25 A2）**: `uv run python -m src.cli <本地文件>` 会 ffmpeg 转 16k 单声道 wav 后走 ASR 降级链，**没有下载、没有 AI 摘要**。API `POST /api/v1/parse` 仍接受本地路径（受 `VMB_LOCAL_MEDIA_DIRS` 白名单约束）；`/api/v1/extract` 只接受 URL。
+- **登录态统一管理**: 所有平台登录态经 `SessionManager.resolve(platform)` 统一解析，优先级：**平台专用 env → 密钥环 session 设置 → 通用 env（`VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`）**。密钥环键见 `ConfigManager.SESSION_KEYS`（如 `bilibili:cookies_file`、`ytdlp:browser`），管理入口：API `PUT/DELETE /api/v1/sessions/settings/{key}`（admin）——MCP 的 `configure` 工具已于 2026-11-25 删除。`/api/v1/parse` **不接受**请求体 cookies_file 路径（安全），登录态只来自服务端解析。新平台接入时在 `session.py` 加 Provider，勿在业务代码直读 cookie env
 - **平台请求治理**: 平台自有 HTTP 请求走 `PlatformRateLimiter`（B站/抖音/小红书/YouTube），本地网关、第三方 API 和 CDN 下载不套平台 limiter；yt-dlp 通过 `VMB_YTDLP_SLEEP_REQUESTS`、`VMB_YTDLP_RETRIES` 等参数节流，平台熔断时跳过 yt-dlp 兜底。小红书可选 `VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE`；抖音用 `DOUYIN_COOKIES_FILE`。`GET /api/v1/metrics` 返回进程内平台计数，`VMB_LOG_JSON=1` 开启 JSON 日志。
-- **桌面 GUI 已下线（2026-11-24）**: `src/gui/` 与 `browser-extension/` 已删除，`gui` extra 一并移除；`python main.py` 不带参数会打印用法并以退出码 2 结束（不再有隐式默认模式）。v1 的下载/转录/摘要能力仍在（CLI `--mode` + `/legacy` 页面），等 A2 再决定去留
+- **GUI 与 v1 都没了（2026-11-24 / 11-25）**: `src/gui/`、`browser-extension/`、`/legacy`、`/ws`、`/api/v1/tasks*`、任务队列与 AI 摘要全部删除；`python main.py` / `python -m src.cli` 不带参数都是「打印用法 + 退出码 2」。`GET /api/v1/status` 的四个任务计数恒为 0（字段保留仅为不破坏调用方）。MCP 的 `VMB_MCP_LEGACY` / `VMB_MCP_EMBEDDED` 两个兜底开关也一并删除
 - **SenseVoice 依赖仓库外资产**: 默认 ASR 第一级需要 `~/.cache/sensevoice/venv`（sherpa-onnx + soundfile）与 `~/.cache/sherpa-onnx/sense-voice/`（`model.int8.onnx` + `tokens.txt`）。2026-11-24 起 `capabilities()` 会真起子进程探测 `import sherpa_onnx, soundfile`（按解释器缓存，超时 10s），**文件齐但解释器缺依赖时 `available=false`**——别再把「文件存在」当成「能用」。安装/体检：`scripts/install_sensevoice.sh [--check]`
 - **Build 工具**: 只剩 `python -m build`（sdist/wheel）。PyInstaller 打包随 GUI 一起在 2026-11-24 移除
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)

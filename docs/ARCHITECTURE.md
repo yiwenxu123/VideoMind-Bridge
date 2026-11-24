@@ -1,160 +1,95 @@
 # VideoMind Bridge 架构文档
 
-> **2026-11-24 注**：下图中「GUI 层」已随 `src/gui/` 一并下线（桌面 GUI 不再是产品形态，见 `docs/AUDIT-2026-11-24.md` 第八章）。其余分层仍然准确；v1 服务层的去留见 A2 计划。
+> 2026-11-25（A2）重写：v1 流水线（下载 → 转录 → AI 摘要 → 任务队列）已删除，
+> 本文只描述现存结构。历史结构见 `docs/AUDIT-2026-11-24.md` 第八章。
 
-## 系统架构
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        GUI 层                                │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │ 主窗口      │ │ 任务队列    │ │ 历史记录侧边栏      │   │
-│  │ MainWindow  │ │ TaskQueue   │ │ TaskHistorySidebar  │   │
-│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
-├─────────────────────────────────────────────────────────────┤
-│                      服务层 (Services)                       │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │ 下载服务 │ │ 转录服务 │ │ AI 服务  │ │ 导出编排器   │  │
-│  │ Download │ │Transcribe│ │ AIService│ │ExportOrchestrator│
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  │
-│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────┐  │
-│  │ 配置管理 │ │ 模板管理 │ │ 重复检测 │ │ 时间预估     │  │
-│  │ Config   │ │ Prompt   │ │ Duplicate│ │ TimeEstimator│  │
-│  └──────────┘ └──────────┘ └──────────┘ └──────────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│                      导出器层 (Exporters)                    │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │ 本地导出    │ │ Obsidian    │ │ Webhook             │   │
-│  │ Local       │ │ Obsidian    │ │ WebhookExporter     │   │
-│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
-├─────────────────────────────────────────────────────────────┤
-│                      数据层 (Data)                           │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────────────┐   │
-│  │ 配置模型    │ │ 任务模型    │ │ 数据库              │   │
-│  │ Config      │ │ Task        │ │ SQLite              │   │
-│  └─────────────┘ └─────────────┘ └─────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 核心模块说明
-
-### 1. 下载服务 (DownloadService)
-
-**职责**: 从各种视频平台下载视频和音频
-
-**主要功能**:
-- 支持 Bilibili、YouTube、小红书等平台
-- 视频质量选择 (1080p/720p/best)
-- 音频提取
-- 重试机制
-
-**关键类**:
-- `DownloadService`: 主服务类
-- `DownloadResult`: 下载结果数据类
-
-### 2. 转录服务 (TranscribeService)
-
-**职责**: 将音频转换为文本
-
-**主要功能**:
-- 基于 faster-whisper
-- 支持多种模型 (tiny/base/small/medium/large)
-- 模型缓存避免重复加载
-- 多语言支持
-
-**关键类**:
-- `TranscribeService`: 主服务类
-- `TranscriptResult`: 转录结果
-- `TranscriptSegment`: 转录片段
-
-### 3. AI 服务 (AIService)
-
-**职责**: 生成视频摘要和提取要点
-
-**主要功能**:
-- 支持 DeepSeek、OpenAI 等模型
-- 可配置 Prompt 模板
-- 自动重试和模型切换
-- Mock 模式用于测试
-
-**关键类**:
-- `AIService`: 主服务类
-- `SummaryResult`: 摘要结果
-- `Highlight`: 要点数据类
-
-### 4. 导出编排器 (ExportOrchestrator)
-
-**职责**: 协调多个导出目标
-
-**主要功能**:
-- 并发导出到多个目标
-- 统一错误处理
-- 导出结果汇总
-
-### 5. 配置管理 (ConfigManager)
-
-**职责**: 管理应用配置
-
-**主要功能**:
-- 单例模式
-- 自动保存/加载
-- 密钥安全存储
-
-## 数据流
+## 1. 分层与职责
 
 ```
-用户输入 URL
-    │
-    ▼
-┌─────────────┐
-│ 下载服务    │ ──► 视频文件 + 音频文件
-└─────────────┘
-    │
-    ▼
-┌─────────────┐
-│ 转录服务    │ ──► 转录文本 + 时间轴
-└─────────────┘
-    │
-    ▼
-┌─────────────┐
-│ AI 服务     │ ──► 摘要 + 要点
-└─────────────┘
-    │
-    ▼
-┌─────────────┐
-│ 导出编排器  │ ──► 本地/Obsidian/Webhook
-└─────────────┘
+L3  接口层   REST /api/v1/*(:8787) · MCP（stdio，薄适配器）· 控制台 /console
+                │  只做参数翻译、鉴权、错误翻译；不含业务逻辑
+L1  编排层   src/core/router.py       成本感知路由 + 降级链 + 缓存
+             src/core/extractors/     8 个平台提取器
+             src/core/asr/            ASR 降级链（4 个后端适配器）
+             src/core/archiver.py     提取即归档（复用导出器，纯文本）
+             src/core/formatter.py    Hermes 输出格式
+                │  消费
+外部  平台  douyin-api(:8010) 平台网关（**待收编为 L0**，见分层文档 §2.4）
+     模型/ASR  SenseVoice(本地) · DashScope · 阿里云 · faster-whisper
 ```
 
-## 扩展点
+定位（与《项目分层与协作架构》一致）：**L1 采集编排 + L3 接口**。
+承诺的是「采到内容，并能证明采到了什么/有多完整」；不判断内容价值——那是 L2 调用方的职责。
 
-### 添加新的导出目标
+## 2. 目录
 
-1. 继承 `BaseExporter` 基类
-2. 实现 `validate_config()` 和 `export()` 方法
-3. 在 `ExportTarget` 枚举中添加新目标
-4. 在 `ExportOrchestrator` 中注册
+| 路径 | 内容 |
+|---|---|
+| `src/core/extractors/` | 8 个提取器（bilibili / youtube / xiaohongshu / douyin / ytdlp / ytdlp_asr / tikhub / apify），注册表模式自动注册 |
+| `src/core/asr/` | ASR 统一层：`chain.py` 降级链、`registry.py` 后端注册、`adapters/` 4 个后端、`normalizer.py` 结果映射 |
+| `src/core/media/` | yt-dlp 与 HTTP 媒体获取、ffmpeg 转码（`to_16k_mono_wav` / `transcode_to_mp3`） |
+| `src/core/platforms/` | 平台登录态、限流器、熔断、共享 HTTP（`platform_get`） |
+| `src/core/discovery/` | 评论采样、创作者作品列表（默认关闭，需显式开启） |
+| `src/core/router.py` | 成本感知路由：按优先级尝试提取器，失败自动降级；只缓存 `completeness=full` |
+| `src/core/prescreener.py` | 零网络预筛：内容分级 + **提取成本决策**（不做内容价值评估） |
+| `src/core/archiver.py` | 提取即归档（Obsidian / 本地 / HTML 播放器），复用 `src/exporters/` |
+| `src/api/` | FastAPI：`server.py`（路由）/ `auth.py`（token + 限流）/ `models.py`（响应模型） |
+| `src/mcp/` | `server.py` = 入口（`-m src.mcp.server`）；`modern_server.py` = 3 个工具的薄适配器 |
+| `src/services/` | `config_manager`（配置与密钥）、`local_media`（本地路径白名单）、`export_orchestrator`（并发导出） |
+| `src/exporters/` | local / obsidian / webhook / html_player 四个导出器 |
+| `src/models/` | `config.py`（配置 schema）、`task.py`（导出上下文与结果模型） |
 
-### 添加新的 AI 模型
+## 3. 数据流
 
-1. 在 `AIService` 中添加模型配置
-2. 实现对应的 API 调用逻辑
-3. 添加错误处理和重试机制
-
-## 性能优化
-
-### 已实现的优化
-
-1. **Whisper 模型缓存**: 全局缓存避免重复加载
-2. **并发任务控制**: 可配置并发数，避免资源耗尽
-3. **数据库分页**: 历史记录分页加载
-4. **时间预估**: 基于历史数据预估处理时间
-
-### 配置项
-
-```yaml
-performance:
-  max_concurrent_tasks: 2      # 最大并发任务数
-  enable_model_cache: true     # 启用模型缓存
-  auto_clear_cache_on_exit: false  # 退出时清理缓存
 ```
+URL（或本地文件）
+  │
+  ├─► /api/v1/prescreen   零网络：内容分级 + 推荐成本档（不下载）
+  │
+  └─► /api/v1/extract     ContentRouter.extract(url, max_cost)
+        │
+        ├─ 逐提取器尝试（按成本档排序，失败降级，记 attempts 明细）
+        │     · 有字幕 → 直接取字幕/正文
+        │     · 无字幕 → 下载音频 → ASR 链（SenseVoice → DashScope → 阿里云 → faster-whisper）
+        │
+        └─► ExtractResult（success ⊥ completeness，见 docs/CONTRACT.md）
+              ├─► formatter：Hermes 输出
+              └─► archiver：纯文本归档到 Obsidian / 本地 / HTML
+```
+
+## 4. 契约与消费者
+
+- 对外字段与不变式：`docs/CONTRACT.md`（唯一权威，含变更记录）。
+- 谁在调用：`docs/CONSUMERS.md`。改字段前必须核对，找不到影响面说明有未登记消费者。
+- 双轴：`success`（拿没拿到）与 `completeness`（有多完整，`full/meta/none/unknown`）正交。
+  「只有标题/文案」必须是 `success=true` + `completeness=meta`，不能是失败。
+
+## 5. 扩展点
+
+### 加一个提取器
+
+1. 继承 `ContentExtractor`（`src/core/extractors/base.py`）；
+2. 调 `register_extractor()` 注册；
+3. 在 `src/core/extractors/__init__.py` 里 import 触发注册；
+4. 需要调优先级就改 `src/core/router.py` 的 `_DEFAULT_PRIORITY`；
+5. `capabilities()` 会自动反映（`is_available()` 决定 `available`）。
+
+### 加一个 ASR 后端
+
+1. 在 `src/core/asr/adapters/` 实现 `Transcriber`（`capabilities()` + `transcribe()`）；
+2. `register_transcriber()` 注册；
+3. 默认链顺序在 `src/models/config.py` 的 `DEFAULT_ASR_CHAIN`（单一常量）。
+
+### 加一个导出目标
+
+1. 继承 `BaseExporter`，实现 `validate_config()` / `export()`；
+2. 在 `ExportTarget` 枚举加值；
+3. 在 `ExportOrchestrator` 注册。
+
+## 6. 治理与可观测
+
+- **缓存**：进程内短时缓存，只缓存 `completeness=full`；key 区分成本档与 ASR 选项。
+- **限流与熔断**：平台自有请求走 `PlatformRateLimiter`；熔断时跳过 yt-dlp 兜底。
+- **指标**：`GET /api/v1/metrics` 按平台/提取器/消费者计数，是「按实际使用收敛接口」的唯一依据。
+- **鉴权**：默认回环免鉴权；设 `VIDEOMIND_API_TOKEN` 后需 Bearer；可配多消费者与限流。
+- **日志**：`VMB_LOG_JSON=1` 输出结构化日志。

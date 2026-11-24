@@ -8,26 +8,18 @@
 ## 功能特性
 
 ### v2 Engine（主链，推荐）
-- **多引擎提取**：9 个提取器自动降级（B站/YouTube/抖音/小红书/yt-dlp/tikhub/Apify/阿里云ASR）
+- **多引擎提取**：8 个提取器自动降级（B站/YouTube/抖音/小红书/yt-dlp/yt-dlp+ASR/TikHub/Apify）
 - **零Cookie提取**：B站 WBI 签名、抖音 iesdouyin、小红书页面解析，无需浏览器 Cookie
 - **提取成本决策**：预筛回答"提取这个链接要花多少钱"（cost_grade + recommended_cost_tier），S/A 免费、B 便宜、C 需付费、D 建议跳过
 - **成本感知路由**: 免费 > 付费自动选择，失败自动降级下一级
 - **提取即归档**: `--archive obsidian,local` 一条命令把全文写入 Obsidian/本地，无需下载视频
 - **结构化输出**: Hermes 兼容 JSON 格式
-- **MCP Server**: AI Agent 直接调用（prescreen_video / smart_extract / extract_video / archive_extract）
+- **MCP Server**: AI Agent 直接调用（`extract` / `capabilities` / `comments` 三个工具，薄适配器，经 HTTP 调本服务）
 
 > 职责边界: VideoMind Bridge 负责**采集与成本决策**；内容价值的深度评估交给 content-value-evaluator skill
 
-### v1 (Legacy 扩展模式)
-
-> 状态：Legacy / 冻结。仅保留兼容性，不再作为新功能的默认入口；新工作流请使用 v2 Engine、MCP 或 Gateway Console。
-
-- **视频下载**：支持 Bilibili、YouTube、抖音、小红书等平台
-- **语音转录**：自动生成字幕和时间轴
-- **AI 摘要**：使用 DeepSeek 等国内模型生成智能摘要
-- **多格式导出**：支持 Obsidian、本地文件夹、HTML 播放器
-- **任务管理**：队列管理、暂停、恢复、历史记录
-- **本地 API 服务**：提供 REST API 和 WebSocket
+> **2026-11-25（A2）：v1 流水线已删除**（下载 → 转录 → AI 摘要 → 任务队列/WebSocket）。
+> 现在只剩两条能力：**链接提取**（v2 引擎）与**本地文件转写**（走同一条 ASR 降级链）。
 
 ## 安装
 
@@ -98,7 +90,7 @@ http://127.0.0.1:8787/console
 控制台包含：概览、平台健康、提取/归档、公开评论采样、会话状态、指标和能力探测。
 如果配置了 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS`，在右上角「设置 Token」填入即可。
 
-旧版 v1 工作站仍保留在 `http://127.0.0.1:8787/legacy`，用于过渡；新操作请使用 Gateway Console。
+旧版 v1 工作站（`/legacy`）、WebSocket（`/ws`）与任务接口（`/api/v1/tasks*`）已于 2026-11-25 删除。
 
 ## 使用
 
@@ -133,43 +125,32 @@ python main.py --mcp
 uv run python -m src.mcp.server
 ```
 
-MCP 工具列表:
+MCP 工具列表（3 个，2026-11-23 从 12 个收敛；2026-11-25 删除全部 v1 工具）:
 | 工具 | 说明 |
 |------|------|
-| `prescreen_video` | 成本决策（纯规则，零网络），输出 cost_grade + recommended_cost_tier |
-| `smart_extract` | 智能提取：成本决策 → 评分 → 自动提取 |
-| `extract_video` | 直接提取内容 |
-| `archive_extract` | 提取并归档（Obsidian/本地） |
-| `list_extractors` | 列出所有提取器及状态 |
-| `configure` | 获取/设置配置 |
+| `extract` | 提取正文；`mode=prescreen` 时改走零网络成本预筛 |
+| `capabilities` | 提取器与 ASR 后端能力矩阵 |
+| `comments` | 评论采样（需 `VMB_ENABLE_COMMENTS=1`） |
 
-### v1 (Legacy 扩展模式)
+MCP 是**薄适配器**：把请求转给本机 REST(8787)，自己不跑引擎（服务没起会明确报错）。
 
-> **2026-11-24：桌面 GUI 与浏览器扩展已下线**（PySide6 依赖一并移除；`python main.py` 不带参数会打印用法并退出）。
-> v1 的下载 / 转录 / AI 摘要能力仍在：用下面的 API 模式 + `/legacy` 页面，或 CLI 的 `--mode`。
+### 本地文件转写（手动下载的视频）
 
-#### API 服务模式
+平台拿不到直链时（如视频号），可以先手动下载，再让本服务转写。这条路径**只做转写**，
+没有下载、没有 AI 摘要 —— 走的是同一套 ASR 降级链：
+
+```bash
+uv run python -m src.cli ~/Downloads/manual.mp4 --json
+uv run python -m src.cli ~/Downloads/manual.mp4 --asr-chain sensevoice,faster_whisper
+```
+
+### API 服务模式
 
 ```bash
 python main.py --api
-# 或指定端口
 python main.py --api --port 9000
 # Gateway Console: http://127.0.0.1:8787/console
-# 旧版工作站: http://127.0.0.1:8787/legacy
-# API 文档: http://127.0.0.1:8787/docs
-```
-
-#### CLI 完整处理
-
-```bash
-# 完整处理（下载 + 转录 + AI摘要 + 导出）
-uv run python -m src.cli "URL" --mode full --json
-
-# 仅转录
-uv run python -m src.cli "URL" --mode transcribe --json
-
-# 仅下载
-uv run python -m src.cli "URL" --mode download --json
+# API 文档:        http://127.0.0.1:8787/docs
 ```
 
 ## 配置
@@ -178,15 +159,9 @@ uv run python -m src.cli "URL" --mode download --json
 
 ### AI 引擎配置
 
-支持以下模型：
-- DeepSeek（deepseek-chat）
-- 智谱 AI（glm-4）
-- Moonshot（moonshot-v1-8k）
-- MiniMax
-- 豆包
-- Ollama（本地）
-- OpenAI（GPT-4o、GPT-4）
-- Anthropic（Claude 3.5）
+> **2026-11-25（A2）**：AI 摘要（DeepSeek / 智谱 / Moonshot / …）随 v1 流水线删除。
+> `config.yaml` 的 `ai` 段与 `/api/v1/settings` 的 AI 字段仍在（读旧配置不报错），
+> 但**已无执行者**；下一次整理配置 schema 时一并去掉。
 
 ### 导出配置
 
@@ -206,7 +181,11 @@ src/
 │   ├── archiver.py       # 提取即归档 (Obsidian/本地/HTML)
 │   ├── formatter.py      # Hermes 输出格式化
 │   ├── models.py         # 数据模型
-│   └── extractors/       # 9 个提取器
+│   ├── asr/              # ASR 统一层（降级链 + 4 个后端适配器）
+│   ├── media/            # yt-dlp/HTTP 取媒体 + ffmpeg 转码
+│   ├── platforms/        # 登录态 / 限流 / 熔断
+│   ├── discovery/        # 评论 / 创作者作品列表
+│   └── extractors/       # 8 个提取器
 │       ├── bilibili_extractor.py
 │       ├── youtube_extractor.py
 │       ├── douyin_extractor.py
@@ -215,13 +194,13 @@ src/
 │       ├── ytdlp_asr_extractor.py   # yt-dlp + 阿里云 ASR
 │       ├── tikhub_extractor.py      # 商业API
 │       └── apify_extractor.py       # 商业爬虫
-├── api/                  # API 服务（FastAPI + WebSocket, v1 扩展）
-├── cli.py                # CLI 入口（v2 主链 + v1 --mode full 扩展）
-├── mcp/                  # MCP Server（stdio JSON-RPC, v2 工具为主）
+├── api/                  # API 服务（FastAPI）
+├── cli.py                # CLI 入口（v2 单一路径；本地文件只转写）
+├── mcp/                  # MCP：server.py=入口，modern_server.py=3 工具薄适配器
 ├── config/               # 配置常量
 ├── exporters/            # 导出器
 ├── models/               # 数据模型
-├── services/             # v1 服务（扩展模式）
+├── services/             # 配置管理 / 本地路径白名单 / 导出编排
 └── utils/                # 工具函数
     └── platform_detector.py  # 统一平台检测（13 平台）
 ```

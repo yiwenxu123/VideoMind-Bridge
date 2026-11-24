@@ -118,60 +118,37 @@ uv run python -m src.cli "URL" --archive obsidian,local --obsidian-vault /path/t
 uv run python -m src.cli "URL" --archive local --json
 ```
 
-### 步骤 4: v1 处理模式 (视频下载 + 转录 + 摘要)
+### 步骤 4: 本地文件转写 (手动下载的视频)
 
-当需要完整处理（含 AI 摘要和文件导出）时使用:
+平台拿不到直链时（视频号等），先手动下载再交给本服务转写。**只转写，不下载、不摘要**：
 
 ```bash
-# 完整处理 (下载+转录+AI摘要)
-uv run python -m src.cli "URL" --mode full --json
+# 直接转写（走默认 ASR 链）
+uv run python -m src.cli ~/Downloads/manual.mp4 --json
 
-# 仅转录
-uv run python -m src.cli "URL" --mode transcribe --json
-
-# 仅下载
-uv run python -m src.cli "URL" --mode download --json
-
-# 导出到 Obsidian
-uv run python -m src.cli "URL" --targets obsidian --obsidian-vault /path/to/vault --json
+# 指定严格 ASR 链
+uv run python -m src.cli ~/Downloads/manual.mp4 --asr-chain sensevoice,faster_whisper --json
 ```
+
+> 2026-11-25（A2）：v1 的 `--mode full/transcribe/download`、`--model`、`--targets` 已删除。
 
 ### 步骤 5: MCP 模式 (AI Agent 直接调用)
 
-MCP Server 提供工具，Agent 可直接调用:
+MCP 只有 3 个工具（2026-11-23 从 12 个收敛，2026-11-25 删除全部 v1 工具），
+且是**薄适配器**：它把请求转给本机 REST(:8787)，自己不跑引擎。
 
 ```json
-// 预筛视频质量
-{
-  "tool": "prescreen_video",
-  "args": { "url": "https://...", "mode": "quick" }
-}
-// 返回: { "grade": "B", "score": 72.5, "reasons": [...] }
+// 提取正文（mode=prescreen 时改走零网络的成本预筛）
+{ "tool": "extract", "args": { "url": "https://...", "cost_tier": "cheap" } }
 
-// 智能提取 (预筛+提取一步完成)
-{
-  "tool": "smart_extract",
-  "args": { "url": "https://..." }
-}
-// 返回: { "prescreen": {...}, "extraction_performed": true, "result": {...} }
+// 能力矩阵（提取器 / ASR 后端）
+{ "tool": "capabilities" }
 
-// 直接提取
-{
-  "tool": "extract_video",
-  "args": { "url": "https://...", "cost_tier": "free" }
-}
-
-// 提取并归档 (写入 Obsidian/本地)
-{
-  "tool": "archive_extract",
-  "args": { "url": "https://...", "targets": ["obsidian", "local"], "obsidian_vault": "/path/to/vault" }
-}
-
-// 列出提取器
-{
-  "tool": "list_extractors"
-}
+// 评论采样（需 VMB_ENABLE_COMMENTS=1）
+{ "tool": "comments", "args": { "url": "https://...", "limit": 20 } }
 ```
+
+> 服务没起时 MCP 会返回可执行提示（`pm2 start videomind-api`）；**没有离线兜底**（`VMB_MCP_EMBEDDED` 已删除）。
 
 ### 步骤 6: 解析 v2 输出
 

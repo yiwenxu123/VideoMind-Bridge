@@ -1,6 +1,6 @@
 # 对外契约（CONTRACT）
 
-> 版本：`schema_version=1.0`｜最近修订：2026-11-23
+> 版本：`schema_version=1.0`｜最近修订：2026-11-25（A2 之后）
 > 本文是**唯一权威**的对外契约说明。改字段语义前先读 §5。
 
 ---
@@ -33,7 +33,11 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 | `POST /api/v1/comments` | 评论采集 | 稳定 |
 | `POST /api/v1/creator/feed` | 创作者作品列表 | **默认关闭**（`VMB_ENABLE_CREATOR_FEED=0` 时不注册） |
 | `GET /api/v1/metrics` | 平台请求指标 + 熔断状态 + 提取命中分布 | 稳定 |
-| `POST /api/v1/tasks*`、`/api/v1/sessions*`、`/api/v1/settings`、`/api/v1/keys*` | 管理面（v1 流水线 / 登录态 / 配置） | 内部，不承诺 |
+| `POST /api/v1/sessions*`、`/api/v1/settings`、`/api/v1/keys*` | 管理面（登录态 / 配置） | 内部，不承诺 |
+
+> **2026-11-25（A2）：`/legacy`、`/ws`、`/api/v1/tasks*` 已删除**（v1 下载→转录→AI 摘要流水线）。
+> 请求这些路径返回 405。`GET /api/v1/status` 仍保留 `active_tasks/queued_tasks/completed_tasks/failed_tasks`
+> 四个字段但恒为 0 —— 字段保留是为了不破坏已按这四列写代码的调用方，不是因为还有任务在跑。
 
 鉴权：本机回环默认免鉴权；设了 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS` 后需 `Authorization: Bearer`。
 
@@ -47,7 +51,8 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 
 **MCP 是薄适配器**：`videomind` MCP 工具（`extract`/`capabilities`/`comments`）不带引擎，
 而是把请求转给本服务，因此**本服务必须在跑**；指标/缓存/熔断由此天然统一。
-服务不可用时 MCP 会返回可执行提示，也可设 `VMB_MCP_EMBEDDED=1` 让 MCP 自带引擎离线运行。
+服务不可用时 MCP 会返回可执行提示（`pm2 start videomind-api`）。**没有离线兜底**：
+> `VMB_MCP_EMBEDDED=1` 的进程内引擎已于 2026-11-25 删除 —— 它让 L3 适配器持有整套业务引擎。
 
 ---
 
