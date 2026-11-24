@@ -18,30 +18,23 @@ from __future__ import annotations
 from src.mcp import modern_server
 from src.mcp.server import MCPServer as LegacyCore
 
-# 迁移前旧实现的工具面（2026-11-22 实测导出），新增/删除工具应当是有意为之
-_LEGACY_TOOL_NAMES = {
-    "videomind_process",
-    "videomind_download",
-    "videomind_transcribe",
-    "videomind_supported",
-    "extract_video",
-    "smart_extract",
-    "prescreen_video",
-    "archive_extract",
-    "list_extractors",
-    "videomind_capabilities",
-    "videomind_config",
-    "configure",
-}
+# 2026-11-23 收敛后的工具面：3 个。
+# 从 12 个砍到 3 个是有意为之，依据见 docs/CONSUMERS.md 与审查报告 §问题 3：
+# - 下游只用 extract / capabilities（+ comments），其余 10 个无已知消费者；
+# - 12 个工具 ≈1847 token，每轮都在上下文里；
+# - prescreen/smart/supported 是 extract 的参数或成本闸，不该各占一个工具；
+# - configure/videomind_config 属配置写入，不该暴露给模型（最小权限）；
+# - v1 的 process/download/transcribe 已 DEPRECATED；archive 属上层 Skill 职责。
+_TOOL_NAMES = {"extract", "capabilities", "comments"}
 
 
 def _tools() -> dict:
     return modern_server.build_server()._tool_manager._tools
 
 
-def test_tool_surface_matches_legacy():
-    """工具名必须与迁移前完全一致——否则客户端的调用会静默失效。"""
-    assert set(_tools()) == _LEGACY_TOOL_NAMES
+def test_tool_surface_is_the_agreed_three():
+    """工具面固定在 3 个：增删必须是有意为之（并同步更新本文与 CONTRACT）。"""
+    assert set(_tools()) == _TOOL_NAMES
 
 
 def test_args_helper_drops_none_only():
@@ -54,13 +47,13 @@ def test_args_helper_drops_none_only():
     assert modern_server._args() == {}
 
 
-def test_extract_video_passes_default_cost_tier_and_omits_unset():
+def test_extract_passes_default_cost_tier_and_omits_unset():
     """extract_video 的默认 cost_tier 应显式传递；未提供的可选参数不得出现。"""
     captured: dict = {}
     original = modern_server._CORE._call_extract_video
     modern_server._CORE._call_extract_video = lambda args: captured.update(args) or {}
     try:
-        _tools()["extract_video"].fn(url="https://example.com/v")
+        _tools()["extract"].fn(url="https://example.com/v")
     finally:
         modern_server._CORE._call_extract_video = original
 
@@ -69,16 +62,21 @@ def test_extract_video_passes_default_cost_tier_and_omits_unset():
     assert "asr" not in captured and "asr_chain" not in captured
 
 
-def test_supported_tool_result_matches_legacy():
+def test_capabilities_result_matches_legacy():
     """纯函数类工具，新旧实现结果必须一致（防止搬运时丢字段）。"""
-    legacy = LegacyCore()._call_supported({"url": "https://www.bilibili.com/video/BV1x"})
-    modern = _tools()["videomind_supported"].fn(url="https://www.bilibili.com/video/BV1x")
+    legacy = LegacyCore()._call_capabilities({})
+    modern = _tools()["capabilities"].fn()
     assert modern == legacy
 
 
-def test_list_extractors_result_matches_legacy():
-    legacy = LegacyCore()._call_list_extractors({})
-    modern = _tools()["list_extractors"].fn()
+def test_prescreen_merged_into_extract():
+    """prescreen 不再是独立工具，改由 extract(mode="prescreen") 提供。"""
+    legacy = LegacyCore()._call_prescreen_video(
+        {"url": "https://www.bilibili.com/video/BV1x", "mode": "quick"}
+    )
+    modern = _tools()["extract"].fn(
+        url="https://www.bilibili.com/video/BV1x", mode="prescreen"
+    )
     assert modern == legacy
 
 

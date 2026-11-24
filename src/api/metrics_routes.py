@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..core.metrics import get_extraction_metrics
+from ..core.metrics import get_api_metrics, get_extraction_metrics
 from ..core.models import SCHEMA_VERSION
 from ..core.platforms.rate_limit import get_platform_rate_limiter
 
@@ -25,4 +25,7 @@ def get_metrics() -> dict:
         # extraction: 提取链路命中分布。
         # 回答"这条平台靠字幕还是靠转写""失败主要卡在哪一环""哪条链路其实没被用到"。
         "extraction": get_extraction_metrics().snapshot(),
+        # api: 谁在调哪些端点（按调用方 + 端点聚合）。
+        # 用于"按实际使用收敛工具面"，不靠猜。调用方标识来自 X-Consumer-Id。
+        "api": get_api_metrics().snapshot(),
     }

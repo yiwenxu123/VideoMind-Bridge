@@ -125,6 +125,44 @@ class ExtractionMetrics:
                 counter.clear()
 
 
+class ApiCallMetrics:
+    """按调用方统计 API 调用（2026-11-23）。
+
+    作用只有一个：**回答"到底谁在调我"**。
+    此前中间件只在启用鉴权时记日志，而本机默认不启用鉴权——于是没有任何调用记录，
+    想收敛工具面/端点数全凭猜。有了这个计数，跑一周就能拿到真实清单。
+
+    `X-Consumer-Id` 请求头缺省记 `anonymous`（Agent 直连时就是它）。
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total = 0
+        self._by_consumer: Counter[str] = Counter()
+        self._by_endpoint: Counter[str] = Counter()
+
+    def record(self, consumer: str, method: str, path: str, status: int) -> None:
+        with self._lock:
+            self._total += 1
+            self._bump(self._by_consumer, consumer or "anonymous")
+            # 只统计 2xx/4xx/5xx 的类别，不把每条路径都展开
+            self._bump(self._by_endpoint, f"{method} {path} {status // 100}xx")
+
+    @staticmethod
+    def _bump(counter: Counter[str], key: str) -> None:
+        if len(counter) >= _MAX_KEYS_PER_DIMENSION and key not in counter:
+            key = "other"
+        counter[key] += 1
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "total": self._total,
+                "by_consumer": dict(self._by_consumer),
+                "by_endpoint": dict(self._by_endpoint),
+            }
+
+
 _metrics: ExtractionMetrics | None = None
 _metrics_lock = threading.Lock()
 
@@ -142,3 +180,20 @@ def reset_extraction_metrics() -> None:
     global _metrics
     with _metrics_lock:
         _metrics = None
+
+
+_api_metrics: ApiCallMetrics | None = None
+
+
+def get_api_metrics() -> ApiCallMetrics:
+    global _api_metrics
+    with _metrics_lock:
+        if _api_metrics is None:
+            _api_metrics = ApiCallMetrics()
+        return _api_metrics
+
+
+def reset_api_metrics() -> None:
+    global _api_metrics
+    with _metrics_lock:
+        _api_metrics = None

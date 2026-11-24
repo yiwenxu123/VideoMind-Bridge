@@ -16,6 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, WebSocket, WebSocket
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+from ..core.metrics import get_api_metrics
 from ..core.models import SCHEMA_VERSION, CostTier
 from ..models.task import ProcessingMode, TaskStatus, VideoTask
 from ..services.config_manager import ConfigManager
@@ -338,6 +339,10 @@ class APIServer:
         async def security_middleware(request, call_next):
             started = time.perf_counter()
             consumer = None
+            # 2026-11-23：默认未启用鉴权时 consumer 一直是 None，导致**完全没有调用记录**，
+            # 想收敛工具面/端点数全凭猜。这里改为无论如何都解析一个调用方标识：
+            # 鉴权通过的 consumer 优先，其次 X-Consumer-Id 请求头，最后记 anonymous。
+            declared_consumer = request.headers.get("x-consumer-id", "").strip()
             request.state.vmb_auth_enabled = self._auth.enabled
             origin = request.headers.get("origin", "")
 
@@ -385,11 +390,18 @@ class APIServer:
 
             response = await call_next(request)
 
-            if consumer is not None:
+            # 总是记录调用方（此前只在启用鉴权时记录 → 本机等于零可见性）
+            if request.url.path.startswith("/api/v1"):
+                who = consumer or declared_consumer or "anonymous"
                 logger.info(
-                    f"api_access consumer={consumer} method={request.method} "
+                    f"api_access consumer={who} method={request.method} "
                     f"path={request.url.path} status={response.status_code} "
                     f"duration_ms={round((time.perf_counter() - started) * 1000, 1)}"
+                )
+                # 记成指标：跑一周就能拿到"谁在调哪些端点"的真实清单，
+                # 这是收敛工具面/端点的依据（而不是靠猜）。
+                get_api_metrics().record(
+                    who, request.method, request.url.path, response.status_code
                 )
 
             if is_allowed and origin:

@@ -9,17 +9,29 @@
 2. **取消被忽略**：``notifications/cancelled`` 分支是 ``pass``。
 3. **协议版本硬编码** ``2025-03-26``，不读客户端请求的版本、不协商。
 
-``mcp>=2.3`` 的 ``MCPServer``（v2 起 FastMCP 改名而来）把**同步工具函数放进
-anyio 线程池**执行（``utilities/func_metadata.py`` 用 ``anyio.to_thread.run_sync``），
+``mcp>=2.3`` 的 ``MCPServer`` 把**同步工具函数放进 anyio 线程池**执行
+（``utilities/func_metadata.py`` 用 ``anyio.to_thread.run_sync``），
 因此上面的 1、2 自然解决，协议协商与 ``structuredContent`` 也由 SDK 负责。
 
-## 兼容性策略
+## 工具面：3 个（2026-11-23 收敛，原 12 个）
 
-- **工具名、参数、返回结构与旧实现保持一一对应**，业务逻辑**完全复用**
-  `server.MCPServer` 的 ``_call_*`` 方法——不重写，便于新旧逐项比对。
-- 入口仍是 ``python -m src.mcp.server``（``server.main`` 转调本模块），
-  所以 MCP 客户端配置**不需要改**。
-- 设 ``VMB_MCP_LEGACY=1`` 可退回旧实现做对照。
+对外暴露的是**工作流**，不是内部端点。收敛依据：
+
+- 下游实际只用 ``extract`` 与 ``capabilities``（`docs/CONSUMERS.md`），
+  外加评论采集；其余 10 个工具**没有已知消费者**。
+- 官方文档明确"工具越多不一定越好"：全部工具定义进上下文会
+  "wastes tokens, increases latency, and degrades model performance"
+  （MCP client best practices）。收敛前实测 12 个工具 ≈1847 token，**每轮都在上下文里**。
+- 原则：同一工作流不拆多刀（``prescreen``/``smart``/``supported`` 都是 ``extract``
+  的参数或成本闸）；配置类不暴露给模型（最小权限）；已 DEPRECATED 的 v1 工具移除。
+
+被移除的能力**没有消失**：仍在 REST（``/api/v1/extract/archive``、``/api/v1/parse`` 等）、
+CLI 与旧实现类里。需要时用 ``VMB_MCP_LEGACY=1`` 退回旧工具面。
+
+## 兼容性
+
+- 入口仍是 ``python -m src.mcp.server``（``server.main`` 转调本模块），客户端配置不用改。
+- 业务逻辑**完全复用** ``server.MCPServer`` 的 ``_call_*``，不重写，便于新旧比对。
 """
 
 from __future__ import annotations
@@ -49,130 +61,54 @@ def build_server():
 
     mcp = MCPServer("VideoMind Bridge", version="3.0.0")
 
-    # ── v2 提取引擎（推荐）──────────────────────────────────────────────
-
-    @mcp.tool(name="extract_video", description="提取视频/图文内容的完整文字")
-    def extract_video(
+    @mcp.tool(
+        name="extract",
+        description=(
+            "从视频/笔记链接提取文字内容。"
+            "mode=auto 执行提取；mode=prescreen 只做零网络的成本/价值预筛（<2ms，不下载）。"
+            "返回含 success / completeness / platform / content / source / error_code。"
+            "注意：success=true 只表示拿到了东西，完整性看 completeness（meta 表示只有标题/文案）。"
+        ),
+    )
+    def extract(
         url: Annotated[str, Field(description="视频或笔记链接")],
+        mode: Annotated[
+            str, Field(description="auto=执行提取；prescreen=只预筛（不下载）")
+        ] = "auto",
         cost_tier: Annotated[
-            str | None,
-            Field(description="free / cheap / paid / expensive / premium"),
+            str,
+            Field(description="成本上限：free / cheap / paid / expensive / premium"),
         ] = "cheap",
-        asr: Annotated[str | None, Field(description="首选 ASR 后端")] = None,
-        asr_chain: Annotated[list[str] | None, Field(description="严格 ASR 降级链")] = None,
-        asr_language: Annotated[str | None, Field(description="ASR 语言提示")] = None,
+        asr_language: Annotated[str | None, Field(description="ASR 语言提示，如 zh")] = None,
     ) -> dict:
+        if mode == "prescreen":
+            return _CORE._call_prescreen_video(_args(url=url, mode="quick"))
+        if mode != "auto":
+            raise ValueError(f"mode 只支持 auto / prescreen，收到 {mode!r}")
         return _CORE._call_extract_video(
-            _args(
-                url=url,
-                cost_tier=cost_tier,
-                asr=asr,
-                asr_chain=asr_chain,
-                asr_language=asr_language,
-            )
+            _args(url=url, cost_tier=cost_tier, asr_language=asr_language)
         )
-
-    @mcp.tool(name="smart_extract", description="先预筛再按需提取")
-    def smart_extract(
-        url: Annotated[str, Field(description="视频或笔记链接")],
-        max_cost: Annotated[str | None, Field(description="成本上限")] = None,
-        min_grade: Annotated[str, Field(description="最低可接受等级 S/A/B/C/D")] = "C",
-    ) -> dict:
-        return _CORE._call_smart_extract(
-            _args(url=url, max_cost=max_cost, min_grade=min_grade)
-        )
-
-    @mcp.tool(name="prescreen_video", description="纯规则预筛评分（零网络）")
-    def prescreen_video(
-        url: Annotated[str, Field(description="视频或笔记链接")],
-        mode: Annotated[str, Field(description="quick(<2ms) 或 full(<10s)")] = "quick",
-    ) -> dict:
-        return _CORE._call_prescreen_video(_args(url=url, mode=mode))
-
-    @mcp.tool(name="archive_extract", description="提取并归档到 Obsidian / 本地")
-    def archive_extract(
-        url: Annotated[str, Field(description="视频或笔记链接")],
-        targets: Annotated[list[str] | None, Field(description="obsidian,local")] = None,
-        obsidian_vault: Annotated[str | None, Field(description="Obsidian vault 路径")] = None,
-        obsidian_subfolder: Annotated[str | None, Field(description="子目录")] = None,
-        local_output: Annotated[str | None, Field(description="本地输出目录")] = None,
-    ) -> dict:
-        return _CORE._call_archive_extract(
-            _args(
-                url=url,
-                targets=targets,
-                obsidian_vault=obsidian_vault,
-                obsidian_subfolder=obsidian_subfolder,
-                local_output=local_output,
-            )
-        )
-
-    @mcp.tool(name="list_extractors", description="提取器清单（乐观可用性，不代表链路通）")
-    def list_extractors() -> dict:
-        return _CORE._call_list_extractors({})
-
-    @mcp.tool(name="videomind_capabilities", description="ASR 后端与提取器能力矩阵")
-    def videomind_capabilities() -> dict:
-        return _CORE._call_capabilities({})
-
-    @mcp.tool(name="videomind_config", description="查看当前配置")
-    def videomind_config() -> dict:
-        return _CORE._call_config({})
-
-    @mcp.tool(name="configure", description="修改配置（action=set/unset/list）")
-    def configure(
-        action: Annotated[str, Field(description="set / unset / list")],
-        key: Annotated[str | None, Field(description="配置键")] = None,
-        value: Annotated[str | None, Field(description="配置值")] = None,
-    ) -> dict:
-        return _CORE._call_configure(_args(action=action, key=key, value=value))
-
-    # ── v1 遗留（已标 DEPRECATED，保留仅为兼容旧调用方）────────────────
 
     @mcp.tool(
-        name="videomind_process",
-        description="[DEPRECATED] 完整处理：下载→转录→AI摘要→导出（v1）",
+        name="capabilities",
+        description=(
+            "能力矩阵：哪些平台/提取器可用、ASR 后端与模型、支持哪些导出目标。"
+            "注意提取器的 available 是**乐观可用性**（有凭证/二进制即 true），不代表链路当前通。"
+        ),
     )
-    def videomind_process(
-        url: Annotated[str, Field(description="视频链接或本地媒体文件")],
-        mode: Annotated[str, Field(description="full / download / transcribe")] = "full",
-        targets: Annotated[list[str] | None, Field(description="导出目标")] = None,
-        whisper_model: Annotated[str | None, Field(description="tiny/base/small/medium")] = None,
-        cookie_browser: Annotated[str | None, Field(description="chrome/edge/firefox")] = None,
-    ) -> dict:
-        return _CORE._call_process(
-            _args(
-                url=url,
-                mode=mode,
-                targets=targets,
-                whisper_model=whisper_model,
-                cookie_browser=cookie_browser,
-            )
-        )
+    def capabilities() -> dict:
+        return _CORE._call_capabilities({})
 
-    @mcp.tool(name="videomind_download", description="[DEPRECATED] 仅下载视频/音频")
-    def videomind_download(
-        url: Annotated[str, Field(description="视频链接或本地媒体文件")],
-        keep_video: Annotated[bool, Field(description="是否保留视频文件")] = True,
-        cookie_browser: Annotated[str | None, Field(description="chrome/edge/firefox")] = None,
+    @mcp.tool(
+        name="comments",
+        description="采集笔记/视频的评论（需要 VMB_ENABLE_COMMENTS=1）",
+    )
+    def comments(
+        url: Annotated[str, Field(description="视频或笔记链接")],
+        limit: Annotated[int, Field(description="评论条数上限")] = 20,
+        sort: Annotated[str, Field(description="hot / time")] = "hot",
     ) -> dict:
-        return _CORE._call_download(
-            _args(url=url, keep_video=keep_video, cookie_browser=cookie_browser)
-        )
-
-    @mcp.tool(name="videomind_transcribe", description="[DEPRECATED] 仅转录音频生成 SRT")
-    def videomind_transcribe(
-        audio_path: Annotated[str, Field(description="音频文件路径")],
-        whisper_model: Annotated[str | None, Field(description="模型大小")] = None,
-        language: Annotated[str | None, Field(description="语言代码")] = None,
-    ) -> dict:
-        return _CORE._call_transcribe(
-            _args(audio_path=audio_path, whisper_model=whisper_model, language=language)
-        )
-
-    @mcp.tool(name="videomind_supported", description="检查链接是否为支持的平台")
-    def videomind_supported(url: Annotated[str, Field(description="待检查链接")]) -> dict:
-        return _CORE._call_supported(_args(url=url))
+        return _CORE._call_get_comments(_args(url=url, limit=limit, sort=sort))
 
     return mcp
 
