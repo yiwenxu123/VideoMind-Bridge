@@ -28,7 +28,6 @@
 - **多格式导出**：支持 Obsidian、本地文件夹、HTML 播放器
 - **任务管理**：队列管理、暂停、恢复、历史记录
 - **本地 API 服务**：提供 REST API 和 WebSocket
-- **浏览器扩展**：支持 Chrome、Edge、Firefox
 
 ## 安装
 
@@ -45,13 +44,11 @@ git clone <repository-url>
 cd VideoMindBridge
 
 # 使用 uv 安装依赖（推荐）
-uv sync                 # 服务端 / CLI / MCP（轻装，不含 GUI）
-uv sync --extra gui     # 需要桌面 GUI 时追加
+uv sync                 # 服务端 / CLI / MCP（2026-11-24 起桌面 GUI 已下线）
 uv sync --extra dev     # 开发（ruff/mypy/pytest）
 
 # 或使用 pip
 pip install .
-pip install ".[gui]"    # 需要桌面 GUI 时追加
 ```
 
 ### ASR 后端（可选，默认链第一级 SenseVoice）
@@ -148,16 +145,8 @@ MCP 工具列表:
 
 ### v1 (Legacy 扩展模式)
 
-#### GUI 模式
-
-```bash
-# GUI 依赖是可选的，先安装 gui extra
-uv sync --extra gui     # 或 pip install -e ".[gui]"
-
-python main.py
-# 或
-.venv/bin/python3 -m src.gui.app
-```
+> **2026-11-24：桌面 GUI 与浏览器扩展已下线**（PySide6 依赖一并移除；`python main.py` 不带参数会打印用法并退出）。
+> v1 的下载 / 转录 / AI 摘要能力仍在：用下面的 API 模式 + `/legacy` 页面，或 CLI 的 `--mode`。
 
 #### API 服务模式
 
@@ -182,42 +171,6 @@ uv run python -m src.cli "URL" --mode transcribe --json
 # 仅下载
 uv run python -m src.cli "URL" --mode download --json
 ```
-
-## 浏览器扩展
-
-> 状态：Legacy / 已冻结。扩展仍只对接 v1 任务 API 和 WebSocket，不支持 Gateway Console 的 token 认证；新工作流请使用 `/console`。计划在过渡期后移除。
-
-### 安装方式
-
-**Chrome / Edge（Chromium 内核）**：
-
-1. 打开浏览器，地址栏输入 `chrome://extensions/` 或 `edge://extensions/`
-2. 开启右上角的「开发者模式」
-3. 点击「加载已解压的扩展程序」
-4. 选择 `browser-extension` 文件夹
-
-**Firefox**：
-
-1. 打开浏览器，地址栏输入 `about:debugging`
-2. 点击「此 Firefox」
-3. 点击「临时载入附加组件」
-4. 选择 `browser-extension/manifest.json`
-
-### 使用方法
-
-1. 安装扩展后，访问任意支持的视频页面
-2. 点击浏览器工具栏中的扩展图标
-3. 选择处理模式（完整模式、仅下载、仅转录）
-4. 点击「开始处理」提交任务
-5. 实时查看处理进度和结果
-
-### 功能特性
-
-- 视频页面自动检测
-- 一键提交处理任务
-- 三种处理模式可选
-- WebSocket 实时进度更新
-- 与 GUI 共享任务历史
 
 ## 配置
 
@@ -266,7 +219,6 @@ src/
 ├── cli.py                # CLI 入口（v2 主链 + v1 --mode full 扩展）
 ├── mcp/                  # MCP Server（stdio JSON-RPC, v2 工具为主）
 ├── config/               # 配置常量
-├── gui/                  # GUI（PySide6, v1 扩展, 降级）
 ├── exporters/            # 导出器
 ├── models/               # 数据模型
 ├── services/             # v1 服务（扩展模式）
@@ -279,9 +231,6 @@ src/
 ```bash
 # 安装测试依赖
 pip install -e ".[dev]"
-
-# GUI 测试还需要 PySide6
-pip install -e ".[dev,gui]"
 
 # 运行所有测试
 pytest tests/ -v

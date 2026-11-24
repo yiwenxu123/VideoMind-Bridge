@@ -35,9 +35,6 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gui = [
-    "pyside6>=6.10.1",
-]
 bench = [
     "jiwer>=3.0.0",
     "psutil>=5.9.0",
@@ -133,7 +130,6 @@ branch = true
 omit = [
     "*/tests/*",
     "*/__pycache__/*",
-    "*/gui/*",
     "*/api/*",
     "*/cli.py",
     "*/app.py",

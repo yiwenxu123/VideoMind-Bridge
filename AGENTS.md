@@ -9,11 +9,9 @@ Python 3.11+ monorepo。uv 驱动。
 
 ```bash
 uv sync --extra dev             # 服务端/CLI/MCP 依赖（含 dev: ruff/mypy/pytest）
-uv sync --extra dev --extra gui # 需要桌面 GUI 时追加 PySide6
 uv run python -m src.cli <url>  # CLI 模式
 uv run python -m src.cli /path/to/video.mp4 --targets obsidian  # 本地文件（跳过下载）
-python main.py                  # GUI 模式
-python main.py --api            # API 服务 (端口 8787; 控制台 /console)
+python main.py --api            # API 服务 (端口 8787; 控制台 /console)；GUI 已下线
 python main.py --mcp            # MCP Server (stdio JSON-RPC)
 ./scripts/install_sensevoice.sh --check  # SenseVoice（默认 ASR 第一级）体检；去掉 --check 即安装
 pm2 start ecosystem.config.cjs  # 本机 PM2 常驻 API 服务
@@ -29,13 +27,12 @@ mypy src/ --ignore-missing-imports  # 类型检查
 
 | Layer | Path | Technology |
 |-------|------|-----------|
-| Entrypoint | `main.py` | argparse → GUI / API (FastAPI) / MCP |
+| Entrypoint | `main.py` | argparse → API (FastAPI) / MCP |
 | CLI | `src/cli.py` | rich, argparse (v1+v2 dual mode) |
 | v2 Engine | `src/core/` | 10 extractors + router + prescreener + archiver + Hermes formatter |
 | v1 Services | `src/services/` | download, transcribe (faster-whisper), AI, export |
 | API | `src/api/` | FastAPI + WebSocket |
 | MCP | `src/mcp/server.py` | stdio JSON-RPC (Model Context Protocol) |
-| GUI | `src/gui/` | PySide6 |
 
 ## v2 Engine (`src/core/`)
 
@@ -116,7 +113,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **登录态统一管理**: 所有平台登录态经 `SessionManager.resolve(platform)` 统一解析，优先级：**平台专用 env → 密钥环 session 设置 → 通用 env（`VMB_COOKIES_FILE` / `VMB_COOKIES_BROWSER`）**。密钥环键见 `ConfigManager.SESSION_KEYS`（如 `bilibili:cookies_file`、`ytdlp:browser`），管理入口：MCP `configure` 的 `session:*` 键 + API `PUT/DELETE /api/v1/sessions/settings/{key}`（admin）。`/api/v1/parse` **不接受**请求体 cookies_file 路径（安全），登录态只来自服务端解析。新平台接入时在 `session.py` 加 Provider，勿在业务代码直读 cookie env
 - **下载/转录取消**: 取消令牌为 `threading.Event`，贯穿 TaskManager → DownloadService → yt-dlp progress hook（抛 `DownloadCancelled`）与转录片段边界；取消/超时统一抛 `OperationCancelledError`（终态 CANCELLED 而非 FAILED）。CLI `--timeout` 为整体超时（下载+转录共享令牌）。下载中断保留 `.part`，同 URL 重建任务即断点续传（临时目录按 URL 哈希固定）。删除任务有 tombstone，executor 收尾不会把已删任务复活写库
 - **平台请求治理**: 平台自有 HTTP 请求走 `PlatformRateLimiter`（B站/抖音/小红书/YouTube），本地网关、第三方 API 和 CDN 下载不套平台 limiter；yt-dlp 通过 `VMB_YTDLP_SLEEP_REQUESTS`、`VMB_YTDLP_RETRIES` 等参数节流，平台熔断时跳过 yt-dlp 兜底。小红书可选 `VMB_XHS_COOKIE` / `VMB_XHS_COOKIES_FILE`；抖音用 `DOUYIN_COOKIES_FILE`。`GET /api/v1/metrics` 返回进程内平台计数，`VMB_LOG_JSON=1` 开启 JSON 日志。
-- **GUI 使用 PySide6**: 已移到 `gui` extra；服务端/CLI/MCP 不需要安装，GUI 测试在缺依赖时自动跳过
+- **桌面 GUI 已下线（2026-11-24）**: `src/gui/` 与 `browser-extension/` 已删除，`gui` extra 一并移除；`python main.py` 不带参数会打印用法并以退出码 2 结束（不再有隐式默认模式）。v1 的下载/转录/摘要能力仍在（CLI `--mode` + `/legacy` 页面），等 A2 再决定去留
 - **SenseVoice 依赖仓库外资产**: 默认 ASR 第一级需要 `~/.cache/sensevoice/venv`（sherpa-onnx + soundfile）与 `~/.cache/sherpa-onnx/sense-voice/`（`model.int8.onnx` + `tokens.txt`）。2026-11-24 起 `capabilities()` 会真起子进程探测 `import sherpa_onnx, soundfile`（按解释器缓存，超时 10s），**文件齐但解释器缺依赖时 `available=false`**——别再把「文件存在」当成「能用」。安装/体检：`scripts/install_sensevoice.sh [--check]`
 - **Build 工具**: PyInstaller (`videomind.spec`，已被 gitignore)
 - **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)
@@ -143,10 +140,8 @@ pytest tests/ --cov=src --cov-report=term       # 覆盖率
 ## Build & Release
 
 ```
-uv sync --extra dev             # 开发安装（服务端，不含 GUI）
-uv sync --extra dev --extra gui # 开发安装（含 GUI）
+uv sync --extra dev             # 开发安装（服务端）
 pip install -e ".[dev]"         # 含 dev 依赖
-pip install -e ".[dev,gui]"     # 含 dev + GUI 依赖
 pyinstaller videomind.spec      # macOS 应用打包
 ```
 
@@ -156,7 +151,7 @@ Release workflow 自动构建 macOS DMG + Windows ZIP，标签推送 `v*` 触发
 
 | 文件 | 说明 |
 |------|------|
-| `main.py` | 入口：GUI/API/MCP 三模式 |
+| `main.py` | 入口：API / MCP 两模式（GUI 已下线） |
 | `build_macos_app.sh` | macOS 构建脚本 |
 | `create_dmg.sh` | DMG 包创建 |
 | `.python-version` | Python 3.11 (仅供 pyenv) |

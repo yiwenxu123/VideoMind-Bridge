@@ -1,24 +1,20 @@
 #!/usr/bin/env python3
 """VideoMind Bridge 入口文件
 
-支持两种启动模式：
-1. GUI 模式（默认）：启动图形界面
-2. CLI 模式：通过命令行参数启动 API 服务
+两种启动模式（2026-11-24 起桌面 GUI 已下线，不再有隐式默认模式）：
+1. API 服务：--api（默认 127.0.0.1:8787）
+2. MCP Server：--mcp（stdio，供 AI Agent 调用）
 
 使用方式：
-    python main.py              # 启动 GUI
-    python main.py --api        # 启动 API 服务
+    python main.py --api              # 启动 API 服务
     python main.py --api --port 9000  # 指定端口
+    python main.py --mcp              # 启动 MCP Server
+
+不带参数时打印用法并以退出码 2 结束。
 """
 
 import argparse
 import sys
-
-
-def run_gui() -> int:
-    """启动 GUI 应用"""
-    from src.gui.app import main as gui_main
-    return gui_main()
 
 
 def run_api(host: str = "127.0.0.1", port: int = 8787) -> None:
@@ -51,7 +47,6 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 示例:
-    python main.py                    启动 GUI 界面
     python main.py --api              启动 API 服务（默认端口 8787）
     python main.py --api --port 9000  启动 API 服务并指定端口
     python main.py --mcp              启动 MCP Server（AI Agent 集成）
@@ -103,7 +98,17 @@ def main() -> int:
         run_mcp()
         return 0
     else:
-        return run_gui()
+        # 2026-11-24：桌面 GUI 已下线。不带参数时不再隐式启动任何模式，
+        # 否则「敲错命令」会被当成「启动成功」，排查成本比多敲一个 --api 高得多。
+        parser.print_usage(sys.stderr)
+        print(
+            "\n请显式选择模式：\n"
+            "  python main.py --api    # 本地 API 服务（http://127.0.0.1:8787）\n"
+            "  python main.py --mcp    # MCP Server（stdio，供 AI Agent 调用）\n"
+            "GUI 已下线；旧的 v1 工作站页面仍在 --api 启动后的 /legacy。",
+            file=sys.stderr,
+        )
+        return 2
 
 
 if __name__ == "__main__":
