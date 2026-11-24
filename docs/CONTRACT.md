@@ -37,6 +37,10 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 
 鉴权：本机回环默认免鉴权；设了 `VIDEOMIND_API_TOKEN` / `VMB_CONSUMER_TOKENS` 后需 `Authorization: Bearer`。
 
+> **token 环境变量只有一个规范名：`VIDEOMIND_API_TOKEN`**（服务端只读它，见 `src/api/auth.py`）。
+> 回归脚本 `scripts/check_real_links.py` / `scripts/check_discovery_links.py` 现在也读这个名字；
+> 历史错名 `VMB_API_TOKEN` 仅保留一个版本的兼容回退并打印弃用提示——**用旧名不会有任何报错，只会静默变成匿名请求**。
+
 **调用方标识**：请在请求头带 `X-Consumer-Id`（如 `content-ops`、`dsh-mcp`）。
 缺省记 `anonymous`。该标识进日志与 `/api/v1/metrics` 的 `api.by_consumer`，
 是"按实际使用收敛端点数/工具面"的唯一依据。

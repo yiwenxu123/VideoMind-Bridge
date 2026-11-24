@@ -345,6 +345,29 @@ def print_table(rows: list[dict[str, Any]]) -> None:
             print(f"  ! {row['name']}: {code}{str(row['error'])[:200]}")
 
 
+CANONICAL_TOKEN_ENV = "VIDEOMIND_API_TOKEN"
+LEGACY_TOKEN_ENV = "VMB_API_TOKEN"
+
+
+def resolve_api_token() -> str:
+    """读取 Bearer token：规范名 VIDEOMIND_API_TOKEN（与服务端 src/api/auth.py 一致）。
+
+    VMB_API_TOKEN 是历史遗留的错名——服务端从来不读它，所以用旧名会静默变成匿名请求。
+    这里保留一个版本的兼容回退，并在命中时提示迁移。
+    """
+    token = os.getenv(CANONICAL_TOKEN_ENV, "").strip()
+    if token:
+        return token
+    legacy = os.getenv(LEGACY_TOKEN_ENV, "").strip()
+    if legacy:
+        print(
+            f"[deprecated] {LEGACY_TOKEN_ENV} 已更名为 {CANONICAL_TOKEN_ENV}，该别名将在下个版本移除",
+            file=sys.stderr,
+        )
+        return legacy
+    return ""
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="真实链接完整性回归检查")
     parser.add_argument("--manifest", required=True, help="YAML 清单路径")
@@ -352,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
         "--base-url",
         default=os.getenv("VMB_BASE_URL", "http://127.0.0.1:8787"),
     )
-    parser.add_argument("--token", default=os.getenv("VMB_API_TOKEN", ""))
+    parser.add_argument("--token", default=resolve_api_token())
     parser.add_argument("--timeout", type=float, default=300.0)
     parser.add_argument("--json", action="store_true")
     parser.add_argument(
