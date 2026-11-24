@@ -582,6 +582,39 @@ class TestExtractResponseContract:
         for field in ("success", "completeness", "error_code", "attempts", "asr", "segments"):
             assert field in properties, f"OpenAPI 缺少字段 {field}"
 
+    def test_serialization_neither_invents_nor_drops_keys(self):
+        """response_model_exclude_unset：进什么键出什么键。
+
+        默认序列化会给未出现的字段补 null（成功路径 +5 个，错误信封 +14 个），
+        对用 `"error" in data` 这类存在性判断的消费者来说等同于改形状。
+        """
+        from src.api.models import ExtractResponse
+        from src.api.server import _extract_response
+        from src.core.models import CostTier, ExtractResult
+
+        ok = _extract_response(
+            ExtractResult(
+                success=True,
+                platform="bilibili",
+                title="t",
+                content="x",
+                source="bilibili_subtitle",
+                url="https://b23.tv/x",
+                cost_tier=CostTier.FREE,
+                duration_seconds=12.5,
+                completeness="full",
+                method="subtitle",
+                request_id="rid-1",
+            ),
+            "rid-1",
+        )
+        out = ExtractResponse.model_validate(ok).model_dump(exclude_unset=True)
+        assert set(out) == set(ok), f"多余 {set(out) - set(ok)} / 丢失 {set(ok) - set(out)}"
+
+        err = {"success": False, "url": "u", "error": "boom", "error_code": "internal_error"}
+        out_err = ExtractResponse.model_validate(err).model_dump(exclude_unset=True)
+        assert set(out_err) == set(err)
+
     def test_internal_error_envelope_still_returns_200(self, client, server, monkeypatch):
         """内部异常时返回的信封（无 platform/content）也必须能通过 response_model，
         否则「已降级的失败」会变成 500 —— 比不加模型更糟。"""

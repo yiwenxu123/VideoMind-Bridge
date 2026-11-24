@@ -54,7 +54,8 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 ## 3. `/api/v1/extract` 响应字段
 
 > 2026-11-24：该端点有了 response_model（`src/api/models.py` 的 `ExtractResponse`），字段在 `GET /openapi.json` 里可见。
-> 模型显式 `extra="allow"` —— 加模型是为了文档化与校验，**不是**为了过滤；新增字段不会被序列化吞掉。
+> 模型显式 `extra="allow"` + `response_model_exclude_unset=True` —— 加模型是为了文档化与校验，**不是**为了过滤：
+> 进什么键出什么键，既不丢字段，也不会给未出现的字段补 `null`（补 null 同样算改形状）。
 
 ### 3.1 字段表
 
@@ -125,7 +126,7 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 |---|---|---|---|
 | 2026-11-23 | 曾把 meta 结果改为 `success=false` | 下游会抛 502 | 同日回滚为 `success=true`（`5f2924f`） |
 | 2026-11-23 | 失败结果的 `platform` 由提取器名改为链接所属平台 | 按平台聚合的统计更准 | 视为修正，无消费者依赖旧值 |
-| 2026-11-24 | `/extract` 新增 response_model（`extra="allow"`） | OpenAPI 可见字段；响应形状不变 | 纯新增（只文档化，不过滤字段） |
+| 2026-11-24 | `/extract` 新增 response_model（`extra="allow"` + `exclude_unset`） | OpenAPI 可见字段；键集合与值均不变 | 纯新增（只文档化，不过滤字段、不补 null） |
 | 2026-11-24 | `/extract/archive` 失败补 `error_code`（`extract_failed` / `internal_error`） | 该端点此前违反不变式 1 | 纯新增 |
 | 2026-11-22 | `/extract` 新增 `attempts` | 纯新增 | — |
 | 2026-11-22 | `/metrics` 新增 `circuits`、`extraction` | 纯新增 | — |

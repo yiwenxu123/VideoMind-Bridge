@@ -528,7 +528,9 @@ class APIServer:
             )
 
         # v2 提取 API
-        @app.post("/api/v1/extract", response_model=ExtractResponse)
+        # exclude_unset：进什么键出什么键。默认模式会给未出现的字段补 null（成功路径 +5 个、
+        # 内部异常信封 +14 个），对做「key 是否存在」判断的消费者等同于改形状。
+        @app.post("/api/v1/extract", response_model=ExtractResponse, response_model_exclude_unset=True)
         async def extract_content(request: dict):
             """快速提取视频内容 (v2 引擎)"""
             url = request.get("url")
