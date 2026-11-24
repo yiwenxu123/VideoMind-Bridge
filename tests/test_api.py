@@ -552,3 +552,75 @@ def test_prescreen_endpoint_exists_and_is_offline(client):
 def test_prescreen_requires_url(client):
     resp = client.post("/api/v1/prescreen", json={})
     assert resp.status_code == 400
+
+# ── 2026-11-24：/extract 契约加固（response_model + 归档 error_code）──
+
+
+class TestExtractResponseContract:
+    """响应模型只能「文档化 + 校验」，不能改变既有形状。"""
+
+    def test_model_keeps_undeclared_fields(self):
+        """extra="allow"：新增字段不需要改模型，也不会被序列化吞掉。"""
+        from src.api.models import ExtractResponse
+
+        model = ExtractResponse.model_validate(
+            {"success": True, "completeness": "meta", "brand_new_field": {"nested": 1}}
+        )
+        dumped = model.model_dump()
+        assert dumped["brand_new_field"] == {"nested": 1}
+        assert dumped["completeness"] == "meta"
+
+    def test_openapi_exposes_response_fields(self, client):
+        """此前该端点在 OpenAPI 里的 schema 是 {}，外部无法查字段。"""
+        spec = client.get("/openapi.json").json()
+        schema = spec["paths"]["/api/v1/extract"]["post"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]
+        ref = schema.get("$ref", "")
+        assert ref, f"应指向模型而非空 schema，实际: {schema}"
+        properties = spec["components"]["schemas"][ref.rsplit("/", 1)[-1]]["properties"]
+        for field in ("success", "completeness", "error_code", "attempts", "asr", "segments"):
+            assert field in properties, f"OpenAPI 缺少字段 {field}"
+
+    def test_internal_error_envelope_still_returns_200(self, client, server, monkeypatch):
+        """内部异常时返回的信封（无 platform/content）也必须能通过 response_model，
+        否则「已降级的失败」会变成 500 —— 比不加模型更糟。"""
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(server._router_runtime, "extract", _boom)
+        resp = client.post("/api/v1/extract", json={"url": "https://example.com/video"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == "internal_error"
+        assert data["schema_version"] == "1.0"
+
+
+class TestArchiveFailureContract:
+    """CONTRACT.md 不变式 1：success=false ⇒ error_code 非空（归档端点也适用）。"""
+
+    def test_no_content_failure_carries_error_code(self, client):
+        resp = client.post(
+            "/api/v1/extract/archive",
+            json={"url": "https://unsupported-example.com/video", "targets": ["local"]},
+        )
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"], "失败必须带可机读归因，下游靠它分流"
+
+    def test_internal_error_carries_error_code(self, client, server, monkeypatch):
+        def _boom(*args, **kwargs):
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(server._router_runtime, "extract", _boom)
+        resp = client.post(
+            "/api/v1/extract/archive",
+            json={"url": "https://example.com/video", "targets": ["local"]},
+        )
+
+        data = resp.json()
+        assert data["success"] is False
+        assert data["error_code"] == "internal_error"

@@ -4,9 +4,9 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
-from ..core.models import CostTier
+from ..core.models import SCHEMA_VERSION, CostTier
 from ..models.task import ExportTarget, ProcessingMode, TaskStatus
 from ..services.local_media import is_local_media_path, is_remote_url
 
@@ -379,3 +379,55 @@ class ConfigResponse(BaseModel):
     supported_ai_providers: list[str] = Field(..., description="支持的AI提供商")
     supported_export_targets: list[str] = Field(..., description="支持的导出目标")
     ai_enabled: bool = Field(default=False, description="AI功能是否已启用")
+
+
+class ExtractAsrInfo(BaseModel):
+    """ASR 元信息（method=asr 时出现）"""
+
+    provider: str | None = None
+    model: str | None = None
+    model_version: str | None = None
+
+
+class ExtractAttempt(BaseModel):
+    """失败时逐提取器的尝试明细"""
+
+    extractor: str | None = None
+    error_code: str | None = None
+    error: str | None = None
+
+
+class ExtractResponse(BaseModel):
+    """`POST /api/v1/extract` 的响应契约（见 docs/CONTRACT.md §3）。
+
+    2026-11-24 新增：此前该端点没有 response_model，OpenAPI 里的 schema 是空的，
+    外部调用方只能读源码猜字段。加这个模型是为了**文档化和校验**，两条刻意设计：
+
+    1. `extra="allow"` —— 新增字段不必回来改模型，也不会因为忘加而被序列化吞掉。
+       契约里那句「只增不减」必须由代码保证，而不是靠注释。
+    2. 除 `success` 外全部有默认值 —— 内部异常时的错误信封（success/url/error/error_code）
+       也要能通过校验；否则「已降级的失败」会被 response_model 变成 500，比不加模型更糟。
+
+    字段语义以 docs/CONTRACT.md 为准；这里只声明形状，不重复解释成功/完整的正交性。
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    success: bool = Field(..., description="是否拿到了东西（不是内容是否完整）")
+    schema_version: str = Field(SCHEMA_VERSION, description="契约版本，目前 1.0")
+    platform: str | None = Field(None, description="链接所属平台，永不是提取器名")
+    title: str = Field("", description="标题")
+    content: str = Field("", description="正文（可能为空）")
+    language: str | None = Field(None, description="语言")
+    duration_seconds: float = Field(0.0, description="视频时长（秒），图文为 0")
+    cost_tier: str | None = Field(None, description="free/cheap/paid/expensive/premium")
+    source: str = Field("", description="实际产出它的链路，如 douyin_asr")
+    url: str = Field("", description="回显的请求 URL")
+    completeness: str = Field("unknown", description="full | meta | none | unknown")
+    method: str = Field("", description="subtitle | asr | page | desc | manual")
+    request_id: str | None = Field(None, description="请求追踪 ID")
+    segments: list[dict[str, Any]] | None = Field(None, description="时间轴分段")
+    asr: ExtractAsrInfo | None = Field(None, description="ASR 元信息")
+    attempts: list[ExtractAttempt] | None = Field(None, description="失败时逐提取器明细")
+    error: str | None = Field(None, description="人类可读说明")
+    error_code: str | None = Field(None, description="可机读的失败/部分原因")

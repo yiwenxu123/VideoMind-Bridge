@@ -26,7 +26,7 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 | `GET /health` | 存活探针（无鉴权） | 稳定 |
 | `GET /api/v1/status` | 运行时状态 | 稳定 |
 | `GET /api/v1/capabilities` | 提取器与 ASR 后端能力矩阵 | 稳定 |
-| `POST /api/v1/extract` | **主入口**：提取内容 | 稳定 |
+| `POST /api/v1/extract` | **主入口**：提取内容（有 response_model，形状见 §3） | 稳定 |
 | `POST /api/v1/extract/archive` | 提取并归档 | 稳定 |
 | `POST /api/v1/parse` | 仅解析元信息（快，含音频直链） | 稳定 |
 | `POST /api/v1/prescreen` | 零网络成本/价值预筛（不下载） | 稳定 |
@@ -52,6 +52,9 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 ---
 
 ## 3. `/api/v1/extract` 响应字段
+
+> 2026-11-24：该端点有了 response_model（`src/api/models.py` 的 `ExtractResponse`），字段在 `GET /openapi.json` 里可见。
+> 模型显式 `extra="allow"` —— 加模型是为了文档化与校验，**不是**为了过滤；新增字段不会被序列化吞掉。
 
 ### 3.1 字段表
 
@@ -93,7 +96,7 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 
 ---
 
-## 4. 不变式（有测试保护，见 `tests/test_consumer_contract.py`）
+## 4. 不变式（有测试保护：`tests/test_consumer_contract.py`、`tests/test_api.py::TestArchiveFailureContract`）
 
 1. `success=false` ⇒ `error_code` 非空（失败必须可机读归因）
 2. `success=true` ⇒ `completeness ∈ {full, meta}`（不允许 `none`）
@@ -122,6 +125,8 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 |---|---|---|---|
 | 2026-11-23 | 曾把 meta 结果改为 `success=false` | 下游会抛 502 | 同日回滚为 `success=true`（`5f2924f`） |
 | 2026-11-23 | 失败结果的 `platform` 由提取器名改为链接所属平台 | 按平台聚合的统计更准 | 视为修正，无消费者依赖旧值 |
+| 2026-11-24 | `/extract` 新增 response_model（`extra="allow"`） | OpenAPI 可见字段；响应形状不变 | 纯新增（只文档化，不过滤字段） |
+| 2026-11-24 | `/extract/archive` 失败补 `error_code`（`extract_failed` / `internal_error`） | 该端点此前违反不变式 1 | 纯新增 |
 | 2026-11-22 | `/extract` 新增 `attempts` | 纯新增 | — |
 | 2026-11-22 | `/metrics` 新增 `circuits`、`extraction` | 纯新增 | — |
 

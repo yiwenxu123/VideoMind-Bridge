@@ -25,6 +25,7 @@ from ..utils import get_logger
 from ..utils.exceptions import ValidationError
 from .models import (
     ConfigResponse,
+    ExtractResponse,
     KeyGroup,
     KeysListResponse,
     KeyUpdateRequest,
@@ -527,7 +528,7 @@ class APIServer:
             )
 
         # v2 提取 API
-        @app.post("/api/v1/extract")
+        @app.post("/api/v1/extract", response_model=ExtractResponse)
         async def extract_content(request: dict):
             """快速提取视频内容 (v2 引擎)"""
             url = request.get("url")
@@ -579,10 +580,13 @@ class APIServer:
                 result = self._router_runtime.extract(url, max_cost=cost_tier)
 
                 if not result.success or not result.content.strip():
+                    # 2026-11-24：失败必须带可机读 error_code（CONTRACT.md 不变式 1）。
+                    # 之前这里只回人类可读 error，下游无法按原因分流。
                     return {
                         "success": False,
                         "url": url,
                         "error": result.error or "提取失败, 无真实内容",
+                        "error_code": result.error_code or "extract_failed",
                     }
 
                 config = ArchiverConfig(
@@ -608,7 +612,12 @@ class APIServer:
                 }
             except Exception as e:
                 logger.error(f"v2 提取归档失败: {e}")
-                return {"success": False, "url": url, "error": str(e)}
+                return {
+                    "success": False,
+                    "url": url,
+                    "error": str(e),
+                    "error_code": "internal_error",
+                }
 
         # 视频源地址解析 (B站官方 playurl, 绕云 IP 风控)
         @app.post("/api/v1/parse")
