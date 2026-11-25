@@ -42,11 +42,14 @@ sensevoice = [
     "soundfile>=0.12.1",
 ]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-asyncio>=0.21.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
+    # 工具版本与 uv.lock 对齐并加上界：CI 用 pip install -e ".[dev]"，
+    # 不加上界就会装到比本地更新的 mypy/ruff，出现「本地绿、CI 红」的推断差异
+    # （2026-11-26 实测：mypy 1.20 对 List[Literal] 的推断比 1.19 更严）。
+    "pytest>=9.0,<10",
+    "pytest-cov>=7.0,<8",
+    "pytest-asyncio>=1.3,<2",
+    "ruff>=0.15,<0.16",
+    "mypy>=1.19,<1.20",
     "types-PyYAML>=6.0.0",
     "httpx>=0.25.0",
 ]

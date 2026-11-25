@@ -376,7 +376,7 @@ def legacy_sections(data: dict[str, Any] | None) -> list[str]:
     """返回配置文件里仍存在、但已不再写盘的 v1 段名（用于迁移判定与日志）"""
     if not data:
         return []
-    found = [k for k in ("ai", "download", "transcribe", "ui", "performance") if k in data]
+    found: list[str] = [k for k in ("ai", "download", "transcribe", "ui", "performance") if k in data]
     export = data.get("export") or {}
     if isinstance(export, dict):
         found += [f"export.{k}" for k in ("local", "webhook", "default_targets") if k in export]
