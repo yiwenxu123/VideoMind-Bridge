@@ -48,6 +48,11 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 
 抖音在本地/云 IP 常被验证码风控，可通过 `DOUYIN_COOKIES_FILE` 指定 cookies.txt (Netscape 格式) 绕过。
 
+抖音链**唯一跨仓硬依赖**是 L0 网关 `douyin-api(:8010)`（注册表 `layer: L0`）。它有自己的对外契约
+（`~/Projects/ai-agents/douyin-api/docs/CONTRACT.md`，V4.1.2，承诺 `GET /api/douyin/web/fetch_one_video?aweme_id=`），
+消费方自检：`python scripts/check_douyin_gateway_contract.py`（读上游 `/openapi.json`）。网关没起时提取报
+`douyin_gateway_unavailable`。
+
 提取器接口: `extract()`, `is_available()`, `supports()`, `should_try()`
 
 ### DashScope ASR (`_dashscope_asr.py` + `dashscope_key`)

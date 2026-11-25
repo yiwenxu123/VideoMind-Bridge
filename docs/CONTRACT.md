@@ -21,6 +21,11 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 > **L0「平台取数网关」**（panorama 注册表 `layer: L0`，端口探活），VideoMind 只做编排。
 > 抖音提取失败最常见的原因是它没起（`error_code=douyin_gateway_unavailable` → `pm2 restart douyin-api`）。
 > 2026-11-25 之前它**完全不在注册表里**，所以运维视图上看不见这条硬依赖。
+>
+> **上游契约**：`~/Projects/ai-agents/douyin-api/docs/CONTRACT.md`（服务版本 V4.1.2）。
+> 它只承诺一条路径 —— `GET /api/douyin/web/fetch_one_video?aweme_id=` —— 以及本服务读取的那几个字段。
+> 上游升级/改写时先跑 `python scripts/check_douyin_gateway_contract.py`（读上游 `/openapi.json`，
+> 路径或参数不见了就退非零，网关没起退 2）。
 
 ---
 
