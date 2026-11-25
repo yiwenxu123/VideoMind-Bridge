@@ -132,7 +132,7 @@ pytest tests/ --cov=src --cov-report=term       # 覆盖率
 ## CI Pipeline (`.github/workflows/ci.yml`)
 
 1. Lint (`ruff check .`)
-2. Test (pytest + coverage, `--cov-fail-under=40`)
+2. Test (pytest + coverage, `--cov-fail-under=70`；实际 84%，门槛不再形同虚设)
 3. Type check (`mypy src/` — 全量 0 错误，失败即 CI 失败)
 4. Build (`python -m build`)
 
