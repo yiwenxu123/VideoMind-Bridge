@@ -437,7 +437,7 @@ class APIServer:
             config_mgr = ConfigManager()
             cfg = config_mgr.config
             return ConfigResponse(
-                default_output_dir=cfg.download.output_dir,
+                default_output_dir=cfg.archive.output_dir,
                 supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu", "local"],
                 supported_export_targets=["local", "obsidian", "html_player"],
             )
@@ -675,7 +675,7 @@ class APIServer:
             config_mgr.reload()
             cfg = config_mgr.config
             return SettingsResponse(
-                output_dir=cfg.download.output_dir,
+                output_dir=cfg.archive.output_dir,
                 obsidian_enabled=cfg.export.obsidian.enabled,
                 obsidian_vault_path=cfg.export.obsidian.vault_path,
                 obsidian_subfolder=cfg.export.obsidian.subfolder,

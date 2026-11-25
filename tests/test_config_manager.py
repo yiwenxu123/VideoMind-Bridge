@@ -264,23 +264,27 @@ download:
             assert cm.config.download.organize_by == "date"
 
     def test_save_creates_file(self, cm, tmp_config_dir):
-        """save() 应创建 YAML 文件"""
+        """save() 应创建 YAML 文件，且只写仍有执行者的段（2026-11-26 A1）"""
         assert cm.save() is True
         config_file = tmp_config_dir / "config.yaml"
         assert config_file.exists()
         content = config_file.read_text(encoding="utf-8")
-        assert "ai:" in content
+        assert "archive:" in content
+        assert "version: '2'" in content
+        assert "ai:" not in content
 
     def test_save_content_correct(self, cm, tmp_config_dir):
-        """保存的内容应为有效 YAML"""
-        cm.config.ai.model = "gpt-4"
-        cm.config.download.video_quality = "4k"
+        """保存的内容应为有效 YAML，且不含已死的 v1 段"""
+        cm.config.archive.output_dir = "/tmp/vmb-out"
+        cm.config.download.video_quality = "4k"  # 只在内存里，不再落盘
         cm.save()
 
         config_file = tmp_config_dir / "config.yaml"
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        assert data["ai"]["model"] == "gpt-4"
-        assert data["download"]["video_quality"] == "4k"
+        assert data["archive"]["output_dir"] == "/tmp/vmb-out"
+        assert "ai" not in data
+        assert "download" not in data
+        assert "transcribe" not in data
 
     def test_persistence_across_reinit(self, tmp_config_dir, mock_credential_manager):
         """设置值 → 重建 ConfigManager → 值持久化"""
@@ -291,17 +295,14 @@ download:
             ConfigManager._instance = None
             ConfigManager._initialized = False
             cm1 = ConfigManager()
-            cm1.config.ai.model = "gpt-4o"
-            cm1.config.download.organize_by = "title"
-            cm1.save()
+            cm1.update_archive(output_dir="/tmp/persisted-out")
 
         # 第二次: 重建后检查
         with patch("pathlib.Path.home", return_value=tmp_config_dir.parent.parent):
             ConfigManager._instance = None
             ConfigManager._initialized = False
             cm2 = ConfigManager()
-            assert cm2.config.ai.model == "gpt-4o"
-            assert cm2.config.download.organize_by == "title"
+            assert cm2.config.archive.output_dir == "/tmp/persisted-out"
 
     def test_save_unicode_content(self, cm, tmp_config_dir):
         """保存含中文/特殊字符的配置"""
@@ -313,17 +314,16 @@ download:
 
     def test_save_then_reload(self, cm, tmp_config_dir):
         """save() 后 reload() 应读到最新内容"""
-        cm.config.ai.temperature = 0.5
         cm.save()
 
         # 手动修改文件
         config_file = tmp_config_dir / "config.yaml"
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        data["ai"]["temperature"] = 0.9
+        data["archive"]["output_dir"] = "/tmp/changed-out"
         config_file.write_text(yaml.dump(data), encoding="utf-8")
 
         cm.reload()
-        assert cm.config.ai.temperature == 0.9
+        assert cm.config.archive.output_dir == "/tmp/changed-out"
 
     def test_get_config_file_path(self, cm, tmp_config_dir):
         """get_config_file_path() 返回正确路径"""
@@ -597,8 +597,8 @@ class TestAIConfig:
         cm.update_ai(nonexistent_field="value")
         assert cm.config.ai.temperature == original
 
-    def test_ai_persistence(self, tmp_config_dir, mock_credential_manager):
-        """AI 配置在重建后仍保留"""
+    def test_ai_config_not_persisted(self, tmp_config_dir, mock_credential_manager):
+        """AI 配置只在内存里（无执行者，不再落盘）——2026-11-26 A1"""
         with patch("pathlib.Path.home", return_value=tmp_config_dir.parent.parent):
             from src.services.config_manager import ConfigManager
 
@@ -611,17 +611,18 @@ class TestAIConfig:
             ConfigManager._instance = None
             ConfigManager._initialized = False
             cm2 = ConfigManager()
-            assert cm2.config.ai.model == "claude-3-opus"
-            assert cm2.config.ai.temperature == 0.2
+            assert cm2.config.ai.model == "deepseek-chat"  # 回默认，不持久化
+            assert cm2.config.ai.temperature == 0.7
 
-    def test_ai_base_url_persistence(self, cm, tmp_config_dir):
-        """AI base_url 更改应持久化"""
+    def test_ai_base_url_not_persisted(self, cm, tmp_config_dir):
+        """AI base_url 只在内存里（无执行者，不再落盘）"""
         cm.update_ai(base_url="https://custom.api.com/v1")
         cm.save()
 
         config_file = tmp_config_dir / "config.yaml"
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        assert data["ai"]["base_url"] == "https://custom.api.com/v1"
+        assert "ai" not in data
+        assert cm.config.ai.base_url == "https://custom.api.com/v1"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -644,7 +645,8 @@ class TestSaveReloadReset:
         config_file = tmp_config_dir / "config.yaml"
         assert config_file.exists()
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        assert data["ai"]["model"] == "deepseek-chat"
+        assert "ai" not in data
+        assert data["version"] == "2"
 
     def test_reset_to_defaults_clears_obsidian(self, cm):
         """reset_to_defaults 应重置 Obsidian 配置"""
@@ -663,21 +665,21 @@ class TestSaveReloadReset:
         # 直接改文件
         config_file = tmp_config_dir / "config.yaml"
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        data["ui"]["theme"] = "dark"
+        data["export"]["obsidian"]["subfolder"] = "Inbox/Reloaded"
         config_file.write_text(yaml.dump(data), encoding="utf-8")
 
         cm.reload()
-        assert cm.config.ui.theme == "dark"
+        assert cm.config.export.obsidian.subfolder == "Inbox/Reloaded"
 
     def test_convenience_save_config(self, cm, tmp_config_dir):
         """save_config() 便捷函数工作正常"""
         from src.services.config_manager import save_config
 
-        cm.config.ai.model = "test-model"
+        cm.update_archive(output_dir="/tmp/convenience-out")
         assert save_config() is True
         config_file = tmp_config_dir / "config.yaml"
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        assert data["ai"]["model"] == "test-model"
+        assert data["archive"]["output_dir"] == "/tmp/convenience-out"
 
     def test_convenience_get_config(self, cm):
         """get_config() 便捷函数返回 config"""
@@ -797,12 +799,13 @@ class TestEdgeCases:
     """边界情况: 空配置 / 特殊字符 / 不完整数据"""
 
     def test_special_chars_in_ai_config(self, cm, tmp_config_dir):
-        """AI 配置含特殊字符"""
+        """AI 配置含特殊字符：内存保留，但不再落盘（无执行者）"""
         cm.update_ai(base_url="https://api.example.com/v1?key=abc&test=true")
         cm.save()
         config_file = tmp_config_dir / "config.yaml"
         content = config_file.read_text(encoding="utf-8")
-        assert "https://api.example.com/v1?key=abc&test=true" in content
+        assert "api.example.com" not in content
+        assert cm.config.ai.base_url == "https://api.example.com/v1?key=abc&test=true"
 
     def test_special_chars_in_subfolder(self, cm):
         """subfolder 含中文/符号/空格"""
@@ -813,15 +816,15 @@ class TestEdgeCases:
         cm.save()
 
     def test_update_download(self, cm, tmp_config_dir):
-        """update_download 方法"""
-        cm.update_download(video_quality="720p", organize_by="title")
-        assert cm.config.download.video_quality == "720p"
-        assert cm.config.download.organize_by == "title"
+        """update_download 仍在，但落盘只写归档目录（v2 没有下载环节）"""
+        cm.update_download(video_quality="720p", output_dir="/tmp/dl-out")
+        assert cm.config.download.video_quality == "720p"      # 内存里还在
+        assert cm.config.archive.output_dir == "/tmp/dl-out"   # 镜像到新字段
 
-        # 持久化验证
         config_file = tmp_config_dir / "config.yaml"
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        assert data["download"]["video_quality"] == "720p"
+        assert data["archive"]["output_dir"] == "/tmp/dl-out"
+        assert "download" not in data
 
     def test_update_ui(self, cm):
         """update_ui 方法"""
@@ -852,18 +855,18 @@ class TestEdgeCases:
         assert cm.get_api_key(provider="openai") == "openai-key"
 
     def test_export_and_import_config(self, cm, tmp_config_dir):
-        """export_config → import_config 往返"""
-        cm.update_ai(model="exported-model")
+        """export_config → import_config 往返（按 v2 段）"""
+        cm.update_archive(output_dir="/export/out")
         cm.update_export(obsidian={"vault_path": "/export/vault"})
 
         export_file = tmp_config_dir / "exported.yaml"
         assert cm.export_config(export_file) is True
 
         # 导入到新配置
-        cm.update_ai(model="temporary")
+        cm.update_archive(output_dir="/temp")
         cm.update_export(obsidian={"vault_path": "/temp"})
         assert cm.import_config(export_file) is True
-        assert cm.config.ai.model == "exported-model"
+        assert cm.config.archive.output_dir == "/export/out"
         assert cm.config.export.obsidian.vault_path == "/export/vault"
 
     def test_import_config_empty_data(self, cm, tmp_config_dir):
@@ -878,7 +881,7 @@ class TestEdgeCases:
         v_file = tmp_config_dir / "version.yaml"
         v_file.write_text("version: 2", encoding="utf-8")
         assert cm.import_config(v_file) is True
-        assert cm.config.version == 2
+        assert cm.config.version == "2"
 
     def test_load_config_with_api_key_in_file(
         self, tmp_config_dir, mock_credential_manager

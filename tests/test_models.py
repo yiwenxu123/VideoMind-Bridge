@@ -129,20 +129,22 @@ def test_app_config():
 
     config = AppConfig.get_default_config()
 
-    # 检查默认配置
-    assert config.version == "1"
-    assert config.download.output_dir == str(Path.home() / "Downloads" / "VideoMind")
-    assert isinstance(config.ai, AIConfig)
+    # 检查默认配置（2026-11-26 A1：格式 v2）
+    assert config.version == "2"
+    assert config.archive.output_dir == str(Path.home() / "Downloads" / "VideoMind")
+    assert isinstance(config.ai, AIConfig)          # 遗留段仍可读
     assert isinstance(config.download, DownloadConfig)
 
-    # 测试配置序列化
+    # 测试配置序列化：只写仍有执行者的段
     config_dict = config.to_dict()
-    assert "ai" in config_dict
-    assert "download" in config_dict
+    assert "archive" in config_dict
+    assert "ai" not in config_dict
+    assert "download" not in config_dict
 
     # 测试配置反序列化
     restored_config = AppConfig.from_dict(config_dict)
-    assert restored_config.ai.engine == config.ai.engine
+    assert restored_config.archive.output_dir == config.archive.output_dir
+    assert restored_config.asr.chain == config.asr.chain
 
     print("  ✓ AppConfig 测试通过")
 

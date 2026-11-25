@@ -120,7 +120,10 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
 - **GUI 与 v1 都没了（2026-11-24 / 11-25）**: `src/gui/`、`browser-extension/`、`/legacy`、`/ws`、`/api/v1/tasks*`、任务队列与 AI 摘要全部删除；`python main.py` / `python -m src.cli` 不带参数都是「打印用法 + 退出码 2」。`GET /api/v1/status` 的四个任务计数恒为 0（字段保留仅为不破坏调用方）。MCP 的 `VMB_MCP_LEGACY` / `VMB_MCP_EMBEDDED` 两个兜底开关也一并删除
 - **SenseVoice 依赖仓库外资产**: 默认 ASR 第一级需要 `~/.cache/sensevoice/venv`（sherpa-onnx + soundfile）与 `~/.cache/sherpa-onnx/sense-voice/`（`model.int8.onnx` + `tokens.txt`）。2026-11-24 起 `capabilities()` 会真起子进程探测 `import sherpa_onnx, soundfile`（按解释器缓存，超时 10s），**文件齐但解释器缺依赖时 `available=false`**——别再把「文件存在」当成「能用」。安装/体检：`scripts/install_sensevoice.sh [--check]`
 - **Build 工具**: 只剩 `python -m build`（sdist/wheel）。PyInstaller 打包随 GUI 一起在 2026-11-24 移除
-- **配置存储**: `~/.config/VideoMind/config.yaml` (首次启动自动生成)
+- **配置存储**: `~/.config/VideoMind/config.yaml`（首次启动自动生成；**格式 v2**）
+  - 只写四段：`version` / `archive.output_dir` / `asr` / `export.obsidian`
+  - `ai` / `download` / `transcribe` / `ui` / `performance` 是 v1 遗留段：**仍能读**（`AppConfig.from_dict` 兼容，`DownloadConfig.output_dir` 会升级为 `archive.output_dir`），**不再写盘**
+  - 含遗留段的旧文件在首次加载时自动迁移：先备份 `config.yaml.bak-<时间戳>`，再写 v2；`VMB_CONFIG_NO_MIGRATE=1` 只提示不改文件
 - **v2 引擎可独立导入**: `from src.core import ContentRouter` 不依赖 GUI；ASR 适配器在需要时通过 `src/services/config_manager` 读取密钥
 
 ## Testing

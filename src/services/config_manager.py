@@ -2,7 +2,9 @@
 
 import logging
 import os
+import shutil
 import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -11,11 +13,13 @@ import yaml
 from ..models.config import (
     AIConfig,
     AppConfig,
+    ArchiveConfig,
     AsrBackendConfig,
     AsrConfig,
     DownloadConfig,
     ExportConfig,
     UIConfig,
+    legacy_sections,
 )
 from ..utils.credential_manager import CredentialManager
 
@@ -50,24 +54,62 @@ class ConfigManager:
             self._config_dir = Path.home() / ".config" / "VideoMind"
             self._config_file = self._config_dir / "config.yaml"
             self._config = self._load_config()
+            self._migrate_if_needed()
 
             self._migrate_api_keys()
 
             self._initialized = True
 
     def _load_config(self) -> AppConfig:
-        """从 YAML 文件加载配置"""
+        """从 YAML 文件加载配置
+
+        2026-11-26 A1：读完顺手判断「文件里是否还有已不再写盘的 v1 段」。
+        有的话只做标记，真正的备份 + 改写交给 _migrate_if_needed()（等 self._config 就位后）。
+        """
+        self._pending_legacy_sections = []
         if self._config_file.exists():
             try:
                 with open(self._config_file, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
                 if data:
+                    self._pending_legacy_sections = legacy_sections(data)
                     return AppConfig.from_dict(data)
             except Exception as e:
                 logger.error(f"加载配置文件失败: {e}, 使用默认配置")
 
         # 如果文件不存在或加载失败，返回默认配置
         return AppConfig.get_default_config()
+
+    def _migrate_if_needed(self) -> None:
+        """把仍含 v1 段的配置文件改写为 v2 格式（先备份，幂等）
+
+        - 备份：config.yaml.bak-<时间戳>
+        - 改写：只写 version / archive / asr / export.obsidian
+        - VMB_CONFIG_NO_MIGRATE=1 时跳过（只提示，不动文件）
+        """
+        sections = getattr(self, "_pending_legacy_sections", [])
+        if not sections:
+            return
+        if os.getenv("VMB_CONFIG_NO_MIGRATE") == "1":
+            logger.info(
+                "配置含 v1 段 %s，已按 VMB_CONFIG_NO_MIGRATE=1 跳过迁移（文件未改动）",
+                ", ".join(sections),
+            )
+            return
+        try:
+            stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+            backup = self._config_file.with_name(f"{self._config_file.name}.bak-{stamp}")
+            shutil.copy2(self._config_file, backup)
+        except OSError as e:
+            logger.error(f"配置迁移前备份失败，放弃迁移: {e}")
+            return
+        if self.save():
+            logger.info(
+                "配置已迁移到 v2（删去无执行者的段：%s）；原文件备份在 %s",
+                ", ".join(sections),
+                backup.name,
+            )
+            self._pending_legacy_sections = []
 
     def _migrate_api_keys(self) -> None:
         """迁移配置文件中的明文 API Key 到密钥环"""
@@ -268,6 +310,7 @@ class ConfigManager:
         loaded = self._load_config()
         if loaded:
             self._config = loaded
+            self._migrate_if_needed()
 
     def get_asr_config(self) -> AsrConfig:
         """返回合并环境变量后的 ASR 配置副本。
@@ -334,6 +377,11 @@ class ConfigManager:
         return self._config.ai
 
     @property
+    def archive(self) -> ArchiveConfig:
+        """归档配置（v2 唯一还需要用户配的路径）"""
+        return self._config.archive
+
+    @property
     def download(self) -> DownloadConfig:
         """获取下载配置"""
         return self._config.download
@@ -355,11 +403,26 @@ class ConfigManager:
                 setattr(self._config.ai, key, value)
         self.save()
 
+    def update_archive(self, **kwargs) -> None:
+        """更新归档配置（output_dir 同步到遗留 download.output_dir，避免两个值漂移）"""
+        for key, value in kwargs.items():
+            if hasattr(self._config.archive, key):
+                setattr(self._config.archive, key, value)
+            if key == "output_dir" and hasattr(self._config.download, "output_dir"):
+                self._config.download.output_dir = value
+        self.save()
+
     def update_download(self, **kwargs) -> None:
-        """更新下载配置"""
+        """[已弃用] 更新下载配置
+
+        v2 没有下载环节，所以：内存里照旧生效（不静默丢参数），但落盘只有
+        output_dir —— 它会被镜像到 archive.output_dir，其余字段不再写文件。
+        """
         for key, value in kwargs.items():
             if hasattr(self._config.download, key):
                 setattr(self._config.download, key, value)
+        if "output_dir" in kwargs:
+            self._config.archive.output_dir = str(kwargs["output_dir"])
         self.save()
 
     def update_export(self, **kwargs) -> None:

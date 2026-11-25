@@ -14,6 +14,9 @@ from typing import Any
 # （CLI / MCP stdio）拿到 base 模型，中文输出繁体化并伴大量同音错字。
 DEFAULT_ASR_CHAIN: list[str] = ["sensevoice", "faster_whisper", "dashscope"]
 
+# 配置格式版本：v2 = 只有 archive/asr/export.obsidian 写盘（2026-11-26 A1）
+CONFIG_VERSION = "2"
+
 
 class AIEngine(StrEnum):
     """AI 引擎类型"""
@@ -75,6 +78,25 @@ class DownloadConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DownloadConfig":
         return cls(**data)
+
+
+@dataclass
+class ArchiveConfig:
+    """归档配置（2026-11-26 A1）
+
+    v2 只有「提取 → 归档」，没有下载；归档目录是唯一还需要用户配的路径。
+    取代 v1 的 download.output_dir（旧键仍可读，见 AppConfig.from_dict）。
+    """
+
+    output_dir: str = str(Path.home() / "Downloads" / "VideoMind")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"output_dir": self.output_dir}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "ArchiveConfig":
+        raw = (data or {}).get("output_dir")
+        return cls(output_dir=str(raw) if raw else str(Path.home() / "Downloads" / "VideoMind"))
 
 
 @dataclass
@@ -292,42 +314,72 @@ class PerformanceConfig:
 
 @dataclass
 class AppConfig:
-    """应用主配置"""
+    """应用主配置（配置格式 v2，2026-11-26 A1）
+
+    写盘只写四段：version / archive / asr / export.obsidian。
+    ai / download / transcribe / ui / performance 是 v1 遗留段：仍能读（旧文件不报错），
+    但不再写回——它们已经没有执行者，写回只会让人以为改了有用。
+    """
+
     version: str = "1"
+    archive: ArchiveConfig = field(default_factory=ArchiveConfig)
+    asr: AsrConfig = field(default_factory=AsrConfig)
+    export: ExportConfig = field(default_factory=ExportConfig)
+    # ── v1 遗留段（只读兼容，不再写盘）──────────────────────────
     ai: AIConfig = field(default_factory=AIConfig)
     download: DownloadConfig = field(default_factory=DownloadConfig)
     transcribe: TranscribeConfig = field(default_factory=TranscribeConfig)
-    asr: AsrConfig = field(default_factory=AsrConfig)
-    export: ExportConfig = field(default_factory=ExportConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     performance: PerformanceConfig = field(default_factory=PerformanceConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "version": self.version,
-            "ai": self.ai.to_dict(),
-            "download": self.download.to_dict(),
-            "transcribe": self.transcribe.to_dict(),
+            "version": CONFIG_VERSION,
+            "archive": self.archive.to_dict(),
             "asr": self.asr.to_dict(),
-            "export": self.export.to_dict(),
-            "ui": self.ui.to_dict(),
-            "performance": self.performance.to_dict()
+            "export": {"obsidian": self.export.obsidian.to_dict()},
         }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppConfig":
+        legacy_download = data.get("download") or {}
+        resolved_dir = (
+            (data.get("archive") or {}).get("output_dir")
+            or legacy_download.get("output_dir")
+            or str(Path.home() / "Downloads" / "VideoMind")
+        )
+        download_data = {
+            k: legacy_download[k]
+            for k in ("video_quality", "download_video", "organize_by")
+            if k in legacy_download
+        }
+        download_data["output_dir"] = str(resolved_dir)
         return cls(
-            version=data.get("version", "1"),
-            ai=AIConfig.from_dict(data.get("ai", {})),
-            download=DownloadConfig.from_dict(data.get("download", {})),
-            transcribe=TranscribeConfig.from_dict(data.get("transcribe", {})),
+            version=str(data.get("version", "1")),
+            archive=ArchiveConfig(output_dir=str(resolved_dir)),
             asr=AsrConfig.from_dict(data.get("asr", {})),
             export=ExportConfig.from_dict(data.get("export", {})),
+            ai=AIConfig.from_dict(data.get("ai", {})),
+            download=DownloadConfig.from_dict(download_data),
+            transcribe=TranscribeConfig.from_dict(data.get("transcribe", {})),
             ui=UIConfig.from_dict(data.get("ui", {})),
-            performance=PerformanceConfig.from_dict(data.get("performance", {}))
+            performance=PerformanceConfig.from_dict(data.get("performance", {})),
         )
 
     @classmethod
     def get_default_config(cls) -> "AppConfig":
         """获取默认配置"""
-        return cls()
+        return cls(version=CONFIG_VERSION)
+
+
+def legacy_sections(data: dict[str, Any] | None) -> list[str]:
+    """返回配置文件里仍存在、但已不再写盘的 v1 段名（用于迁移判定与日志）"""
+    if not data:
+        return []
+    found = [k for k in ("ai", "download", "transcribe", "ui", "performance") if k in data]
+    export = data.get("export") or {}
+    if isinstance(export, dict):
+        found += [f"export.{k}" for k in ("local", "webhook", "default_targets") if k in export]
+    if data.get("version") != CONFIG_VERSION:
+        found.append("version")
+    return found

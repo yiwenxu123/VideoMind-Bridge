@@ -159,10 +159,11 @@ python main.py --api --port 9000
 
 ### AI 引擎配置
 
-> **2026-11-25（A2）**：AI 摘要（DeepSeek / 智谱 / Moonshot / …）随 v1 流水线删除。
-> `config.yaml` 的 `ai` 段仍在（读旧配置不报错），但**已无执行者**；
-> 2026-11-25 起 `/api/v1/settings` 也不再回显这些字段（只留归档目录与 Obsidian 导出）。
-> 存储 schema 的清理需要单独一次迁移（读旧文件 → 写新文件 → 备份）。
+> **2026-11-26（A1，配置格式 v2）**：AI 摘要随 v1 流水线删除，`ai` / `download` / `transcribe` /
+> `ui` / `performance` 五段已**不再写盘**（旧文件仍能读，首次启动自动迁移并备份为
+> `config.yaml.bak-<时间戳>`；`VMB_CONFIG_NO_MIGRATE=1` 可跳过迁移）。
+> v2 只写四段：`version` / `archive.output_dir` / `asr` / `export.obsidian`。
+> `/api/v1/settings` 与之对齐（4 个键）。
 
 ### 导出配置
 
