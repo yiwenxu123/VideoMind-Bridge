@@ -51,7 +51,12 @@ class ConfigManager:
             if self._initialized:
                 return
 
-            self._config_dir = Path.home() / ".config" / "VideoMind"
+            # VMB_CONFIG_DIR 可把配置目录整体挪走（测试隔离 / 多实例并存）
+            override = os.getenv("VMB_CONFIG_DIR")
+            self._config_dir = (
+                Path(override).expanduser() if override
+                else Path.home() / ".config" / "VideoMind"
+            )
             self._config_file = self._config_dir / "config.yaml"
             self._config = self._load_config()
             self._migrate_if_needed()

@@ -124,6 +124,7 @@ FREE       FREE       FREE      FREE           FREE    CHEAP      PREMIUM   PREM
   - 只写四段：`version` / `archive.output_dir` / `asr` / `export.obsidian`
   - `ai` / `download` / `transcribe` / `ui` / `performance` 是 v1 遗留段：**仍能读**（`AppConfig.from_dict` 兼容，`DownloadConfig.output_dir` 会升级为 `archive.output_dir`），**不再写盘**
   - 含遗留段的旧文件在首次加载时自动迁移：先备份 `config.yaml.bak-<时间戳>`，再写 v2；`VMB_CONFIG_NO_MIGRATE=1` 只提示不改文件
+  - `VMB_CONFIG_DIR=/some/dir` 可把配置目录整体挪走（测试隔离 / 多实例并存）；测试已用 autouse fixture 隔离，**跑 pytest 不会改真实配置**
 - **v2 引擎可独立导入**: `from src.core import ContentRouter` 不依赖 GUI；ASR 适配器在需要时通过 `src/services/config_manager` 读取密钥
 
 ## Testing
