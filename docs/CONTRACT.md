@@ -17,6 +17,11 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 
 **消费者清单见 [`CONSUMERS.md`](./CONSUMERS.md)。改动前必须核对。**
 
+> **上游是 L0，不是我的内部模块**：图里的 `douyin-api(:8010)` 按《项目分层与协作架构》§2.4 归
+> **L0「平台取数网关」**（panorama 注册表 `layer: L0`，端口探活），VideoMind 只做编排。
+> 抖音提取失败最常见的原因是它没起（`error_code=douyin_gateway_unavailable` → `pm2 restart douyin-api`）。
+> 2026-11-25 之前它**完全不在注册表里**，所以运维视图上看不见这条硬依赖。
+
 ---
 
 ## 2. 端点
