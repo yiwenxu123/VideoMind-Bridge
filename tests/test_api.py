@@ -37,7 +37,7 @@ def server():
 
 @pytest.fixture
 def client(server):
-    """创建 TestClient，自动管理 FastAPI lifespan（启动/停止 TaskManager）"""
+    """创建 TestClient，自动管理 FastAPI lifespan（启动/关闭 RouterRuntime）"""
     with TestClient(server.app) as c:
         yield c
 
