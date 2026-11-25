@@ -140,7 +140,7 @@ pytest tests/ --cov=src --cov-report=term       # 覆盖率
 ## CI Pipeline (`.github/workflows/ci.yml`)
 
 1. Lint (`ruff check .`)
-2. Test (pytest + coverage, `--cov-fail-under=70`；实际 84%，门槛不再形同虚设)
+2. Test (pytest + coverage, `--cov-fail-under=75`；实际约 80.6%，门槛留 5 个点缓冲)
 3. Type check (`mypy src/` — 全量 0 错误，失败即 CI 失败)
 4. Build (`python -m build`)
 
@@ -162,7 +162,8 @@ python -m build                 # 产出 sdist/wheel（CI 的 build job 也跑�
 | `.python-version` | Python 3.11 (仅供 pyenv) |
 | `skill/` | OpenClaw 集成 skill 定义 |
 | `.sisyphus/` | 历史开发计划 (仅保留供参考) |
-| `docs/` | API 使用 / 架构 / macOS 构建文档 |
+| `docs/` | API 使用 / 架构 / 审计报告 / 契约 |
+| `docs/issues/` | 跨项目问题记录（下游 502 映射等，供对方仓库引用） |
 
 ## 常见陷阱
 

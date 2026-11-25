@@ -46,7 +46,9 @@ module.exports = {
         all_proxy: "",
       },
       autorestart: true,
-      max_restarts: 10,
+      // 2026-11-26：手动重启已累计 16 次（unstable=0），10 次上限只会在真正的崩溃循环里
+      // 过早放弃；20 次仍能挡住失控循环。
+      max_restarts: 20,
       min_uptime: "5s",
       time: true,
       out_file: path.join(process.env.HOME, ".pm2-logs", "videomind-api.log"),

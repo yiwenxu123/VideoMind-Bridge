@@ -82,9 +82,6 @@ md输出样式.md
 mvp_test.py
 
 # Runtime data（SQLite 开 WAL：跑服务/测试时会生成 -wal / -shm 伴生文件，只忽略 .db 会漏）
-data/tasks.db
-data/tasks.db-wal
-data/tasks.db-shm
 
 # Playwright MCP
 .playwright-mcp/
