@@ -7,7 +7,7 @@ import asyncio
 import os
 import time
 import urllib.parse
-from contextlib import asynccontextmanager, suppress
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -109,12 +109,18 @@ def _resolve_request_asr_chain(payload: dict) -> list[str] | None:
     return None
 
 
-def _parse_cost_tier(payload: dict) -> CostTier:
+def _parse_cost_tier(payload: dict) -> tuple[CostTier, str]:
+    """解析 cost_tier，并回报它从哪来。
+
+    返回 (tier, source)：source 为 "request"（调用方显式传了）或 "default"
+    （服务端按 CHEAP 处理）。2026-11-25 起这个来源会回显在响应里 ——
+    服务端替调用方做花钱决策这件事必须可见，不能静默。
+    """
     raw = payload.get("cost_tier")
     if raw is None:
-        return CostTier.CHEAP
+        return CostTier.CHEAP, "default"
     try:
-        return CostTier(str(raw).strip().lower())
+        return CostTier(str(raw).strip().lower()), "request"
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -151,7 +157,7 @@ def _build_extract_options(payload: dict, request_id: str):
     )
 
 
-def _extract_response(result, request_id: str) -> dict:
+def _extract_response(result, request_id: str, cost_tier_source: str = "default") -> dict:
     """构造 /extract 响应（只增不减：保留旧字段并补契约字段）。"""
     payload = {
         "success": result.success,
@@ -162,6 +168,7 @@ def _extract_response(result, request_id: str) -> dict:
         "language": result.language,
         "duration_seconds": result.duration_seconds,
         "cost_tier": result.cost_tier.value,
+        "cost_tier_source": cost_tier_source,
         "source": result.source,
         "url": result.url,
         "completeness": result.completeness,
@@ -432,9 +439,7 @@ class APIServer:
             return ConfigResponse(
                 default_output_dir=cfg.download.output_dir,
                 supported_platforms=["bilibili", "youtube", "douyin", "xiaohongshu", "local"],
-                supported_ai_providers=["deepseek", "zhipu", "moonshot", "minimax", "doubao", "ollama"],
-                supported_export_targets=["local", "obsidian", "notion"],
-                ai_enabled=False,  # A2：AI 摘要服务已删除，此字段恒为 False
+                supported_export_targets=["local", "obsidian", "html_player"],
             )
 
         # v2 提取 API
@@ -450,13 +455,13 @@ class APIServer:
             request_id = uuid4().hex
             try:
                 options = _build_extract_options(request, request_id)
-                cost_tier = _parse_cost_tier(request)
+                cost_tier, cost_tier_source = _parse_cost_tier(request)
                 result = self._router_runtime.extract(
                     url,
                     max_cost=cost_tier,
                     options=options,
                 )
-                return _extract_response(result, request_id)
+                return _extract_response(result, request_id, cost_tier_source)
             except HTTPException:
                 raise
             except Exception as e:
@@ -468,6 +473,7 @@ class APIServer:
                     "schema_version": SCHEMA_VERSION,
                     "request_id": request_id,
                     "error_code": "internal_error",
+                    "cost_tier_source": "default",
                 }
 
         # v2 提取 + 归档 API
@@ -488,7 +494,7 @@ class APIServer:
                 from src.core import HermesFormatter
                 from src.core.archiver import ArchiverConfig, archive_extract_result
 
-                cost_tier = _parse_cost_tier(request)
+                cost_tier, cost_tier_source = _parse_cost_tier(request)
                 result = self._router_runtime.extract(url, max_cost=cost_tier)
 
                 if not result.success or not result.content.strip():
@@ -499,6 +505,7 @@ class APIServer:
                         "url": url,
                         "error": result.error or "提取失败, 无真实内容",
                         "error_code": result.error_code or "extract_failed",
+                        "cost_tier_source": cost_tier_source,
                     }
 
                 config = ArchiverConfig(
@@ -511,6 +518,7 @@ class APIServer:
                 return {
                     "success": True,
                     "url": url,
+                    "cost_tier_source": cost_tier_source,
                     "extract": HermesFormatter.format_extract_result_full(result),
                     "archive": [
                         {
@@ -529,6 +537,7 @@ class APIServer:
                     "url": url,
                     "error": str(e),
                     "error_code": "internal_error",
+                    "cost_tier_source": "default",
                 }
 
         # 视频源地址解析 (B站官方 playurl, 绕云 IP 风控)
@@ -665,86 +674,24 @@ class APIServer:
             config_mgr = ConfigManager()
             config_mgr.reload()
             cfg = config_mgr.config
-            api_key = config_mgr.get_api_key()
             return SettingsResponse(
-                ai_engine=cfg.ai.engine.value if hasattr(cfg.ai.engine, 'value') else str(cfg.ai.engine),
-                ai_model=cfg.ai.model,
-                ai_base_url=cfg.ai.base_url,
-                ai_api_key_configured=bool(api_key),
-                ai_temperature=cfg.ai.temperature,
-                ai_max_tokens=cfg.ai.max_tokens,
-                ai_timeout=cfg.ai.timeout,
                 output_dir=cfg.download.output_dir,
-                download_quality=cfg.download.video_quality,
-                whisper_model=cfg.transcribe.whisper_model,
-                save_srt=cfg.export.local.save_srt,
-                save_transcript=cfg.export.local.save_transcript,
-                save_markdown=cfg.export.local.save_markdown,
                 obsidian_enabled=cfg.export.obsidian.enabled,
                 obsidian_vault_path=cfg.export.obsidian.vault_path,
                 obsidian_subfolder=cfg.export.obsidian.subfolder,
-                available_engines=["DeepSeek-V3", "Ollama"],
             )
 
         @app.put("/api/v1/settings")
         async def update_settings(request: SettingsUpdateRequest, http_request: Request):
-            """更新设置"""
+            """更新设置（2026-11-25 A2 后：只接受仍有执行者的项）"""
             _require_admin_consumer(http_request)
             config_mgr = ConfigManager()
-            changed = []
+            changed: list[str] = []
 
-            # AI 设置
-            if request.ai_engine is not None:
-                from ..models.config import AIEngine
-                engine_val = request.ai_engine
-                with suppress(ValueError):
-                    engine_val = AIEngine(request.ai_engine)
-                config_mgr.update_ai(engine=engine_val)
-                changed.append("ai_engine")
-            if request.ai_model is not None:
-                config_mgr.update_ai(model=request.ai_model)
-                changed.append("ai_model")
-            if request.ai_base_url is not None:
-                config_mgr.update_ai(base_url=request.ai_base_url)
-                changed.append("ai_base_url")
-            if request.ai_api_key is not None:
-                config_mgr.set_api_key(request.ai_api_key)
-                changed.append("ai_api_key")
-            if request.ai_temperature is not None:
-                config_mgr.update_ai(temperature=request.ai_temperature)
-                changed.append("ai_temperature")
-            if request.ai_max_tokens is not None:
-                config_mgr.update_ai(max_tokens=request.ai_max_tokens)
-                changed.append("ai_max_tokens")
-            if request.ai_timeout is not None:
-                config_mgr.update_ai(timeout=request.ai_timeout)
-                changed.append("ai_timeout")
-
-            # 下载设置
             if request.output_dir is not None:
                 config_mgr.update_download(output_dir=request.output_dir)
                 changed.append("output_dir")
-            if request.download_quality is not None:
-                config_mgr.update_download(video_quality=request.download_quality)
-                changed.append("download_quality")
 
-            # 转录设置
-            if request.whisper_model is not None:
-                config_mgr._config.transcribe.whisper_model = request.whisper_model
-                changed.append("whisper_model")
-
-            # 导出设置
-            if request.save_srt is not None:
-                config_mgr._config.export.local.save_srt = request.save_srt
-                changed.append("save_srt")
-            if request.save_transcript is not None:
-                config_mgr._config.export.local.save_transcript = request.save_transcript
-                changed.append("save_transcript")
-            if request.save_markdown is not None:
-                config_mgr._config.export.local.save_markdown = request.save_markdown
-                changed.append("save_markdown")
-
-            # Obsidian 导出设置
             obsidian_updates: dict[str, Any] = {}
             if request.obsidian_enabled is not None:
                 obsidian_updates["enabled"] = request.obsidian_enabled
@@ -759,8 +706,7 @@ class APIServer:
                 config_mgr.update_export(obsidian=obsidian_updates)
 
             config_mgr.save()
-
-            logger.info(f"设置已更新: {', '.join(changed)}")
+            logger.info(f"设置已更新: {', '.join(changed) or '无变化'}")
             return {"success": True, "updated": changed}
 
     async def start(self) -> None:

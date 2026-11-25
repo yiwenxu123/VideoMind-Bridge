@@ -135,22 +135,24 @@ class TestSettings:
         resp = client.get("/api/v1/settings")
         assert resp.status_code == 200
 
-    def test_has_correct_structure(self, client):
+    def test_only_live_fields_are_exposed(self, client):
+        """2026-11-25 A2 后：只回显仍有执行者的配置项。
+
+        ai_* / download_quality / whisper_model / save_* 已无执行者（AI 摘要、下载、
+        转录服务都删了；whisper 尺寸的真实来源是 VMB_WHISPER_MODEL），
+        继续回显会让人以为改了有用。
+        """
         resp = client.get("/api/v1/settings")
         data = resp.json()
-        assert "ai_engine" in data
-        assert "ai_model" in data
-        assert "ai_api_key_configured" in data
-        assert "ai_temperature" in data
-        assert "ai_max_tokens" in data
-        assert "ai_timeout" in data
-        assert "output_dir" in data
-        assert "download_quality" in data
-        assert "whisper_model" in data
-        assert "save_srt" in data
-        assert "save_transcript" in data
-        assert "save_markdown" in data
-        assert "available_engines" in data
+
+        assert set(data) == {
+            "output_dir",
+            "obsidian_enabled",
+            "obsidian_vault_path",
+            "obsidian_subfolder",
+        }
+        for gone in ("ai_engine", "whisper_model", "download_quality", "save_srt"):
+            assert gone not in data, f"{gone} 已无执行者，不该再回显"
 
 
 # ── Config ───────────────────────────────────────────────────────
@@ -166,16 +168,16 @@ class TestConfig:
     def test_has_correct_structure(self, client):
         resp = client.get("/api/v1/config")
         data = resp.json()
-        assert "default_output_dir" in data
-        assert "supported_platforms" in data
-        assert isinstance(data["supported_platforms"], list)
-        assert len(data["supported_platforms"]) > 0
-        assert "supported_ai_providers" in data
-        assert isinstance(data["supported_ai_providers"], list)
-        assert "supported_export_targets" in data
-        assert isinstance(data["supported_export_targets"], list)
-        assert "ai_enabled" in data
-        assert isinstance(data["ai_enabled"], bool)
+        assert set(data) == {
+            "default_output_dir",
+            "supported_platforms",
+            "supported_export_targets",
+        }
+        # 2026-11-25 A2 后：AI 相关字段已删（无执行者），只留仍有意义的项
+        assert "ai_enabled" not in data
+        assert "supported_ai_providers" not in data
+        assert isinstance(data["supported_platforms"], list) and data["supported_platforms"]
+        assert isinstance(data["supported_export_targets"], list) and data["supported_export_targets"]
 
 
 # ── 安全防护 ─────────────────────────────────────────────────

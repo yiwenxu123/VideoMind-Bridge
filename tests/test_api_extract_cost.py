@@ -42,6 +42,32 @@ def test_extract_cost_tier_default_and_premium():
     assert premium.status_code == 200
     assert calls == [CostTier.CHEAP, CostTier.PREMIUM]
 
+    # 服务端替调用方决定"最多花到 cheap"这件事必须可见，不能静默。
+    assert default.json()["cost_tier_source"] == "default"
+    assert premium.json()["cost_tier_source"] == "request"
+
+
+def test_archive_reports_cost_tier_source():
+    server = APIServer()
+
+    def fake_extract(url, *, max_cost=None, options=None):
+        return _result()
+
+    server._router_runtime.extract = fake_extract
+
+    with TestClient(server.app) as client:
+        default = client.post(
+            "/api/v1/extract/archive",
+            json={"url": "https://example.com/v", "targets": ["local"]},
+        )
+        explicit = client.post(
+            "/api/v1/extract/archive",
+            json={"url": "https://example.com/v", "targets": ["local"], "cost_tier": "free"},
+        )
+
+    assert default.json()["cost_tier_source"] == "default"
+    assert explicit.json()["cost_tier_source"] == "request"
+
 
 def test_extract_invalid_cost_tier_returns_400():
     server = APIServer()

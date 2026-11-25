@@ -33,8 +33,8 @@ def test_extract_success_contract_keys():
 
     assert set(payload) == {
         "success", "schema_version", "platform", "title", "content", "language",
-        "duration_seconds", "cost_tier", "source", "url", "completeness",
-        "method", "request_id", "segments", "asr",
+        "duration_seconds", "cost_tier", "cost_tier_source", "source", "url",
+        "completeness", "method", "request_id", "segments", "asr",
     }
     assert payload["schema_version"] == SCHEMA_VERSION
     assert payload["request_id"] == "req-1"
@@ -58,8 +58,8 @@ def test_extract_failure_contract_keys():
 
     assert set(payload) == {
         "success", "schema_version", "platform", "title", "content", "language",
-        "duration_seconds", "cost_tier", "source", "url", "completeness",
-        "method", "request_id", "error", "error_code",
+        "duration_seconds", "cost_tier", "cost_tier_source", "source", "url",
+        "completeness", "method", "request_id", "error", "error_code",
     }
     assert payload["success"] is False
     assert payload["error_code"] == "unsupported_url"

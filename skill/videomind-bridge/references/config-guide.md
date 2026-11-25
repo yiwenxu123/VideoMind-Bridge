@@ -32,6 +32,7 @@
 > **2026-11-25（A2）后**：`ai` / `download` / `transcribe` 三段**已无执行者**（AI 摘要、下载、Whisper 转录服务都删了），
 > 读旧配置不会报错但改了也没用。真正生效的是环境变量：`VMB_ASR_CHAIN`（ASR 链）、`VMB_WHISPER_MODEL`（faster-whisper 尺寸）。
 > 下面的 YAML 保留是为了说明「文件里这些键还在」，不是让你去改。
+> `/api/v1/settings` 也已不再回显这些字段（2026-11-25），只回显归档目录与 Obsidian 导出。
 
 ```yaml
 ai:

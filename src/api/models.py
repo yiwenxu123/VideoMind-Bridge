@@ -175,41 +175,26 @@ class SystemStatusResponse(BaseModel):
 
 
 class SettingsResponse(BaseModel):
-    """设置响应"""
-    ai_engine: str = Field(default="DeepSeek-V3", description="AI 引擎")
-    ai_model: str = Field(default="deepseek-chat", description="模型名称")
-    ai_base_url: str = Field(default="https://api.deepseek.com", description="API 地址")
-    ai_api_key_configured: bool = Field(default=False, description="API Key 是否已配置")
-    ai_temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
-    ai_max_tokens: int = Field(default=4096, ge=1, le=128000, description="最大 Token 数")
-    ai_timeout: int = Field(default=120, ge=10, le=300, description="超时时间（秒）")
-    output_dir: str = Field(default="", description="输出目录")
-    download_quality: str = Field(default="1080p", description="下载画质")
-    whisper_model: str = Field(default="small", description="Whisper 模型")
-    save_srt: bool = Field(default=True, description="保存 SRT 字幕")
-    save_transcript: bool = Field(default=True, description="保存纯文本转录")
-    save_markdown: bool = Field(default=True, description="保存 Markdown")
+    """设置响应（2026-11-25 A2 后：只保留仍有执行者的项）
+
+    删掉的 ai_* / download_quality / whisper_model / save_* / available_engines 已无执行者：
+    AI 摘要服务、下载服务、转录服务都随 v1 流水线删除；faster-whisper 的真实尺寸来源是
+    环境变量 VMB_WHISPER_MODEL，不是这里的 whisper_model。存储 schema 仍保留这些键
+    （旧 config.yaml 继续可读），只是不再对外回显。
+    """
+    output_dir: str = Field(default="", description="默认输出目录（归档用）")
     obsidian_enabled: bool = Field(default=False, description="启用 Obsidian 导出")
     obsidian_vault_path: str = Field(default="", description="Obsidian Vault 路径")
     obsidian_subfolder: str = Field(default="Inbox/Videos", description="笔记保存的子文件夹")
-    available_engines: list[str] = Field(default=["DeepSeek-V3", "Ollama"], description="可用引擎列表")
 
 
 class SettingsUpdateRequest(BaseModel):
-    """设置更新请求"""
-    ai_engine: str | None = Field(None, description="AI 引擎")
-    ai_model: str | None = Field(None, description="模型名称")
-    ai_base_url: str | None = Field(None, description="API 地址")
-    ai_api_key: str | None = Field(None, description="API Key（传入时更新密钥环）")
-    ai_temperature: float | None = Field(None, ge=0.0, le=2.0, description="温度参数")
-    ai_max_tokens: int | None = Field(None, ge=1, le=128000, description="最大 Token 数")
-    ai_timeout: int | None = Field(None, ge=10, le=300, description="超时时间（秒）")
-    output_dir: str | None = Field(None, description="输出目录")
-    download_quality: str | None = Field(None, description="下载画质")
-    whisper_model: str | None = Field(None, description="Whisper 模型")
-    save_srt: bool | None = Field(None, description="保存 SRT 字幕")
-    save_transcript: bool | None = Field(None, description="保存纯文本转录")
-    save_markdown: bool | None = Field(None, description="保存 Markdown")
+    """设置更新请求（2026-11-25 A2 后：只接受仍有执行者的项）
+
+    删掉的 ai_* / download_quality / whisper_model / save_* 已无执行者，写入也不会生效；
+    继续接受它们等于让调用方以为自己改了配置。
+    """
+    output_dir: str | None = Field(None, description="默认输出目录（归档用）")
     obsidian_enabled: bool | None = Field(None, description="启用 Obsidian 导出")
     obsidian_vault_path: str | None = Field(None, description="Obsidian Vault 路径")
     obsidian_subfolder: str | None = Field(None, description="笔记保存的子文件夹")
@@ -247,12 +232,14 @@ class KeyDeleteRequest(BaseModel):
 
 
 class ConfigResponse(BaseModel):
-    """配置响应"""
+    """配置响应（2026-11-25 A2 后：只保留仍有执行者的项）
+
+    删掉的 ai_enabled / supported_ai_providers 曾指向 AI 摘要服务，该服务已删除；
+    保留这两个恒 False/恒空列表的字段只会让人以为"打开就能用"。
+    """
     default_output_dir: str = Field(..., description="默认输出目录")
     supported_platforms: list[str] = Field(..., description="支持的平台列表")
-    supported_ai_providers: list[str] = Field(..., description="支持的AI提供商")
     supported_export_targets: list[str] = Field(..., description="支持的导出目标")
-    ai_enabled: bool = Field(default=False, description="AI功能是否已启用")
 
 
 class ExtractAsrInfo(BaseModel):
@@ -295,6 +282,10 @@ class ExtractResponse(BaseModel):
     language: str | None = Field(None, description="语言")
     duration_seconds: float = Field(0.0, description="视频时长（秒），图文为 0")
     cost_tier: str | None = Field(None, description="free/cheap/paid/expensive/premium")
+    cost_tier_source: str = Field(
+        "default",
+        description="request=调用方显式传了 cost_tier；default=服务端按默认档（cheap）处理",
+    )
     source: str = Field("", description="实际产出它的链路，如 douyin_asr")
     url: str = Field("", description="回显的请求 URL")
     completeness: str = Field("unknown", description="full | meta | none | unknown")

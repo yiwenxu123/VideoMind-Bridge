@@ -43,7 +43,7 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 | `POST /api/v1/comments` | 评论采集 | 稳定 |
 | `POST /api/v1/creator/feed` | 创作者作品列表 | **默认关闭**（`VMB_ENABLE_CREATOR_FEED=0` 时不注册） |
 | `GET /api/v1/metrics` | 平台请求指标 + 熔断状态 + 提取命中分布 | 稳定 |
-| `POST /api/v1/sessions*`、`/api/v1/settings`、`/api/v1/keys*` | 管理面（登录态 / 配置） | 内部，不承诺 |
+| `POST /api/v1/sessions*`、`/api/v1/settings`、`/api/v1/keys*` | 管理面（登录态 / 归档目录 / Obsidian 导出 / 提取器 Key） | 内部，不承诺 |
 
 > **2026-11-25（A2）：`/legacy`、`/ws`、`/api/v1/tasks*` 已删除**（v1 下载→转录→AI 摘要流水线）。
 > 请求这些路径返回 405。`GET /api/v1/status` 仍保留 `active_tasks/queued_tasks/completed_tasks/failed_tasks`
@@ -90,6 +90,7 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 | `error` | string（可选） | 人类可读说明（失败时含各链路尝试摘要） |
 | `attempts` | array（可选，失败时） | `[{extractor, error_code, error}]` 逐提取器明细 |
 | `url` / `request_id` / `schema_version` / `cost_tier` | — | 回显与追踪 |
+| `cost_tier_source` | `request` \| `default` | 成本档从哪来：调用方显式传了，还是服务端按默认档（cheap）处理。**看到 `default` 就说明你没管花钱上限** |
 
 ### 3.2 关键：`success` 与 `completeness` 是**正交**的两条轴
 
@@ -143,6 +144,8 @@ L3  video-content-extractor Skill ┘                    └──► yt-dlp / �
 | 2026-11-23 | 失败结果的 `platform` 由提取器名改为链接所属平台 | 按平台聚合的统计更准 | 视为修正，无消费者依赖旧值 |
 | 2026-11-24 | `/extract` 新增 response_model（`extra="allow"` + `exclude_unset`） | OpenAPI 可见字段；键集合与值均不变 | 纯新增（只文档化，不过滤字段、不补 null） |
 | 2026-11-24 | `/extract/archive` 失败补 `error_code`（`extract_failed` / `internal_error`） | 该端点此前违反不变式 1 | 纯新增 |
+| 2026-11-25 | `/api/v1/settings`、`/api/v1/config` 删除无执行者的 AI / 下载 / 转录字段 | 内部端点，控制台未使用；删后不再误导「改了有用」 | 删除（**配置存储 schema 未动**，旧 config.yaml 仍可读） |
+| 2026-11-25 | `/extract`、`/extract/archive` 新增 `cost_tier_source`（`request` / `default`） | 纯新增；让「服务端替你用了默认成本档」可见 | 纯新增（默认档位仍是 cheap，未改行为） |
 | 2026-11-22 | `/extract` 新增 `attempts` | 纯新增 | — |
 | 2026-11-22 | `/metrics` 新增 `circuits`、`extraction` | 纯新增 | — |
 
